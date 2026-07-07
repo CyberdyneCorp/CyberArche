@@ -52,6 +52,10 @@ connectors, CyberdyneAuth SSO, CyberdyneRAG ingestion, and permissions/sharing).
 - `auth-integration`: CyberdyneAuth OIDC/OAuth2 SSO, JWT verification, IAM authz.
 - `rag-knowledge`: CyberdyneRAG project mapping, file ingestion, retrieval.
 - `permissions-sharing`: document/workspace ACL, roles, invites, share links.
+- `architecture-quality`: cross-cutting scalability and maintainability —
+  enforced hexagonal boundaries, pluggable block types/providers/surfaces,
+  stateless horizontally-scalable services, scalable realtime/workers, and
+  complexity/contract-parity gates so features are easy to add.
 
 ### Modified Capabilities
 
@@ -76,3 +80,6 @@ _None — greenfield project; no existing specs._
   (or Anthropic SDK), a Mermaid renderer, a LaTeX (KaTeX) renderer, Excalidraw.
 - **Data**: new PostgreSQL schema (documents, blocks/snapshots, CRDT update log,
   memberships, share grants, agent runs, MCP connector configs).
+- **Cross-cutting**: import-linter boundary enforcement, a block-type registry,
+  port/adapter seams for every provider, stateless services + a worker queue and
+  shared-state realtime relay, and CI gates for complexity and contract parity.

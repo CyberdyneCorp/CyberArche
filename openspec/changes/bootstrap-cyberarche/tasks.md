@@ -104,9 +104,18 @@
 - [ ] 11.7 Web: share dialog, invite UI, comment thread View/ViewModel
 - [ ] 11.8 BDD tests: inheritance + override, invite-as-commenter, view-link open/revoke, consistent denial across surfaces
 
-## 12. Validation & CI
+## 12. Architecture Quality (architecture-quality)
 
-- [ ] 12.1 `openspec validate --all --strict` in CI
-- [ ] 12.2 import-linter boundary check in CI (domain ← application ← adapters)
-- [ ] 12.3 Backend pytest (incl. BDD) + frontend Vitest/Playwright gates
-- [ ] 12.4 Cognitive-complexity gate (backend ≤15, frontend 8–12) on changed files
+- [ ] 12.1 Block-type registry: add a block type via registration only (render/serialize), no core-editor edits; back-compat load test
+- [ ] 12.2 Port/adapter seams verified for every provider (LLM, RAG, auth, storage, CRDT); config-driven selection
+- [ ] 12.3 Shared contract-test suites per port; run every real and fake adapter against them
+- [ ] 12.4 Make API and MCP stateless (no in-process shared state); horizontal-replica test with no sticky sessions
+- [ ] 12.5 Multi-instance realtime relay sharing CRDT state via update log + broker (e.g. Redis pub/sub); cross-instance convergence test
+- [ ] 12.6 Queue-backed workers for ingestion and large agent runs; assert requests/editor never block
+
+## 13. Validation & CI
+
+- [ ] 13.1 `openspec validate --all --strict` in CI
+- [ ] 13.2 import-linter boundary check in CI (domain ← application ← adapters); fail on violation
+- [ ] 13.3 Backend pytest (incl. BDD + contract-parity) + frontend Vitest/Playwright gates
+- [ ] 13.4 Cognitive-complexity gate (backend ≤15, frontend 8–12) on changed files

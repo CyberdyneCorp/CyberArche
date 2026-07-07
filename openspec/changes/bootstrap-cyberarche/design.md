@@ -20,10 +20,14 @@ Constraints:
 ## Goals / Non-Goals
 
 **Goals:**
-- A working vertical foundation across all ten capabilities — not a stub.
+- A working vertical foundation across all capabilities — not a stub.
 - CRDT multiplayer with the AI agent as a peer editor.
 - One composition root shared by three deployables (`api`, `mcp`, `workers`).
 - Provider-agnostic LLM; permissions enforced identically on HTTP, realtime, MCP.
+- **Scalability and maintainability as first-class requirements** (see the
+  `architecture-quality` capability): the platform must scale horizontally and
+  must be easy to extend with new features — new block types, providers, tools,
+  and inbound surfaces — without touching the domain or unrelated capabilities.
 
 **Non-Goals:**
 - Building our own auth or vector store — we integrate CyberdyneAuth/CyberdyneRAG.
@@ -101,6 +105,29 @@ commands; Views (`*.svelte`) render; Models (`lib/api/*.ts`) are typed clients.
 **Rationale:** ProseMirror+Yjs is the mature multiplayer rich-text stack; keeps
 MVVM boundaries clean. **Alternative rejected:** hand-rolled contenteditable —
 too costly to make collaborative and correct.
+
+### D-10 — Extensibility by construction (add features without editing the core)
+Extension happens at seams, not by modifying core code: block types register in a
+block-type registry (D-9); every provider (LLM, RAG, auth, storage, CRDT) sits
+behind an application port (D-3, D-6, D-7); inbound surfaces (HTTP, MCP, workers)
+are thin adapters over shared use cases and one composition root (D-4); external
+capabilities arrive as MCP connectors (D-5). import-linter enforces the layer
+rule in CI, and each port has a shared contract-test suite so a new adapter is
+verified against the same behavior. **Rationale:** the explicit product
+requirement is "easy to add features" — making the domain closed for modification
+but open for extension keeps feature work local and low-risk. **Alternative
+rejected:** feature flags branching inside core services — accumulates coupling
+and complexity.
+
+### D-11 — Horizontal scalability: stateless services, shared-state realtime, queued work
+The HTTP API and MCP server are stateless (all state in Postgres / object storage
+/ the CRDT update log) so they scale behind a load balancer with no sticky
+sessions. The realtime relay runs multiple instances that share document state
+via the persisted update log plus a broker (e.g. Redis pub/sub) so editors on
+different instances still converge. Ingestion and large agent runs run on
+horizontally scalable workers via a queue, never in request handlers. **Rationale:**
+matches the scalability requirement and keeps request latency bounded. **Trade-off:**
+a broker adds an operational dependency; justified by multi-instance realtime.
 
 ## Risks / Trade-offs
 
