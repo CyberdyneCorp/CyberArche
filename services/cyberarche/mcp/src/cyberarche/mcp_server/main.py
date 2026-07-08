@@ -54,8 +54,22 @@ class McpSettings(BaseSettings):
         )
 
     def allowed_hosts(self) -> list[str] | None:
+        """Configured public FQDNs plus loopback.
+
+        The container's own health check requests Host: 127.0.0.1:<port>;
+        omitting it makes FastMCP answer 421, the container is marked
+        unhealthy, and Traefik skips it -> 502 on the public domain.
+        """
         hosts = [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
-        return hosts or None
+        if not hosts:
+            return None
+        loopback = [
+            "127.0.0.1",
+            "localhost",
+            f"127.0.0.1:{self.mcp_port}",
+            f"localhost:{self.mcp_port}",
+        ]
+        return hosts + [h for h in loopback if h not in hosts]
 
 
 async def serve(settings: McpSettings | None = None) -> None:
