@@ -145,13 +145,14 @@ def _build_use_cases(
     comments: CommentRepository,
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
+    peer_bus: PeerBusPort,
     model_name: str,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships)
     realtime = RealtimeUseCases(
-        documents, update_log, crdt_engine, access, snapshots, clock, ids
+        documents, update_log, crdt_engine, access, snapshots, clock, ids, peer_bus
     )
     knowledge = KnowledgeUseCases(
         workspaces, ingestions, rag, access, clock, blobs=blobs, queue=queue
@@ -487,6 +488,7 @@ async def build_container(
             comments,
             blobs,
             queue,
+            peer_bus,
             config.llm_model,
             clock,
             ids,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
+from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
@@ -27,6 +28,14 @@ from cyberarche.domain.snapshots import Snapshot
 COMPACTION_THRESHOLD = 200
 
 
+def updates_channel(document_id: DocumentId) -> str:
+    """Bus channel carrying RAW persisted updates for a document. Every
+    accepted edit — from a WebSocket peer, the HTTP agent, or MCP — is
+    published here, so relay instances fan out server-originated edits
+    live (Yjs re-application is idempotent, duplicates are harmless)."""
+    return f"cyberarche:doc-updates:{document_id}"
+
+
 class RealtimeUseCases:
     def __init__(
         self,
@@ -37,6 +46,7 @@ class RealtimeUseCases:
         snapshots: SnapshotRepository | None = None,
         clock: ClockPort | None = None,
         ids: IdPort | None = None,
+        bus: PeerBusPort | None = None,
     ) -> None:
         self._documents = documents
         self._update_log = update_log
@@ -45,6 +55,7 @@ class RealtimeUseCases:
         self._snapshots = snapshots
         self._clock = clock
         self._ids = ids
+        self._bus = bus
 
     async def join(
         self, caller: CallerContext, document_id: DocumentId
@@ -77,6 +88,8 @@ class RealtimeUseCases:
         await self._update_log.append(
             document_id, update, origin=origin or caller.user_id
         )
+        if self._bus is not None:  # live fanout to every relay instance
+            await self._bus.publish(updates_channel(document_id), update)
         await self._maybe_compact(document_id)
         return update
 

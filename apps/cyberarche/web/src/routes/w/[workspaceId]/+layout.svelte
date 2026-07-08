@@ -61,7 +61,8 @@
 	.content {
 		flex: 1;
 		background: var(--bg1);
-		overflow-y: auto;
+		overflow: hidden; /* document + agent panel manage their own scroll */
+		min-width: 0;
 	}
 	.first-run {
 		display: grid;

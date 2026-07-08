@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { getDocument, type Document } from '$lib/api/documents';
+	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
+	import { createAgentPanel, type AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { colorFor, createEditor, type EditorVM } from '$lib/viewmodels/editor.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
@@ -14,6 +16,12 @@
 	let doc = $state<Document | null>(null);
 	let titleDraft = $state('');
 	let editor = $state<EditorVM | null>(null);
+	let agent = $state<AgentPanelVM | null>(null);
+	let agentOpen = $state(false);
+
+	$effect(() => {
+		agent = createAgentPanel(documentId);
+	});
 
 	// Depends only on documentId — never on `editor`, which it writes
 	// (reading it here would loop the effect through create/destroy).
@@ -60,6 +68,7 @@
 </script>
 
 {#if doc}
+	<div class="split">
 	<article class="doc">
 		<header class="topbar">
 			<nav class="crumbs" aria-label="Breadcrumb">
@@ -80,6 +89,13 @@
 					class:chip-accent={editor?.status === 'connected'}
 					data-testid="sync-status">{statusLabel}</span
 				>
+				<button
+					class="agent-toggle"
+					class:open={agentOpen}
+					title="Agent"
+					data-testid="agent-toggle"
+					onclick={() => (agentOpen = !agentOpen)}>✦</button
+				>
 			</div>
 		</header>
 
@@ -97,15 +113,36 @@
 			{/if}
 		</div>
 	</article>
+	{#if agentOpen && agent}
+		<AgentPanel {agent} onclose={() => (agentOpen = false)} />
+	{/if}
+	</div>
 {:else}
 	<div class="loading">Loading…</div>
 {/if}
 
 <style>
+	.split {
+		display: flex;
+		height: 100%;
+	}
 	.doc {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		min-height: 100%;
+		min-width: 0;
+		overflow-y: auto;
+	}
+	.agent-toggle {
+		padding: 3px 9px;
+		border-radius: var(--r-control);
+		color: var(--ai);
+		font-size: 14px;
+	}
+	.agent-toggle:hover,
+	.agent-toggle.open {
+		background: var(--aibg);
 	}
 	.topbar {
 		position: sticky;

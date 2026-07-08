@@ -30,6 +30,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.bus import PeerBusPort, Unsubscribe
+from cyberarche.application.use_cases.realtime import updates_channel
 from cyberarche.domain.errors import (
     NotAuthenticated,
     NotAuthorized,
@@ -56,16 +57,23 @@ class DocumentPeers:
     def __init__(self, bus: PeerBusPort) -> None:
         self._bus = bus
         self._sockets: dict[DocumentId, dict[WebSocket, bytes]] = {}
-        self._unsubscribers: dict[DocumentId, Unsubscribe] = {}
+        self._unsubscribers: dict[DocumentId, tuple[Unsubscribe, ...]] = {}
 
     async def join(self, document_id: DocumentId, socket: WebSocket) -> bytes:
         socket_id = uuid.uuid4().bytes
         is_first_local = document_id not in self._sockets
         self._sockets.setdefault(document_id, {})[socket] = socket_id
         if is_first_local:
-            self._unsubscribers[document_id] = await self._bus.subscribe(
+            # Socket-originated frames (awareness, control) between peers...
+            peer_unsub = await self._bus.subscribe(
                 _channel(document_id), self._deliverer(document_id)
             )
+            # ...and RAW persisted updates from ANY inbound surface (WS,
+            # HTTP agent, MCP), published by the realtime use case.
+            update_unsub = await self._bus.subscribe(
+                updates_channel(document_id), self._update_deliverer(document_id)
+            )
+            self._unsubscribers[document_id] = (peer_unsub, update_unsub)
         return socket_id
 
     async def leave(self, document_id: DocumentId, socket: WebSocket) -> None:
@@ -73,8 +81,7 @@ class DocumentPeers:
         sockets.pop(socket, None)
         if not sockets and document_id in self._sockets:
             del self._sockets[document_id]
-            unsubscribe = self._unsubscribers.pop(document_id, None)
-            if unsubscribe is not None:
+            for unsubscribe in self._unsubscribers.pop(document_id, ()):
                 await unsubscribe()
 
     async def publish(
@@ -95,6 +102,19 @@ class DocumentPeers:
                         await socket.send_text(frame[1:].decode())
                     else:
                         await socket.send_bytes(frame)
+                except RuntimeError:  # peer went away mid-send
+                    continue
+
+        return deliver
+
+    def _update_deliverer(self, document_id: DocumentId):
+        async def deliver(update: bytes) -> None:
+            if not update:
+                return
+            frame = bytes([FRAME_UPDATE]) + update
+            for socket in list(self._sockets.get(document_id, {})):
+                try:
+                    await socket.send_bytes(frame)
                 except RuntimeError:  # peer went away mid-send
                     continue
 
@@ -134,11 +154,13 @@ async def _handle_frame(
         return  # unknown frame types are ignored (forward compatibility)
     use_cases = socket.app.state.container.use_cases
     try:
-        update = await use_cases.realtime.apply(caller, document_id, payload)
+        # apply() publishes the raw update on the bus — the single live
+        # fanout path shared with HTTP/MCP-originated edits. The sender
+        # receives its own echo; Yjs re-application is a no-op.
+        await use_cases.realtime.apply(caller, document_id, payload)
     except NotAuthorized:
         await socket.send_text(json.dumps({"type": "error", "error": "NotAuthorized"}))
         return
-    await registry.publish(document_id, socket_id, bytes([FRAME_UPDATE]) + update)
 
 
 @router.websocket("/api/v1/documents/{document_id}/sync")

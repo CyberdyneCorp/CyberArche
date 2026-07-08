@@ -28,7 +28,11 @@ export default defineConfig({
 			env: {
 				CYBERARCHE_BACKEND: 'memory',
 				CYBERARCHE_AUTH_BASE_URL: AUTH_URL,
-				CYBERARCHE_RAG_BASE_URL: ''
+				CYBERARCHE_RAG_BASE_URL: '',
+				// Real LLM for the agent e2e when a key is provided.
+				CYBERARCHE_LLM_PROVIDER: 'openai',
+				CYBERARCHE_LLM_MODEL: process.env.CYBERARCHE_IT_LLM_MODEL ?? 'gpt-4o-mini',
+				CYBERARCHE_LLM_API_KEY: process.env.CYBERARCHE_IT_OPENAI_KEY ?? ''
 			}
 		},
 		{

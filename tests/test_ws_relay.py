@@ -91,6 +91,37 @@ def test_viewer_update_rejected_and_not_broadcast(api):
         assert error == {"type": "error", "error": "NotAuthorized"}
 
 
+def test_agent_http_edit_reaches_open_websocket_clients(api):
+    """ai-agent spec: agent edits appear LIVE to connected participants.
+    Regression test — server-originated edits (HTTP/MCP) must fan out
+    through the bus, not only persist to the update log."""
+    _, document_id = make_document(api)
+    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
+
+    with api.websocket_connect(url) as client:
+        client.receive_bytes()  # initial state
+
+        response = api.post(
+            f"/api/v1/documents/{document_id}/agent/blocks",
+            json={
+                "blocks": [
+                    {"id": "agent1", "type": "paragraph", "data": {"text": "live agent edit"}}
+                ]
+            },
+            headers=auth(),
+        )
+        assert response.status_code == 201
+
+        frame = client.receive_bytes()
+        assert frame[0] == FRAME_UPDATE
+        doc = Doc()
+        doc.apply_update(frame[1:])
+        from pycrdt import Array
+
+        blocks = [dict(m) for m in doc.get("blocks", type=Array)]
+        assert blocks[0]["data"]["text"] == "live agent edit"
+
+
 def test_missing_token_is_refused(api):
     _, document_id = make_document(api)
     try:

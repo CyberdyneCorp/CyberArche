@@ -73,7 +73,7 @@
 - [x] 8.4 File ingestion into blocks: PDF→blocks, CSV/Excel→`table` blocks; submit to RAG (worker job)
 - [x] 8.5 Agent tool-use loop calling CyberArche MCP + external MCP tools, permission-scoped
 - [x] 8.6 `AgentRun` recording (prompt, tools, docs touched, model, outcome)
-- [ ] 8.7 Web: agent panel View/ViewModel, insert-as-blocks, run history
+- [x] 8.7 Web: agent panel View/ViewModel, insert-as-blocks, run history
 - [x] 8.8 BDD tests: grounded answer with citations, live agent edit merges, PDF ingest, spreadsheet→table, run auditing
 
 ## 9. MCP Server (mcp-server)
