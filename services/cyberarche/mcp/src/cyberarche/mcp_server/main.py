@@ -35,6 +35,9 @@ class McpSettings(BaseSettings):
     # FQDN. FastMCP's DNS-rebinding protection rejects unknown hosts with 421,
     # so the deployment must allow-list its domain (comma-separated).
     mcp_allowed_hosts: str = ""
+    # Proxy IPs whose X-Forwarded-* headers we trust ("*" = any; the service
+    # is only reachable through the proxy on the container network).
+    mcp_forwarded_allow_ips: str = "*"
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -85,6 +88,15 @@ async def serve(settings: McpSettings | None = None) -> None:
             # is only reachable through the proxy in that deployment).
             host_origin_protection=hosts is not None,
             allowed_hosts=hosts,
+            # Trust the reverse proxy's X-Forwarded-* headers. Without this,
+            # uvicorn believes the scheme is http and FastMCP's /mcp/ -> /mcp
+            # redirect points at http://; MCP clients (httpx) treat the
+            # scheme change as a new origin and STRIP the Authorization
+            # header -> every tool call fails with "missing bearer token".
+            uvicorn_config={
+                "proxy_headers": True,
+                "forwarded_allow_ips": settings.mcp_forwarded_allow_ips,
+            },
         )
     finally:
         await container.aclose()

@@ -54,4 +54,6 @@ USER appuser
 # ports — Traefik then cannot pick one and answers 502 on the public domain.
 
 # Default command = API (migrations first; exec so SIGTERM reaches uvicorn).
-CMD ["sh", "-c", "python scripts/migrate.py && exec uvicorn --factory cyberarche.api.bootstrap:create_app --host 0.0.0.0 --port 8000"]
+# --proxy-headers/--forwarded-allow-ips: trust Traefik's X-Forwarded-Proto so
+# the app knows requests are https (correct redirect/WebSocket scheme).
+CMD ["sh", "-c", "python scripts/migrate.py && exec uvicorn --factory cyberarche.api.bootstrap:create_app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]
