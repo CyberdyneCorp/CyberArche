@@ -39,6 +39,26 @@ const PEER_TTL_MS = 30_000;
 /** Server close codes (adapters/inbound/http/realtime.py). */
 const CLOSE_UNAUTHENTICATED = 4401;
 const CLOSE_FORBIDDEN = 4403;
+/** Clock skew allowance when deciding a token is spent. */
+const EXPIRY_SKEW_MS = 30_000;
+
+/** True when the JWT is absent, unreadable, or past (exp - skew).
+ *
+ * Checked before every connect: the socket carries its token in the URL, so an
+ * expired one is refused at the handshake and — depending on the server — may
+ * come back as an opaque failure rather than a close code. Refreshing first
+ * keeps the reconnect on the happy path. */
+export function isExpired(token: string | null): boolean {
+	if (!token) return true;
+	try {
+		const payload = token.split('.')[1];
+		const { exp } = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+		if (typeof exp !== 'number') return false;
+		return Date.now() >= exp * 1000 - EXPIRY_SKEW_MS;
+	} catch {
+		return false; // opaque token: let the server judge it
+	}
+}
 
 export class ArcheProvider {
 	readonly doc: Y.Doc;
@@ -59,6 +79,10 @@ export class ArcheProvider {
 	/** Set while a refresh-and-retry is in flight, so an expiry storm triggers
 	 * exactly one refresh. */
 	private refreshing = false;
+	/** Set after a refresh, cleared once a socket actually opens. Stops a tight
+	 * connect -> "still expired" -> refresh loop if the refresh hands back a
+	 * token that is itself spent. */
+	private refreshed = false;
 
 	constructor(
 		private readonly documentId: string,
@@ -83,12 +107,27 @@ export class ArcheProvider {
 
 	private connect(): void {
 		if (this.closed) return;
+		// A spent token would be refused at the handshake; renew it first.
+		if (isExpired(this.tokens.getAccessToken())) {
+			if (this.refreshed) {
+				// We already refreshed and the token is still spent: nothing
+				// this client can do. Do not spin.
+				this.setStatus('offline');
+				this.onDenied();
+				return;
+			}
+			this.refreshThenReconnect();
+			return;
+		}
 		this.setStatus('connecting');
 		const socket = new WebSocket(this.wsUrl());
 		socket.binaryType = 'arraybuffer';
 		this.socket = socket;
 
 		socket.onopen = () => {
+			// NOT proof of acceptance: the server accepts the handshake and then
+			// closes with 4401/4403/4404 so the code reaches us. Only a frame
+			// from the server proves the session is real (see handleMessage).
 			this.setStatus('connected');
 			// Push local state so offline edits merge on the server.
 			const state = Y.encodeStateAsUpdate(this.doc);
@@ -112,26 +151,55 @@ export class ArcheProvider {
 		if (event.code === CLOSE_UNAUTHENTICATED) {
 			// The access token expired mid-session. Refresh once, then retry
 			// with the new one; reconnecting with the same token would loop.
-			if (this.refreshing) return;
-			this.refreshing = true;
-			void this.tokens
-				.tryRefresh()
-				.then((ok) => {
-					this.refreshing = false;
-					if (this.closed) return;
-					if (ok) this.connect();
-					else this.onDenied(); // signed out; the app routes to /signin
-				})
-				.catch(() => {
-					this.refreshing = false;
-				});
+			this.refreshThenReconnect();
 			return;
 		}
 
+		// Anything else (including an unclean 1006 from a handshake the proxy
+		// or an older server refused without a code) may still be a spent
+		// token. Renew it if it looks expired; otherwise just back off — a
+		// network blip must not sign the user out.
+		if (isExpired(this.tokens.getAccessToken())) {
+			this.refreshThenReconnect();
+			return;
+		}
 		this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
 	}
 
+	/** Refresh once, then reconnect. Concurrent calls collapse into one. */
+	private refreshThenReconnect(): void {
+		if (this.refreshing) return;
+		this.refreshing = true;
+		this.setStatus('connecting');
+		void this.tokens
+			.tryRefresh()
+			.then((ok) => {
+				this.refreshing = false;
+				if (this.closed) return;
+				if (ok) {
+					this.refreshed = true;
+					this.connect();
+					return;
+				}
+				// Refresh failed: the session is over. Retrying the dead token
+				// would loop forever, which is what shipped.
+				this.setStatus('offline');
+				this.onDenied();
+			})
+			.catch(() => {
+				this.refreshing = false;
+				if (!this.closed) {
+					this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+				}
+			});
+	}
+
 	private handleMessage(event: MessageEvent): void {
+		// The server talks to us: the connection was genuinely accepted, so the
+		// refresh cycle is over and a later failure may refresh again.
+		this.refreshing = false;
+		this.refreshed = false;
+
 		if (typeof event.data === 'string') {
 			this.handleControl(JSON.parse(event.data));
 			return;

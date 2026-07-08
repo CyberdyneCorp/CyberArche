@@ -163,6 +163,19 @@ async def _handle_frame(
         return
 
 
+async def _refuse(socket: WebSocket, code: int) -> None:
+    """Refuse a connection with an application close code the client can read.
+
+    Closing before `accept()` makes Starlette answer the handshake with HTTP
+    403; the close code is discarded and the browser only reports a generic
+    failure. A client then cannot tell an expired token (refresh and retry)
+    from a forbidden document (stop) — and retries the dead token forever.
+    Accept first, then close: the code survives.
+    """
+    await socket.accept()
+    await socket.close(code=code)
+
+
 @router.websocket("/api/v1/documents/{document_id}/sync")
 async def sync(socket: WebSocket, document_id: str) -> None:
     registry: DocumentPeers = socket.app.state.document_peers
@@ -173,13 +186,13 @@ async def sync(socket: WebSocket, document_id: str) -> None:
             caller, doc_id
         )
     except NotAuthenticated:
-        await socket.close(code=4401)
+        await _refuse(socket, 4401)
         return
     except NotAuthorized:
-        await socket.close(code=4403)
+        await _refuse(socket, 4403)
         return
     except NotFound:
-        await socket.close(code=4404)
+        await _refuse(socket, 4404)
         return
 
     await socket.accept()

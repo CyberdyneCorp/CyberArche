@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 import anyio
 from pycrdt import Doc, Text
 
+from starlette.websockets import WebSocketDisconnect
+
 from cyberarche.adapters.inbound.http.realtime import FRAME_UPDATE
 from cyberarche.application.ports.identity import Claims
 from cyberarche.domain.ids import UserId
@@ -124,29 +126,29 @@ def test_agent_http_edit_reaches_open_websocket_clients(api):
         assert blocks[0]["data"]["text"] == "live agent edit"
 
 
+def _refusal_code(api, url: str) -> int:
+    """The application close code the client actually receives.
+
+    Asserting merely "it raised" cannot distinguish an expired token from a
+    forbidden document — and the client's behaviour differs (refresh vs stop).
+    """
+    with api.websocket_connect(url) as ws:
+        try:
+            ws.receive_bytes()
+        except WebSocketDisconnect as exc:
+            return exc.code
+    raise AssertionError("expected the connection to be refused")
+
+
 def test_missing_token_is_refused(api):
     _, document_id = make_document(api)
-    try:
-        with api.websocket_connect(f"/api/v1/documents/{document_id}/sync") as ws:
-            ws.receive_bytes()
-        raise AssertionError("expected close")
-    except AssertionError:
-        raise
-    except Exception:
-        pass  # closed with 4401 before accept
+    assert _refusal_code(api, f"/api/v1/documents/{document_id}/sync") == 4401
 
 
 def test_unknown_document_is_refused(api):
-    try:
-        with api.websocket_connect(
-            "/api/v1/documents/nope/sync?token=alice-token"
-        ) as ws:
-            ws.receive_bytes()
-        raise AssertionError("expected close")
-    except AssertionError:
-        raise
-    except Exception:
-        pass  # closed with 4404 before accept
+    assert (
+        _refusal_code(api, "/api/v1/documents/nope/sync?token=alice-token") == 4404
+    )
 
 
 def test_join_without_any_role_is_refused(api):
@@ -161,16 +163,8 @@ def test_join_without_any_role_is_refused(api):
         "eve-token", Claims(subject="eve", tenant_id="acme")
     )
 
-    try:
-        with api.websocket_connect(
-            f"/api/v1/documents/{document_id}/sync?token=eve-token"
-        ) as ws:
-            ws.receive_bytes()
-        raise AssertionError("expected the join to be refused")
-    except AssertionError:
-        raise
-    except Exception:
-        pass  # closed with 4403 before accept
+    code = _refusal_code(api, f"/api/v1/documents/{document_id}/sync?token=eve-token")
+    assert code == 4403  # forbidden, not merely "some failure"
 
 
 def test_viewer_may_join(api):
