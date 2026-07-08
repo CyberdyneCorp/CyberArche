@@ -111,3 +111,45 @@ def test_vertical_flow_workspace_document_snapshot_trash_restore(api):
         api.get(f"/api/v1/documents/{parent['id']}", headers=auth("mallory-token")).status_code
         == 404
     )
+
+
+def test_purge_removes_a_trashed_document_and_its_children_over_http(api):
+    headers = auth("alice-token")
+    workspace = api.post("/api/v1/workspaces", json={"name": "Purge"}, headers=headers).json()
+    parent = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Parent"},
+        headers=headers,
+    ).json()
+    child = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Child", "parent_id": parent["id"]},
+        headers=headers,
+    ).json()
+
+    # DELETE /{id} trashes (soft); the doc is still there, just trashed.
+    assert api.delete(f"/api/v1/documents/{parent['id']}", headers=headers).json()["trashed"]
+
+    # DELETE /{id}/trash purges (permanent) — parent and child both gone.
+    purged = api.delete(f"/api/v1/documents/{parent['id']}/trash", headers=headers)
+    assert purged.status_code == 200
+    assert set(purged.json()["purged"]) == {parent["id"], child["id"]}
+
+    # A purged document cannot be restored — that is the difference from trash.
+    assert api.post(f"/api/v1/documents/{parent['id']}/restore", headers=headers).status_code == 404
+    assert api.get(f"/api/v1/documents/{child['id']}", headers=headers).status_code == 404
+
+
+def test_a_live_document_cannot_be_purged_over_http(api):
+    headers = auth("alice-token")
+    workspace = api.post("/api/v1/workspaces", json={"name": "Live"}, headers=headers).json()
+    document = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Alive"},
+        headers=headers,
+    ).json()
+
+    # Not trashed -> purge is a validation error, not a silent delete.
+    response = api.delete(f"/api/v1/documents/{document['id']}/trash", headers=headers)
+    assert response.status_code == 422
+    assert api.get(f"/api/v1/documents/{document['id']}", headers=headers).status_code == 200

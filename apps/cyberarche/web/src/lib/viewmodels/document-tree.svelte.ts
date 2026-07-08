@@ -4,6 +4,7 @@
 import {
 	createDocument,
 	listChildren,
+	purgeDocument,
 	restoreDocument,
 	retitleDocument,
 	trashDocument,
@@ -143,6 +144,13 @@ export function createDocumentTree() {
 				if (parent?.childrenLoaded) await vm.loadChildren(restored.parent_id);
 			}
 			return restored;
+		},
+
+		/** Permanently delete a trashed document; drops it from the trash list. */
+		async purge(id: string) {
+			await settled();
+			await purgeDocument(id);
+			trash = trash.filter((d) => d.id !== id);
 		}
 	};
 	return vm;

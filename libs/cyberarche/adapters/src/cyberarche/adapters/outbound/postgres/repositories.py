@@ -223,6 +223,38 @@ class PostgresDocumentRepository:
                         _UPDATE_SQL, *_document_update_params(document)
                     )
 
+    async def purge(
+        self, tenant_id: TenantId, document_id: DocumentId
+    ) -> list[DocumentId]:
+        # Collect the subtree first (to report what was removed), then delete
+        # the root — parent_id and every owning table cascade ON DELETE, so one
+        # DELETE removes children, CRDT updates, snapshots, comments, share
+        # links, grants, and favourites atomically. agent_runs is SET NULL.
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    """
+                    WITH RECURSIVE subtree(id) AS (
+                        SELECT id FROM documents
+                        WHERE id = $1 AND tenant_id = $2
+                        UNION ALL
+                        SELECT d.id FROM documents d
+                        JOIN subtree s ON d.parent_id = s.id
+                    )
+                    SELECT id FROM subtree
+                    """,
+                    document_id,
+                    tenant_id,
+                )
+                purged = [DocumentId(r["id"]) for r in rows]
+                if purged:
+                    await connection.execute(
+                        "DELETE FROM documents WHERE id = $1 AND tenant_id = $2",
+                        document_id,
+                        tenant_id,
+                    )
+        return purged
+
 
 # Only the mutable columns; every placeholder must be referenced so
 # asyncpg can type the prepared statement.

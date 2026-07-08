@@ -40,3 +40,5 @@ export const retitleDocument = (id: string, title: string) =>
 export const trashDocument = (id: string) => del<Document>(`/api/v1/documents/${id}`);
 export const restoreDocument = (id: string) =>
 	post<Document>(`/api/v1/documents/${id}/restore`);
+/** Permanently delete a trashed document and its subtree; returns the ids removed. */
+export const purgeDocument = (id: string) => del<{ purged: string[] }>(`/api/v1/documents/${id}/trash`);

@@ -181,3 +181,42 @@ test('the sidebar surfaces documents shared with me', async ({ page, request }) 
 	// It lives in its own section, never in the workspace tree.
 	await expect(page.getByTestId('document-tree')).not.toContainText('shared');
 });
+
+test('a trashed document can be permanently deleted', async ({ page, request }) => {
+	await openDocument(page, request);
+
+	// Create a second document so we can trash one without emptying the tree.
+	const doomed = await (
+		await request.post(`${API}/api/v1/documents`, {
+			data: { workspace_id: workspaceId, title: 'Doomed' },
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	await page.goto(`/w/${workspaceId}/d/${doomed.id}`);
+	await page.getByTestId('block-editor').waitFor();
+
+	// Trash it from the tree.
+	const row = page
+		.getByTestId('document-tree')
+		.locator('.item')
+		.filter({ hasText: 'Doomed' })
+		.first();
+	await row.hover();
+	await row.getByLabel('Move to trash').click();
+	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Doomed' })).toHaveCount(1);
+
+	// Permanently delete it — the confirm dialog must be accepted.
+	page.once('dialog', (dialog) => dialog.accept());
+	await page
+		.getByTestId('trash-doc')
+		.filter({ hasText: 'Doomed' })
+		.getByTestId('trash-purge')
+		.click();
+	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Doomed' })).toHaveCount(0);
+
+	// The backend agrees it is gone: it cannot be restored.
+	const restore = await request.post(`${API}/api/v1/documents/${doomed.id}/restore`, {
+		headers: { Authorization: `Bearer ${session.access}` }
+	});
+	expect(restore.status()).toBe(404);
+});

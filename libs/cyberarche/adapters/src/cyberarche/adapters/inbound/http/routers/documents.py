@@ -9,6 +9,7 @@ from cyberarche.adapters.inbound.http.schemas import (
     CreateDocumentRequest,
     DocumentResponse,
     MoveDocumentRequest,
+    PurgeResponse,
     RecordSnapshotRequest,
     RetitleDocumentRequest,
     SnapshotDetailResponse,
@@ -89,6 +90,16 @@ async def restore_document(
 ) -> DocumentResponse:
     document = await cases.documents.restore(caller, DocumentId(document_id))
     return DocumentResponse.from_domain(document)
+
+
+@router.delete("/{document_id}/trash")
+async def purge_document(
+    document_id: str, cases: Cases, caller: Caller
+) -> PurgeResponse:
+    """Permanently delete a trashed document and its subtree. The soft-delete
+    (move to trash) stays on `DELETE /{document_id}`."""
+    purged = await cases.documents.purge(caller, DocumentId(document_id))
+    return PurgeResponse(purged=[str(document_id) for document_id in purged])
 
 
 # ---- Snapshots -------------------------------------------------------------

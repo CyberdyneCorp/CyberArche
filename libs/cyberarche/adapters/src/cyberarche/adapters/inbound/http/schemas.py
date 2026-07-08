@@ -88,6 +88,12 @@ class DocumentResponse(BaseModel):
         )
 
 
+class PurgeResponse(BaseModel):
+    """The ids removed by a permanent delete — the document and its subtree."""
+
+    purged: list[str]
+
+
 class SnapshotResponse(BaseModel):
     id: str
     document_id: str

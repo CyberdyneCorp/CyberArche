@@ -69,6 +69,19 @@ class DocumentRepository(Protocol):
         """Case-insensitive title match within a tenant (no trashed docs)."""
         ...
 
+    async def purge(
+        self, tenant_id: TenantId, document_id: DocumentId
+    ) -> list[DocumentId]:
+        """Permanently remove a document, its descendant subtree, and every row
+        the removed documents own (CRDT updates, snapshots, comments, share
+        links, grants, favourites). Returns the ids removed, subtree included.
+
+        Agent-run references are cleared, not deleted, so the audit trail
+        survives. Callers must ensure the document is trashed and the caller is
+        authorized; this is the storage primitive, not the policy.
+        """
+        ...
+
 
 class SnapshotRepository(Protocol):
     async def add(self, snapshot: Snapshot) -> None: ...

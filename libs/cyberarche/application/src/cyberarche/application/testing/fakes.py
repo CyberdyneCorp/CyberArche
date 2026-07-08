@@ -134,6 +134,29 @@ class InMemoryDocumentRepository:
         for document in documents:
             self._items[document.id] = document
 
+    async def purge(
+        self, tenant_id: TenantId, document_id: DocumentId
+    ) -> list[DocumentId]:
+        root = self._items.get(document_id)
+        if root is None or root.tenant_id != tenant_id:
+            return []
+        # Collect the subtree, then remove it. Owned rows (snapshots, comments,
+        # update log) live in sibling stores keyed by document_id and are only
+        # reachable through the document, which is gone — so removing the
+        # documents matches Postgres's observable cascade.
+        removed: list[DocumentId] = []
+        frontier = [document_id]
+        while frontier:
+            current = frontier.pop()
+            if current not in self._items:
+                continue
+            del self._items[current]
+            removed.append(current)
+            frontier.extend(
+                d.id for d in self._items.values() if d.parent_id == current
+            )
+        return removed
+
     async def list_for_teamspace(
         self, tenant_id: TenantId, teamspace_id: TeamspaceId
     ) -> list[Document]:

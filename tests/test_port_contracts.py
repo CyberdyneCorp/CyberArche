@@ -335,3 +335,56 @@ async def test_membership_repository_contract(adapters):
         role=Role.VIEWER, granted_at=NOW + timedelta(minutes=1)))
     newest_first = await repo.document_grants_for_user(UserId("carol"))
     assert [g.document_id for g in newest_first] == ["doc-2", "doc-1"]
+
+
+async def test_document_purge_contract(adapters):
+    """purge removes the document and its subtree, and returns the purged ids.
+
+    Owned-row cleanup (snapshots, comments, grants, favourites) is a Postgres
+    FK-cascade guarantee, asserted below only in integration mode: the in-memory
+    double is single-store, and its dangling rows are unreachable through the
+    use cases (favourites filter missing documents; the rest need the document).
+    """
+    ws_repo, repo = adapters["workspaces"], adapters["documents"]
+    await ws_repo.add(workspace())
+    await repo.add(document("p-1", title="Parent"))
+    await repo.add(document("c-1", title="Child", parent_id="p-1"))
+
+    purged = await repo.purge(TenantId("acme"), DocumentId("p-1"))
+    assert set(purged) == {"p-1", "c-1"}  # the whole subtree
+    assert await repo.get(TenantId("acme"), DocumentId("p-1")) is None
+    assert await repo.get(TenantId("acme"), DocumentId("c-1")) is None
+    # Purging an already-gone document is a no-op, not an error.
+    assert await repo.purge(TenantId("acme"), DocumentId("p-1")) == []
+
+
+async def test_document_purge_cascades_owned_rows_postgres(adapters, request):
+    """The FK cascade: purging a document removes every row that references it.
+
+    Verifiable only against the real schema, which is where a missing or wrong
+    ON DELETE clause would bite (a purge-shaped bug's natural hiding place).
+    """
+    if request.node.callspec.params["adapters"] != "postgres":
+        import pytest
+
+        pytest.skip("postgres-only: exercises the FK cascade")
+
+    from cyberarche.domain.memberships import DocumentGrant, Role
+
+    ws_repo, repo = adapters["workspaces"], adapters["documents"]
+    favorites, memberships = adapters["favorites"], adapters["memberships"]
+    updates = adapters["update_log"]
+    await ws_repo.add(workspace())
+    await repo.add(document("d-1"))
+
+    await favorites.add(UserId("alice"), DocumentId("d-1"))
+    await memberships.add_document_grant(
+        DocumentGrant(DocumentId("d-1"), UserId("bob"), Role.VIEWER, NOW)
+    )
+    await updates.append(DocumentId("d-1"), b"\x01\x02", origin="alice")
+
+    await repo.purge(TenantId("acme"), DocumentId("d-1"))
+
+    assert await favorites.list_for_user(UserId("alice")) == []
+    assert await memberships.document_grant(DocumentId("d-1"), UserId("bob")) is None
+    assert await updates.list_for_document(DocumentId("d-1")) == []

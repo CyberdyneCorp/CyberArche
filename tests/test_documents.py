@@ -94,3 +94,92 @@ async def test_unknown_block_type_is_rejected():
     with pytest.raises(ValidationFailed):
         validate_block_type("hologram")
     assert validate_block_type("latex") == "latex"
+
+
+# ---- purge (permanent delete from trash) -----------------------------------
+
+from tests.conftest import caller  # noqa: E402
+
+BOB = caller("bob", "acme")
+
+
+async def test_purge_removes_a_trashed_document_permanently(use_cases: UseCases, alice):
+    workspace = await make_workspace(use_cases, alice)
+    document = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Doomed"
+    )
+    await use_cases.documents.trash(alice, document.id)
+
+    purged = await use_cases.documents.purge(alice, document.id)
+    assert purged == [document.id]
+
+    # Gone from the trash, and not restorable.
+    trashed = await use_cases.documents.list_trashed(alice, workspace_id=workspace.id)
+    assert document.id not in [d.id for d in trashed]
+    with pytest.raises(NotFound):
+        await use_cases.documents.restore(alice, document.id)
+
+
+async def test_purge_cascades_to_the_subtree_and_owned_data(use_cases: UseCases, alice):
+    workspace = await make_workspace(use_cases, alice)
+    parent = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Parent"
+    )
+    child = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Child", parent_id=parent.id
+    )
+    # Owned data: a snapshot on the parent, a comment on the child.
+    await use_cases.snapshots.record(
+        alice, parent.id, content={"blocks": []}, state_vector=b"sv"
+    )
+    await use_cases.agent.apply_blocks(
+        alice, child.id, [{"id": "b1", "type": "paragraph", "data": {"text": "x"}}]
+    )
+    await use_cases.sharing.add_comment(alice, child.id, block_id="b1", body="hi")
+
+    await use_cases.documents.trash(alice, parent.id)
+    purged = await use_cases.documents.purge(alice, parent.id)
+
+    assert set(purged) == {parent.id, child.id}  # subtree came along
+    with pytest.raises(NotFound):
+        await use_cases.documents.get(alice, child.id)
+    # Owned data is unreachable once the document is gone. (Postgres cascades
+    # the rows physically; the contract test asserts that against real SQL.)
+    with pytest.raises(NotFound):
+        await use_cases.snapshots.list(alice, parent.id)
+    with pytest.raises(NotFound):
+        await use_cases.sharing.list_comments(alice, child.id)
+
+
+async def test_a_live_document_cannot_be_purged(use_cases: UseCases, alice):
+    workspace = await make_workspace(use_cases, alice)
+    document = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Alive"
+    )
+
+    with pytest.raises(ValidationFailed):
+        await use_cases.documents.purge(alice, document.id)
+
+    # Untouched: still readable.
+    assert (await use_cases.documents.get(alice, document.id)).id == document.id
+
+
+async def test_purge_requires_edit_permission(use_cases: UseCases, alice):
+    from cyberarche.domain.errors import NotAuthorized
+    from cyberarche.domain.memberships import Role
+
+    workspace = await make_workspace(use_cases, alice)
+    document = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Shared"
+    )
+    await use_cases.documents.trash(alice, document.id)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.COMMENTER
+    )
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.documents.purge(BOB, document.id)
+
+    # Still in the trash, restorable by an editor.
+    restored = await use_cases.documents.restore(alice, document.id)
+    assert restored.trashed is False

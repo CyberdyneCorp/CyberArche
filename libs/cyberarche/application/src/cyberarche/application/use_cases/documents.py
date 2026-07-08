@@ -149,6 +149,22 @@ class DocumentUseCases:
         await self._documents.update(restored)
         return restored
 
+    async def purge(
+        self, caller: CallerContext, document_id: DocumentId
+    ) -> list[DocumentId]:
+        """Permanently delete a trashed document and its subtree (D-1..D-4).
+
+        Only reachable from the trash: a live document must be trashed first, so
+        the trash stays the recoverable safety net.
+        """
+        document = await self._get_or_raise(
+            caller, document_id, include_trashed=True
+        )
+        if not document.trashed:
+            raise ValidationFailed("only a trashed document can be purged")
+        await self._access.require_document(caller, document, Role.EDITOR)
+        return await self._documents.purge(caller.tenant_id, document_id)
+
     async def list_trashed(
         self, caller: CallerContext, *, workspace_id: WorkspaceId
     ) -> list[Document]:

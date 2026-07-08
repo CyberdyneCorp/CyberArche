@@ -31,6 +31,14 @@
 		creatingTeamspace = false;
 	}
 
+	async function confirmPurge(id: string, title: string) {
+		// Permanent and unrecoverable — confirm before purging.
+		if (!confirm(`Permanently delete "${title || 'Untitled'}"? This cannot be undone.`)) {
+			return;
+		}
+		await documentTree.purge(id);
+	}
+
 	async function signOut() {
 		session.logout();
 		await goto('/signin');
@@ -170,7 +178,15 @@
 			{#each documentTree.trash as doc (doc.id)}
 				<div class="trash-row" data-testid="trash-doc">
 					<span class="title">{doc.title}</span>
-					<button onclick={() => documentTree.restore(doc.id)}>Restore</button>
+					<button data-testid="trash-restore" onclick={() => documentTree.restore(doc.id)}
+						>Restore</button
+					>
+					<button
+						class="danger"
+						data-testid="trash-purge"
+						title="Delete permanently"
+						onclick={() => confirmPurge(doc.id, doc.title)}>Delete</button
+					>
 				</div>
 			{/each}
 		</nav>
@@ -331,6 +347,9 @@
 	.trash-row button {
 		color: var(--acc-strong);
 		font-size: 11px;
+	}
+	.trash-row button.danger {
+		color: var(--rose);
 	}
 	.footer {
 		margin-top: auto;

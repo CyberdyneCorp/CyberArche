@@ -68,4 +68,29 @@ describe('document tree ViewModel', () => {
 
 		expect(tree.roots[0].document.title).toBe('Retrieval Pipeline RFC');
 	});
+
+	it('purge drops a document from the trash list', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				const method = init?.method ?? 'GET';
+				if (method === 'GET') return { ok: true, status: 200, json: async () => [DOC('d-1', 'Doomed')] };
+				if (method === 'DELETE' && url === '/api/v1/documents/d-1')
+					return { ok: true, status: 200, json: async () => ({ ...DOC('d-1', 'Doomed'), trashed: true }) };
+				// DELETE /api/v1/documents/d-1/trash  -> purge
+				if (method === 'DELETE' && url.endsWith('/trash'))
+					return { ok: true, status: 200, json: async () => ({ purged: ['d-1'] }) };
+				throw new Error(`unrouted: ${method} ${url}`);
+			}) as unknown as typeof fetch
+		);
+
+		const tree = createDocumentTree();
+		await tree.open('ws-1');
+		await tree.moveToTrash('d-1');
+		expect(tree.trash.map((d) => d.id)).toEqual(['d-1']);
+
+		await tree.purge('d-1');
+		expect(tree.trash).toEqual([]);
+		expect(tree.roots).toEqual([]);
+	});
 });
