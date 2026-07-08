@@ -115,7 +115,7 @@
 
 ## 13. Validation & CI
 
-- [ ] 13.1 `openspec validate --all --strict` in CI
-- [ ] 13.2 import-linter boundary check in CI (domain ← application ← adapters); fail on violation
-- [ ] 13.3 Backend pytest (incl. BDD + contract-parity) + frontend Vitest/Playwright gates
-- [ ] 13.4 Cognitive-complexity gate (backend ≤15, frontend 8–12) on changed files
+- [x] 13.1 `openspec validate --all --strict` in CI
+- [x] 13.2 import-linter boundary check in CI (domain ← application ← adapters); fail on violation
+- [x] 13.3 Backend pytest (incl. BDD + contract-parity) + frontend Vitest/Playwright gates
+- [x] 13.4 Cognitive-complexity gate (backend ≤15, frontend 8–12) on changed files

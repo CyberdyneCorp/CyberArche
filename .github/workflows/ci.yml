@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  openspec:
+    name: OpenSpec validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g @fission-ai/openspec@latest
+      - run: openspec validate --all --strict
+
+  backend:
+    name: Backend (lint, boundaries, tests, complexity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install workspace
+        run: uv sync
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Hexagonal boundaries (import-linter)
+        run: uv run lint-imports
+      - name: Tests
+        run: uv run pytest -q
+      - name: Cognitive complexity gate (backend <= 15)
+        run: |
+          uv run --with complexipy complexipy libs services --max-complexity-allowed 15
+
+  web:
+    name: Web (typecheck + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check web app exists
+        id: web
+        run: |
+          if [ -f apps/cyberarche/web/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "web app not scaffolded yet - skipping"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.web.outputs.present == 'true'
+        with:
+          node-version: 22
+      - name: Install, check, test
+        if: steps.web.outputs.present == 'true'
+        working-directory: apps/cyberarche/web
+        run: |
+          npm ci
+          npm run check --if-present
+          npm test --if-present

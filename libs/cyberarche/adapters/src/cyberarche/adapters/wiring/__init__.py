@@ -183,6 +183,121 @@ def _build_llm(config: WiringConfig, http: httpx.AsyncClient) -> LLMPort:
     return OpenAICompatibleLLM(llm_config, http)
 
 
+@dataclass(slots=True)
+class _Repositories:
+    workspaces: WorkspaceRepository
+    documents: DocumentRepository
+    snapshots: SnapshotRepository
+    memberships: MembershipRepository
+    update_log: UpdateLogPort
+    ingestions: IngestionRepository
+    agent_runs: AgentRunRepository
+    connectors: ConnectorRepository
+    share_links: ShareLinkRepository
+    comments: CommentRepository
+
+
+async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
+    import asyncpg
+
+    from cyberarche.adapters.outbound.postgres.agent_runs import (
+        PostgresAgentRunRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.connectors import (
+        PostgresConnectorRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.ingestions import (
+        PostgresIngestionRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.repositories import (
+        PostgresDocumentRepository,
+        PostgresMembershipRepository,
+        PostgresSnapshotRepository,
+        PostgresWorkspaceRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.sharing import (
+        PostgresCommentRepository,
+        PostgresShareLinkRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
+
+    pool = await asyncpg.create_pool(config.database_url)
+    closers.append(pool.close)
+    return _Repositories(
+        workspaces=PostgresWorkspaceRepository(pool),
+        documents=PostgresDocumentRepository(pool),
+        snapshots=PostgresSnapshotRepository(pool),
+        memberships=PostgresMembershipRepository(pool),
+        update_log=PostgresUpdateLog(pool),
+        ingestions=PostgresIngestionRepository(pool),
+        agent_runs=PostgresAgentRunRepository(pool),
+        connectors=PostgresConnectorRepository(pool),
+        share_links=PostgresShareLinkRepository(pool),
+        comments=PostgresCommentRepository(pool),
+    )
+
+
+def _memory_repositories() -> _Repositories:
+    from cyberarche.application.testing import fakes
+
+    return _Repositories(
+        workspaces=fakes.InMemoryWorkspaceRepository(),
+        documents=fakes.InMemoryDocumentRepository(),
+        snapshots=fakes.InMemorySnapshotRepository(),
+        memberships=fakes.InMemoryMembershipRepository(),
+        update_log=fakes.InMemoryUpdateLog(),
+        ingestions=fakes.InMemoryIngestionRepository(),
+        agent_runs=fakes.InMemoryAgentRunRepository(),
+        connectors=fakes.InMemoryConnectorRepository(),
+        share_links=fakes.InMemoryShareLinkRepository(),
+        comments=fakes.InMemoryCommentRepository(),
+    )
+
+
+def _build_secret_box(config: WiringConfig) -> SecretBoxPort:
+    if config.connector_secret_key:
+        from cyberarche.adapters.outbound.crypto import FernetSecretBox
+
+        return FernetSecretBox(config.connector_secret_key)
+    from cyberarche.application.testing.fakes import NaiveSecretBox
+
+    return NaiveSecretBox()  # tests/sample runtime only
+
+
+def _build_auth_stack(config: WiringConfig, shared_http):
+    """(token_port, service_tokens, authorization) from CyberdyneAuth config."""
+    if not config.auth_base_url:
+        raise ValueError("auth_base_url is required unless a token_port is injected")
+    auth_config = CyberdyneAuthConfig(
+        base_url=config.auth_base_url,
+        client_id=config.auth_client_id,
+        client_secret=config.auth_client_secret,
+        audience=config.auth_audience,
+        tenant_claim=config.auth_tenant_claim,
+    )
+    credentials = ClientCredentialsTokenSource(auth_config, shared_http())
+    token_port = JwksTokenVerifier(auth_config, shared_http(), credentials)
+    authorization = IamAuthorization(auth_config, shared_http(), credentials)
+    return token_port, credentials, authorization
+
+
+def _build_rag(config: WiringConfig, service_tokens, shared_http) -> RagPort:
+    if not config.rag_base_url:
+        from cyberarche.application.testing.fakes import InMemoryRag
+
+        return InMemoryRag()
+    from cyberarche.adapters.outbound.rag.cyberdyne_rag import CyberdyneRagAdapter
+
+    if config.rag_api_token:
+        async def rag_token() -> str:
+            return config.rag_api_token
+    elif service_tokens is not None:
+        rag_token = service_tokens.service_token
+    else:
+        raise ValueError("RAG needs rag_api_token or CyberdyneAuth credentials")
+    return CyberdyneRagAdapter(config.rag_base_url, shared_http(), rag_token)
+
+
 async def build_container(
     config: WiringConfig,
     *,
@@ -198,89 +313,9 @@ async def build_container(
     closers = []
 
     if config.backend == "postgres":
-        import asyncpg
-
-        from cyberarche.adapters.outbound.postgres.repositories import (
-            PostgresDocumentRepository,
-            PostgresMembershipRepository,
-            PostgresSnapshotRepository,
-            PostgresWorkspaceRepository,
-        )
-        from cyberarche.adapters.outbound.postgres.ingestions import (
-            PostgresIngestionRepository,
-        )
-        from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
-
-        pool = await asyncpg.create_pool(config.database_url)
-        closers.append(pool.close)
-        workspaces = PostgresWorkspaceRepository(pool)
-        documents = PostgresDocumentRepository(pool)
-        snapshots = PostgresSnapshotRepository(pool)
-        memberships = PostgresMembershipRepository(pool)
-        update_log = PostgresUpdateLog(pool)
-        ingestions = PostgresIngestionRepository(pool)
+        repos = await _postgres_repositories(config, closers)
     else:
-        from cyberarche.application.testing.fakes import (
-            InMemoryDocumentRepository,
-            InMemoryIngestionRepository,
-            InMemoryMembershipRepository,
-            InMemorySnapshotRepository,
-            InMemoryUpdateLog,
-            InMemoryWorkspaceRepository,
-        )
-
-        workspaces = InMemoryWorkspaceRepository()
-        documents = InMemoryDocumentRepository()
-        snapshots = InMemorySnapshotRepository()
-        memberships = InMemoryMembershipRepository()
-        update_log = InMemoryUpdateLog()
-        ingestions = InMemoryIngestionRepository()
-
-    if config.backend == "postgres":
-        from cyberarche.adapters.outbound.postgres.agent_runs import (
-            PostgresAgentRunRepository,
-        )
-        from cyberarche.adapters.outbound.postgres.connectors import (
-            PostgresConnectorRepository,
-        )
-
-        from cyberarche.adapters.outbound.postgres.sharing import (
-            PostgresCommentRepository,
-            PostgresShareLinkRepository,
-        )
-
-        agent_runs = PostgresAgentRunRepository(pool)
-        connectors = PostgresConnectorRepository(pool)
-        share_links = PostgresShareLinkRepository(pool)
-        comments = PostgresCommentRepository(pool)
-    else:
-        from cyberarche.application.testing.fakes import (
-            InMemoryAgentRunRepository,
-            InMemoryCommentRepository,
-            InMemoryConnectorRepository,
-            InMemoryShareLinkRepository,
-        )
-
-        agent_runs = InMemoryAgentRunRepository()
-        connectors = InMemoryConnectorRepository()
-        share_links = InMemoryShareLinkRepository()
-        comments = InMemoryCommentRepository()
-
-    if mcp_client is None:
-        from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
-            FastMcpClientAdapter,
-        )
-
-        mcp_client = FastMcpClientAdapter()
-
-    if config.connector_secret_key:
-        from cyberarche.adapters.outbound.crypto import FernetSecretBox
-
-        secret_box: SecretBoxPort = FernetSecretBox(config.connector_secret_key)
-    else:
-        from cyberarche.application.testing.fakes import NaiveSecretBox
-
-        secret_box = NaiveSecretBox()  # tests/sample runtime only
+        repos = _memory_repositories()
 
     http: httpx.AsyncClient | None = None
 
@@ -294,40 +329,12 @@ async def build_container(
     service_tokens: ServiceTokenPort | None = None
     authorization: AuthorizationPort | None = None
     if token_port is None:
-        if not config.auth_base_url:
-            raise ValueError(
-                "auth_base_url is required unless a token_port is injected"
-            )
-        auth_config = CyberdyneAuthConfig(
-            base_url=config.auth_base_url,
-            client_id=config.auth_client_id,
-            client_secret=config.auth_client_secret,
-            audience=config.auth_audience,
-            tenant_claim=config.auth_tenant_claim,
+        token_port, service_tokens, authorization = _build_auth_stack(
+            config, shared_http
         )
-        credentials = ClientCredentialsTokenSource(auth_config, shared_http())
-        token_port = JwksTokenVerifier(auth_config, shared_http(), credentials)
-        service_tokens = credentials
-        authorization = IamAuthorization(auth_config, shared_http(), credentials)
 
     if rag is None:
-        if config.rag_base_url:
-            from cyberarche.adapters.outbound.rag.cyberdyne_rag import (
-                CyberdyneRagAdapter,
-            )
-
-            if config.rag_api_token:
-                async def rag_token() -> str:
-                    return config.rag_api_token
-            elif service_tokens is not None:
-                rag_token = service_tokens.service_token
-            else:
-                raise ValueError("RAG needs rag_api_token or CyberdyneAuth credentials")
-            rag = CyberdyneRagAdapter(config.rag_base_url, shared_http(), rag_token)
-        else:
-            from cyberarche.application.testing.fakes import InMemoryRag
-
-            rag = InMemoryRag()
+        rag = _build_rag(config, service_tokens, shared_http)
 
     if llm is None:
         if config.llm_api_key or config.llm_base_url:
@@ -337,6 +344,37 @@ async def build_container(
 
             llm = ScriptedLLM([])  # no provider configured (tests/sample)
 
+    if mcp_client is None:
+        from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
+            FastMcpClientAdapter,
+        )
+
+        mcp_client = FastMcpClientAdapter()
+
+    secret_box = _build_secret_box(config)
+    (
+        workspaces,
+        documents,
+        snapshots,
+        memberships,
+        update_log,
+        ingestions,
+        agent_runs,
+        connectors,
+        share_links,
+        comments,
+    ) = (
+        repos.workspaces,
+        repos.documents,
+        repos.snapshots,
+        repos.memberships,
+        repos.update_log,
+        repos.ingestions,
+        repos.agent_runs,
+        repos.connectors,
+        repos.share_links,
+        repos.comments,
+    )
     crdt_engine = PycrdtEngine()
     return Container(
         config=config,

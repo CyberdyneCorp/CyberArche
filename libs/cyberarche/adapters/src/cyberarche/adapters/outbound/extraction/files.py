@@ -65,13 +65,17 @@ class FileExtractor:
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         blocks: list[dict] = []
         for sheet in workbook.worksheets:
-            rows = [
-                ["" if cell is None else str(cell) for cell in row]
-                for row in sheet.iter_rows(values_only=True)
-                if any(cell is not None for cell in row)
-            ]
+            rows = _sheet_rows(sheet)
             if not rows:
                 continue
             blocks.append(_block("heading", {"text": sheet.title, "level": 2}))
             blocks.append(_table_block(rows, source=f"{filename}#{sheet.title}"))
         return blocks
+
+
+def _sheet_rows(sheet) -> list[list[str]]:
+    return [
+        ["" if cell is None else str(cell) for cell in row]
+        for row in sheet.iter_rows(values_only=True)
+        if any(cell is not None for cell in row)
+    ]
