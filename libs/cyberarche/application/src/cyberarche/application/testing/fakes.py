@@ -11,8 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 from cyberarche.application.ports.crdt import LoggedUpdate
 from cyberarche.application.ports.identity import Claims
+from cyberarche.application.ports.rag import (
+    IngestionRecord,
+    RagQueryMode,
+    RagTask,
+    RagTaskStatus,
+)
 from cyberarche.domain.documents import Document
-from cyberarche.domain.errors import NotAuthenticated
+from cyberarche.domain.errors import NotAuthenticated, NotFound
 from cyberarche.domain.ids import DocumentId, SnapshotId, TenantId, UserId, WorkspaceId
 from cyberarche.domain.memberships import DocumentGrant, WorkspaceMembership
 from cyberarche.domain.snapshots import Snapshot
@@ -187,6 +193,96 @@ class InMemoryUpdateLog:
             created_at=self._clock.now(),
         )
         self._items[document_id] = [compacted] + kept
+
+
+class InMemoryRag:
+    """RagPort fake: isolated per-slug projects, deterministic task lifecycle.
+
+    Uploaded tasks start PROCESSING and complete on the next status poll,
+    mimicking the async MMDI pipeline.
+    """
+
+    def __init__(self) -> None:
+        self.projects: dict[str, dict[str, bytes]] = {}
+        self.tasks: dict[str, dict[str, RagTask]] = {}
+        self._task_files: dict[str, str] = {}
+        self._counter = itertools.count(1)
+
+    async def ensure_project(self, slug: str, *, name: str) -> None:
+        self.projects.setdefault(slug, {})
+        self.tasks.setdefault(slug, {})
+
+    async def upload(
+        self, slug: str, *, filename: str, content: bytes, content_type: str
+    ) -> RagTask:
+        task = RagTask(
+            task_id=f"task-{next(self._counter):04d}",
+            status=RagTaskStatus.PROCESSING,
+        )
+        self.projects.setdefault(slug, {})[filename] = content
+        self.tasks.setdefault(slug, {})[task.task_id] = task
+        self._task_files[task.task_id] = filename
+        return task
+
+    async def task_status(self, slug: str, task_id: str) -> RagTask:
+        task = self.tasks.get(slug, {}).get(task_id)
+        if task is None:
+            raise NotFound("RAG task not found")
+        if task.status is RagTaskStatus.PROCESSING:  # completes on next poll
+            task = RagTask(task_id=task_id, status=RagTaskStatus.COMPLETED)
+            self.tasks[slug][task_id] = task
+        return task
+
+    async def query(self, slug: str, *, query: str, mode: RagQueryMode) -> str:
+        filenames = sorted(self.projects.get(slug, {}))
+        return f"[{slug}:{mode.value}] {query} -> sources: {', '.join(filenames)}"
+
+    async def delete_datasource(self, slug: str, filename: str) -> None:
+        self.projects.get(slug, {}).pop(filename, None)
+
+
+class InMemoryIngestionRepository:
+    def __init__(self) -> None:
+        self._items: dict[str, IngestionRecord] = {}
+
+    async def add(self, record: IngestionRecord) -> None:
+        self._items[record.task_id] = record
+
+    async def get(
+        self, workspace_id: WorkspaceId, task_id: str
+    ) -> IngestionRecord | None:
+        record = self._items.get(task_id)
+        if record is None or record.workspace_id != workspace_id:
+            return None
+        return record
+
+    async def by_hash(
+        self, workspace_id: WorkspaceId, content_hash: str
+    ) -> IngestionRecord | None:
+        for record in self._items.values():
+            if record.workspace_id == workspace_id and record.content_hash == content_hash:
+                return record
+        return None
+
+    async def by_task_id(self, task_id: str) -> IngestionRecord | None:
+        return self._items.get(task_id)
+
+    async def list_for_workspace(
+        self, workspace_id: WorkspaceId
+    ) -> list[IngestionRecord]:
+        return [r for r in self._items.values() if r.workspace_id == workspace_id]
+
+    async def update(self, record: IngestionRecord) -> None:
+        self._items[record.task_id] = record
+
+    async def delete_by_filename(
+        self, workspace_id: WorkspaceId, filename: str
+    ) -> None:
+        self._items = {
+            task_id: record
+            for task_id, record in self._items.items()
+            if not (record.workspace_id == workspace_id and record.filename == filename)
+        }
 
 
 class StaticTokenPort:

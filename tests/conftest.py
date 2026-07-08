@@ -14,7 +14,9 @@ from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
 from cyberarche.application.testing.fakes import (
     FixedClock,
     InMemoryDocumentRepository,
+    InMemoryIngestionRepository,
     InMemoryMembershipRepository,
+    InMemoryRag,
     InMemorySnapshotRepository,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
@@ -23,6 +25,7 @@ from cyberarche.application.testing.fakes import (
 )
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
@@ -45,21 +48,29 @@ def memberships() -> InMemoryMembershipRepository:
 
 
 @pytest.fixture
+def rag() -> InMemoryRag:
+    return InMemoryRag()
+
+
+@pytest.fixture
 def use_cases(
     clock: FixedClock,
     update_log: InMemoryUpdateLog,
     memberships: InMemoryMembershipRepository,
+    rag: InMemoryRag,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
     snapshots = InMemorySnapshotRepository()
+    ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
     access = AccessControl(memberships)
     return UseCases(
-        workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids),
+        workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=RealtimeUseCases(documents, update_log, PycrdtEngine(), access),
+        knowledge=KnowledgeUseCases(workspaces, ingestions, rag, access, clock),
     )
 
 
@@ -88,7 +99,12 @@ TOKENS = {
 @pytest.fixture
 def api() -> TestClient:
     app = create_app(
-        Settings(backend="memory", auth_base_url=""),
+        Settings(
+            backend="memory",
+            auth_base_url="",
+            rag_base_url="",
+            rag_webhook_secret="hook-secret",
+        ),
         token_port=StaticTokenPort(dict(TOKENS)),
     )
     with TestClient(app) as client:

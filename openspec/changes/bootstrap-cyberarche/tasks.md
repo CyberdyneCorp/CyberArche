@@ -57,13 +57,13 @@
 
 ## 7. RAG Knowledge (rag-knowledge)
 
-- [ ] 7.1 `RagPort` + CyberdyneRAG adapter (project create, upload, task poll/callback, query, datasource delete)
-- [ ] 7.2 Provision an isolated RAG `project_slug` on workspace creation
-- [ ] 7.3 Ingestion use case: upload file, track task to completion, dedupe; wire to workers
-- [ ] 7.4 Retrieval use case: query with mode (local/global/hybrid/naive/mix)
-- [ ] 7.5 Delete-source cascade to RAG datasource
-- [ ] 7.6 Webhook endpoint for RAG task completion (verify secret)
-- [ ] 7.7 BDD tests: provision on create, cross-workspace isolation, track-to-completion, dedupe, delete cascade
+- [x] 7.1 `RagPort` + CyberdyneRAG adapter (project create, upload, task poll/callback, query, datasource delete)
+- [x] 7.2 Provision an isolated RAG `project_slug` on workspace creation
+- [x] 7.3 Ingestion use case: upload file, track task to completion, dedupe; wire to workers
+- [x] 7.4 Retrieval use case: query with mode (local/global/hybrid/naive/mix)
+- [x] 7.5 Delete-source cascade to RAG datasource
+- [x] 7.6 Webhook endpoint for RAG task completion (verify secret)
+- [x] 7.7 BDD tests: provision on create, cross-workspace isolation, track-to-completion, dedupe, delete cascade
 
 ## 8. AI Agent (ai-agent)
 

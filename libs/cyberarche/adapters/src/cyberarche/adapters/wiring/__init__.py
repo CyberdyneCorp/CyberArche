@@ -27,8 +27,10 @@ from cyberarche.application.ports.repositories import (
     WorkspaceRepository,
 )
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
+from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
@@ -60,6 +62,9 @@ class WiringConfig:
     auth_client_secret: str = ""
     auth_audience: str | None = None
     auth_tenant_claim: str = "org_id"
+    rag_base_url: str = ""
+    rag_api_token: str = ""
+    rag_webhook_secret: str = ""
 
 
 @dataclass(slots=True)
@@ -74,6 +79,8 @@ class Container:
     memberships: MembershipRepository
     update_log: UpdateLogPort
     crdt_engine: CrdtEnginePort
+    ingestions: IngestionRepository
+    rag: RagPort
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -89,15 +96,18 @@ def _build_use_cases(
     memberships: MembershipRepository,
     update_log: UpdateLogPort,
     crdt_engine: CrdtEnginePort,
+    ingestions: IngestionRepository,
+    rag: RagPort,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships)
     return UseCases(
-        workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids),
+        workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=RealtimeUseCases(documents, update_log, crdt_engine, access),
+        knowledge=KnowledgeUseCases(workspaces, ingestions, rag, access, clock),
     )
 
 
@@ -105,8 +115,10 @@ async def build_container(
     config: WiringConfig,
     *,
     token_port: TokenPort | None = None,
+    rag: RagPort | None = None,
 ) -> Container:
-    """Build the container. `token_port` is injectable for tests/sample runtime."""
+    """Build the container. `token_port` and `rag` are injectable for tests
+    and the dockerless sample runtime."""
     clock = SystemClock()
     ids = UuidIds()
     closers = []
@@ -120,6 +132,9 @@ async def build_container(
             PostgresSnapshotRepository,
             PostgresWorkspaceRepository,
         )
+        from cyberarche.adapters.outbound.postgres.ingestions import (
+            PostgresIngestionRepository,
+        )
         from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
         pool = await asyncpg.create_pool(config.database_url)
@@ -129,9 +144,11 @@ async def build_container(
         snapshots = PostgresSnapshotRepository(pool)
         memberships = PostgresMembershipRepository(pool)
         update_log = PostgresUpdateLog(pool)
+        ingestions = PostgresIngestionRepository(pool)
     else:
         from cyberarche.application.testing.fakes import (
             InMemoryDocumentRepository,
+            InMemoryIngestionRepository,
             InMemoryMembershipRepository,
             InMemorySnapshotRepository,
             InMemoryUpdateLog,
@@ -143,6 +160,16 @@ async def build_container(
         snapshots = InMemorySnapshotRepository()
         memberships = InMemoryMembershipRepository()
         update_log = InMemoryUpdateLog()
+        ingestions = InMemoryIngestionRepository()
+
+    http: httpx.AsyncClient | None = None
+
+    def shared_http() -> httpx.AsyncClient:
+        nonlocal http
+        if http is None:
+            http = httpx.AsyncClient(timeout=30.0)
+            closers.append(http.aclose)
+        return http
 
     service_tokens: ServiceTokenPort | None = None
     authorization: AuthorizationPort | None = None
@@ -151,8 +178,6 @@ async def build_container(
             raise ValueError(
                 "auth_base_url is required unless a token_port is injected"
             )
-        http = httpx.AsyncClient(timeout=10.0)
-        closers.append(http.aclose)
         auth_config = CyberdyneAuthConfig(
             base_url=config.auth_base_url,
             client_id=config.auth_client_id,
@@ -160,10 +185,29 @@ async def build_container(
             audience=config.auth_audience,
             tenant_claim=config.auth_tenant_claim,
         )
-        credentials = ClientCredentialsTokenSource(auth_config, http)
-        token_port = JwksTokenVerifier(auth_config, http, credentials)
+        credentials = ClientCredentialsTokenSource(auth_config, shared_http())
+        token_port = JwksTokenVerifier(auth_config, shared_http(), credentials)
         service_tokens = credentials
-        authorization = IamAuthorization(auth_config, http, credentials)
+        authorization = IamAuthorization(auth_config, shared_http(), credentials)
+
+    if rag is None:
+        if config.rag_base_url:
+            from cyberarche.adapters.outbound.rag.cyberdyne_rag import (
+                CyberdyneRagAdapter,
+            )
+
+            if config.rag_api_token:
+                async def rag_token() -> str:
+                    return config.rag_api_token
+            elif service_tokens is not None:
+                rag_token = service_tokens.service_token
+            else:
+                raise ValueError("RAG needs rag_api_token or CyberdyneAuth credentials")
+            rag = CyberdyneRagAdapter(config.rag_base_url, shared_http(), rag_token)
+        else:
+            from cyberarche.application.testing.fakes import InMemoryRag
+
+            rag = InMemoryRag()
 
     crdt_engine = PycrdtEngine()
     return Container(
@@ -177,8 +221,19 @@ async def build_container(
         memberships=memberships,
         update_log=update_log,
         crdt_engine=crdt_engine,
+        ingestions=ingestions,
+        rag=rag,
         use_cases=_build_use_cases(
-            workspaces, documents, snapshots, memberships, update_log, crdt_engine, clock, ids
+            workspaces,
+            documents,
+            snapshots,
+            memberships,
+            update_log,
+            crdt_engine,
+            ingestions,
+            rag,
+            clock,
+            ids,
         ),
         _closers=closers,
     )

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     auth_client_secret: str = ""
     auth_audience: str | None = None
     auth_tenant_claim: str = "org_id"
+    rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
+    rag_api_token: str = ""
+    rag_webhook_secret: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]
 
     def wiring(self) -> WiringConfig:
@@ -28,4 +31,7 @@ class Settings(BaseSettings):
             auth_client_secret=self.auth_client_secret,
             auth_audience=self.auth_audience,
             auth_tenant_claim=self.auth_tenant_claim,
+            rag_base_url=self.rag_base_url,
+            rag_api_token=self.rag_api_token,
+            rag_webhook_secret=self.rag_webhook_secret,
         )
