@@ -9,6 +9,7 @@ from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 
@@ -24,3 +25,4 @@ class UseCases:
     knowledge: KnowledgeUseCases
     connectors: ConnectorUseCases
     agent: AgentUseCases
+    sharing: SharingUseCases

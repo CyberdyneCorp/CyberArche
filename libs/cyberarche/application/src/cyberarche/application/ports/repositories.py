@@ -26,6 +26,11 @@ class DocumentRepository(Protocol):
 
     async def get(self, tenant_id: TenantId, document_id: DocumentId) -> Document | None: ...
 
+    async def get_any_tenant(self, document_id: DocumentId) -> Document | None:
+        """Tenant-agnostic lookup — ONLY for share-link resolution, where
+        access is decided by an explicit grant instead of tenant scope."""
+        ...
+
     async def children(
         self,
         tenant_id: TenantId,

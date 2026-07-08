@@ -1,0 +1,193 @@
+"""permissions-sharing spec: invites, overrides, share links, comments."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+
+from cyberarche.application.use_cases import UseCases
+from cyberarche.domain.errors import NotAuthorized
+from cyberarche.domain.memberships import Role
+from cyberarche.domain.sharing import SharePermission
+from tests.conftest import caller
+
+BOB = caller("bob", "acme")
+CAROL = caller("carol", "acme")
+OUTSIDER = caller("dave", "globex")
+
+
+async def setup(use_cases: UseCases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    document = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Shared Doc"
+    )
+    return workspace, document
+
+
+BLOCK = {"id": "b1", "type": "paragraph", "data": {"text": "x"}}
+
+
+async def test_invited_commenter_can_comment_but_not_edit(use_cases, alice):
+    workspace, document = await setup(use_cases, alice)
+
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.COMMENTER
+    )
+
+    comment = await use_cases.sharing.add_comment(
+        BOB, document.id, block_id="b1", body="looks good"
+    )
+    assert comment.author_id == BOB.user_id
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.apply_blocks(BOB, document.id, [BLOCK])
+
+
+async def test_document_grant_overrides_inherited_workspace_role(use_cases, alice):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+    # Editor everywhere in the workspace...
+    other = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Other"
+    )
+    await use_cases.agent.apply_blocks(BOB, other.id, [BLOCK])
+
+    # ...but demoted to viewer on this specific document.
+    await use_cases.sharing.grant_on_document(
+        alice, document.id, user_id=BOB.user_id, role=Role.VIEWER
+    )
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.apply_blocks(BOB, document.id, [BLOCK])
+
+
+async def test_only_owner_can_invite(use_cases, alice):
+    workspace, _ = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+    with pytest.raises(NotAuthorized):  # editors cannot invite
+        await use_cases.sharing.invite_to_workspace(
+            BOB, workspace.id, user_id=CAROL.user_id, role=Role.VIEWER
+        )
+
+
+async def test_view_share_link_grants_read_only_access(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    link = await use_cases.sharing.create_share_link(
+        alice, document.id, permission=SharePermission.VIEW
+    )
+
+    opened = await use_cases.sharing.open_share_link(OUTSIDER, link.id)
+
+    assert opened.id == document.id
+    comments = await use_cases.sharing.list_comments(OUTSIDER, document.id)
+    assert comments == []  # read access works
+    with pytest.raises(NotAuthorized):  # but not comment/edit
+        await use_cases.sharing.add_comment(
+            OUTSIDER, document.id, block_id="b1", body="hi"
+        )
+
+
+async def test_edit_share_link_grants_edit(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    link = await use_cases.sharing.create_share_link(
+        alice, document.id, permission=SharePermission.EDIT
+    )
+    await use_cases.sharing.open_share_link(BOB, link.id)
+    await use_cases.agent.apply_blocks(BOB, document.id, [BLOCK])  # allowed
+
+
+async def test_revoked_link_is_denied(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    link = await use_cases.sharing.create_share_link(
+        alice, document.id, permission=SharePermission.VIEW
+    )
+    await use_cases.sharing.revoke_share_link(alice, document.id, link.id)
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.sharing.open_share_link(OUTSIDER, link.id)
+
+
+async def test_expired_link_is_denied(use_cases, clock, alice):
+    _, document = await setup(use_cases, alice)
+    link = await use_cases.sharing.create_share_link(
+        alice,
+        document.id,
+        permission=SharePermission.VIEW,
+        expires_at=clock.now() + timedelta(hours=1),
+    )
+    clock.tick(seconds=2 * 3600)
+    with pytest.raises(NotAuthorized):
+        await use_cases.sharing.open_share_link(OUTSIDER, link.id)
+
+
+async def test_comment_visible_to_other_participants_and_resolvable(use_cases, alice):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.COMMENTER
+    )
+
+    comment = await use_cases.sharing.add_comment(
+        BOB, document.id, block_id="b1", body="typo here"
+    )
+    seen_by_alice = await use_cases.sharing.list_comments(alice, document.id)
+    assert [c.id for c in seen_by_alice] == [comment.id]
+
+    resolved = await use_cases.sharing.resolve_comment(alice, document.id, comment.id)
+    assert resolved.resolved_at is not None
+    assert resolved.resolved_by == alice.user_id
+
+
+async def test_commenter_cannot_resolve_others_comments(use_cases, alice):
+    workspace, document = await setup(use_cases, alice)
+    for user in (BOB, CAROL):
+        await use_cases.sharing.invite_to_workspace(
+            alice, workspace.id, user_id=user.user_id, role=Role.COMMENTER
+        )
+    comment = await use_cases.sharing.add_comment(
+        BOB, document.id, block_id="b1", body="mine"
+    )
+    with pytest.raises(NotAuthorized):  # carol is neither author nor editor
+        await use_cases.sharing.resolve_comment(CAROL, document.id, comment.id)
+    # The author may resolve their own.
+    await use_cases.sharing.resolve_comment(BOB, document.id, comment.id)
+
+
+def test_share_flow_over_http(api):
+    def auth(token):
+        return {"Authorization": f"Bearer {token}"}
+
+    workspace = api.post(
+        "/api/v1/workspaces", json={"name": "WS"}, headers=auth("alice-token")
+    ).json()
+    document = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Doc"},
+        headers=auth("alice-token"),
+    ).json()
+
+    link = api.post(
+        f"/api/v1/documents/{document['id']}/share-links",
+        json={"permission": "view"},
+        headers=auth("alice-token"),
+    ).json()
+
+    # Mallory (another tenant) opens the link and gains view access.
+    opened = api.post(
+        f"/api/v1/share-links/{link['id']}/open", headers=auth("mallory-token")
+    )
+    assert opened.status_code == 200
+    assert opened.json()["document_id"] == document["id"]
+
+    # Revoke, then subsequent opens are denied.
+    revoked = api.delete(
+        f"/api/v1/documents/{document['id']}/share-links/{link['id']}",
+        headers=auth("alice-token"),
+    ).json()
+    assert revoked["revoked"] is True
+    denied = api.post(
+        f"/api/v1/share-links/{link['id']}/open", headers=auth("mallory-token")
+    )
+    assert denied.status_code == 403

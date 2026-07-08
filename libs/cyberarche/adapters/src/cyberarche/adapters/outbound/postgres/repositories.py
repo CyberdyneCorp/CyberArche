@@ -133,6 +133,12 @@ class PostgresDocumentRepository:
         )
         return _document_from_row(row) if row else None
 
+    async def get_any_tenant(self, document_id: DocumentId) -> Document | None:
+        row = await self._pool.fetchrow(
+            "SELECT * FROM documents WHERE id = $1", document_id
+        )
+        return _document_from_row(row) if row else None
+
     async def children(
         self,
         tenant_id: TenantId,

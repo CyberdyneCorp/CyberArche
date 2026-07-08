@@ -16,11 +16,13 @@ from cyberarche.application.testing.fakes import (
     FakeMcpClient,
     FixedClock,
     InMemoryAgentRunRepository,
+    InMemoryCommentRepository,
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
     InMemoryIngestionRepository,
     InMemoryMembershipRepository,
     InMemoryRag,
+    InMemoryShareLinkRepository,
     InMemorySnapshotRepository,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
@@ -35,6 +37,7 @@ from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.domain.ids import TenantId, UserId
@@ -109,6 +112,15 @@ def use_cases(
     connectors = ConnectorUseCases(
         connector_repo, mcp_client, secret_box, access, clock, ids
     )
+    sharing = SharingUseCases(
+        documents,
+        memberships,
+        InMemoryShareLinkRepository(),
+        InMemoryCommentRepository(),
+        access,
+        clock,
+        ids,
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
@@ -130,6 +142,7 @@ def use_cases(
             model_name="scripted-test-model",
             connectors=connectors,
         ),
+        sharing=sharing,
     )
 
 

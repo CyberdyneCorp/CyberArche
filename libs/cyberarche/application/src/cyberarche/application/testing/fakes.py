@@ -15,7 +15,8 @@ from cyberarche.application.ports.identity import Claims
 from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
 from cyberarche.application.ports.mcp import ExternalTool
 from cyberarche.domain.connectors import Connector
-from cyberarche.domain.ids import ConnectorId
+from cyberarche.domain.ids import ConnectorId, ShareLinkId
+from cyberarche.domain.sharing import Comment, ShareLink
 from cyberarche.application.ports.rag import (
     IngestionRecord,
     RagQueryMode,
@@ -82,6 +83,9 @@ class InMemoryDocumentRepository:
         if document is None or document.tenant_id != tenant_id:
             return None
         return document
+
+    async def get_any_tenant(self, document_id: DocumentId) -> Document | None:
+        return self._items.get(document_id)
 
     async def children(
         self,
@@ -414,6 +418,46 @@ class InMemoryConnectorRepository:
         if connector is not None and connector.tenant_id == tenant_id:
             del self._items[connector_id]
             self._secrets.pop(connector_id, None)
+
+
+class InMemoryShareLinkRepository:
+    def __init__(self) -> None:
+        self._items: dict[ShareLinkId, ShareLink] = {}
+
+    async def add(self, link: ShareLink) -> None:
+        self._items[link.id] = link
+
+    async def get(self, link_id: ShareLinkId) -> ShareLink | None:
+        return self._items.get(link_id)
+
+    async def list_for_document(self, document_id: DocumentId) -> list[ShareLink]:
+        return [l for l in self._items.values() if l.document_id == document_id]
+
+    async def update(self, link: ShareLink) -> None:
+        self._items[link.id] = link
+
+
+class InMemoryCommentRepository:
+    def __init__(self) -> None:
+        self._items: dict[str, Comment] = {}
+
+    async def add(self, comment: Comment) -> None:
+        self._items[comment.id] = comment
+
+    async def get(self, document_id: DocumentId, comment_id: str) -> Comment | None:
+        comment = self._items.get(comment_id)
+        if comment is None or comment.document_id != document_id:
+            return None
+        return comment
+
+    async def list_for_document(self, document_id: DocumentId) -> list[Comment]:
+        return sorted(
+            (c for c in self._items.values() if c.document_id == document_id),
+            key=lambda c: c.created_at,
+        )
+
+    async def update(self, comment: Comment) -> None:
+        self._items[comment.id] = comment
 
 
 class StaticTokenPort:

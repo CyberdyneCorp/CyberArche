@@ -35,12 +35,14 @@ from cyberarche.application.ports.mcp import (
     SecretBoxPort,
 )
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
+from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRepository
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
@@ -101,6 +103,8 @@ class Container:
     connectors: ConnectorRepository
     mcp_client: McpClientPort
     secret_box: SecretBoxPort
+    share_links: ShareLinkRepository
+    comments: CommentRepository
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -123,6 +127,8 @@ def _build_use_cases(
     connectors: ConnectorRepository,
     mcp_client: McpClientPort,
     secret_box: SecretBoxPort,
+    share_links: ShareLinkRepository,
+    comments: CommentRepository,
     model_name: str,
     clock,
     ids,
@@ -153,6 +159,9 @@ def _build_use_cases(
             ids,
             model_name=model_name,
             connectors=connector_use_cases,
+        ),
+        sharing=SharingUseCases(
+            documents, memberships, share_links, comments, access, clock, ids
         ),
     )
 
@@ -235,16 +244,27 @@ async def build_container(
             PostgresConnectorRepository,
         )
 
+        from cyberarche.adapters.outbound.postgres.sharing import (
+            PostgresCommentRepository,
+            PostgresShareLinkRepository,
+        )
+
         agent_runs = PostgresAgentRunRepository(pool)
         connectors = PostgresConnectorRepository(pool)
+        share_links = PostgresShareLinkRepository(pool)
+        comments = PostgresCommentRepository(pool)
     else:
         from cyberarche.application.testing.fakes import (
             InMemoryAgentRunRepository,
+            InMemoryCommentRepository,
             InMemoryConnectorRepository,
+            InMemoryShareLinkRepository,
         )
 
         agent_runs = InMemoryAgentRunRepository()
         connectors = InMemoryConnectorRepository()
+        share_links = InMemoryShareLinkRepository()
+        comments = InMemoryCommentRepository()
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -336,6 +356,8 @@ async def build_container(
         connectors=connectors,
         mcp_client=mcp_client,
         secret_box=secret_box,
+        share_links=share_links,
+        comments=comments,
         use_cases=_build_use_cases(
             workspaces,
             documents,
@@ -350,6 +372,8 @@ async def build_container(
             connectors,
             mcp_client,
             secret_box,
+            share_links,
+            comments,
             config.llm_model,
             clock,
             ids,

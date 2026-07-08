@@ -12,6 +12,7 @@ from cyberarche.adapters.inbound.http.routers.knowledge import (
     router as knowledge_router,
     webhook_router,
 )
+from cyberarche.adapters.inbound.http.routers.sharing import router as sharing_router
 from cyberarche.adapters.inbound.http.routers.workspaces import router as workspaces_router
 
 all_routers = [
@@ -22,4 +23,5 @@ all_routers = [
     webhook_router,
     agent_router,
     connectors_router,
+    sharing_router,
 ]
