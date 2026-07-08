@@ -1,0 +1,69 @@
+# document-model Specification
+
+## Purpose
+
+Workspaces, the document tree, the typed block model, and version snapshots — the structural core every other capability builds on.
+
+## Requirements
+
+### Requirement: Workspace container
+The system SHALL organize documents inside workspaces, and each workspace SHALL
+belong to exactly one tenant (organization) derived from the caller's verified
+token claims.
+
+#### Scenario: Create a workspace
+- **WHEN** an authenticated user creates a workspace with a name
+- **THEN** the system SHALL create the workspace owned by the user's tenant
+- **AND** the creator SHALL be granted the `owner` role on the workspace
+
+#### Scenario: Workspaces are tenant-isolated
+- **WHEN** a user lists workspaces
+- **THEN** the system SHALL return only workspaces belonging to the caller's tenant
+
+### Requirement: Document as a tree of documents
+The system SHALL model a document with a stable `document_id`, a title, an owner,
+a parent (workspace or another document), and an ordered list of child documents,
+so documents form a navigable hierarchy.
+
+#### Scenario: Nest a document under a parent
+- **WHEN** a user creates a document with a parent document
+- **THEN** the child SHALL appear in the parent's ordered children
+- **AND** the child SHALL inherit the parent's workspace
+
+#### Scenario: Reorder children
+- **WHEN** a user moves a child document to a new position among its siblings
+- **THEN** the system SHALL persist the new ordering
+
+### Requirement: Block tree content
+A document's body SHALL be an ordered tree of typed blocks. Each block SHALL have
+a stable `block_id`, a `type`, type-specific `data`, and an ordered list of child
+blocks. The canonical block content SHALL be stored as a CRDT document.
+
+#### Scenario: Supported block types
+- **WHEN** a block is created
+- **THEN** its `type` SHALL be one of: `paragraph`, `heading`, `bulleted_list`,
+  `numbered_list`, `todo`, `callout`, `quote`, `divider`, `code`, `table`,
+  `latex`, `mermaid`, `whiteboard`, `image`, `file`, `embed`, `ai_block`
+
+#### Scenario: Reject unknown block type
+- **WHEN** a block is created with a `type` outside the supported set
+- **THEN** the system SHALL reject it with a validation error
+
+### Requirement: Version snapshots
+The system SHALL periodically persist an immutable snapshot of a document's
+content (a materialized JSON of the block tree plus the CRDT state vector) and
+SHALL allow listing and restoring snapshots.
+
+#### Scenario: Restore a snapshot
+- **WHEN** an editor restores a document to a prior snapshot
+- **THEN** the system SHALL replace the current content with the snapshot content
+- **AND** SHALL record a new snapshot representing the restore
+
+### Requirement: Soft delete and trash
+Deleting a document SHALL move it to a trash state rather than erasing it, and
+trashed documents SHALL be restorable until permanently purged.
+
+#### Scenario: Trash then restore
+- **WHEN** a user deletes a document
+- **THEN** the document SHALL be marked trashed and hidden from normal listings
+- **AND** the user SHALL be able to restore it to its previous parent
