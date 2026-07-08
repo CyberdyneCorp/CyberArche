@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from cyberarche.domain.errors import ValidationFailed
-from cyberarche.domain.ids import DocumentId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import DocumentId, TeamspaceId, TenantId, UserId, WorkspaceId
 
 MAX_TITLE_LENGTH = 500
 
@@ -31,6 +31,8 @@ class Document:
     trashed: bool = False
     # Parent at the moment of trashing, so restore can put it back.
     trashed_from_parent_id: DocumentId | None = None
+    # Optional teamspace of the same workspace (teamspaces spec).
+    teamspace_id: TeamspaceId | None = None
 
     @staticmethod
     def create(
@@ -43,6 +45,7 @@ class Document:
         position: int,
         created_by: UserId,
         created_at: datetime,
+        teamspace_id: TeamspaceId | None = None,
     ) -> "Document":
         return Document(
             id=id,
@@ -54,6 +57,7 @@ class Document:
             created_by=created_by,
             created_at=created_at,
             updated_at=created_at,
+            teamspace_id=teamspace_id,
         )
 
     def retitle(self, title: str, *, now: datetime) -> "Document":

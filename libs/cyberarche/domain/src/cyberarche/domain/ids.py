@@ -7,6 +7,7 @@ from typing import NewType
 TenantId = NewType("TenantId", str)
 UserId = NewType("UserId", str)
 WorkspaceId = NewType("WorkspaceId", str)
+TeamspaceId = NewType("TeamspaceId", str)
 DocumentId = NewType("DocumentId", str)
 BlockId = NewType("BlockId", str)
 SnapshotId = NewType("SnapshotId", str)

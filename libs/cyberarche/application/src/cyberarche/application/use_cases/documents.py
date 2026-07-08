@@ -9,10 +9,11 @@ from __future__ import annotations
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.repositories import DocumentRepository
+from cyberarche.application.ports.teamspaces import TeamspaceRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound, ValidationFailed
-from cyberarche.domain.ids import DocumentId, WorkspaceId
+from cyberarche.domain.ids import DocumentId, TeamspaceId, WorkspaceId
 from cyberarche.domain.memberships import Role
 
 
@@ -23,11 +24,13 @@ class DocumentUseCases:
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
+        teamspaces: TeamspaceRepository | None = None,
     ) -> None:
         self._documents = documents
         self._access = access
         self._clock = clock
         self._ids = ids
+        self._teamspaces = teamspaces
 
     async def create(
         self,
@@ -36,8 +39,17 @@ class DocumentUseCases:
         workspace_id: WorkspaceId,
         title: str,
         parent_id: DocumentId | None = None,
+        teamspace_id: TeamspaceId | None = None,
     ) -> Document:
-        await self._access.require_workspace(caller, workspace_id, Role.EDITOR)
+        """Create a document, optionally inside a teamspace of the workspace.
+
+        A teamspace member without a workspace role may create in it, so the
+        permission check falls back to the teamspace when one is given.
+        """
+        if teamspace_id is None:
+            await self._access.require_workspace(caller, workspace_id, Role.EDITOR)
+        else:
+            await self._require_teamspace_of(caller, workspace_id, teamspace_id)
         if parent_id is not None:
             parent = await self._get_or_raise(caller, parent_id)
             if parent.workspace_id != workspace_id:
@@ -54,9 +66,25 @@ class DocumentUseCases:
             position=len(siblings),
             created_by=caller.user_id,
             created_at=self._clock.now(),
+            teamspace_id=teamspace_id,
         )
         await self._documents.add(document)
         return document
+
+    async def _require_teamspace_of(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        teamspace_id: TeamspaceId,
+    ) -> None:
+        if self._teamspaces is None:
+            raise ValidationFailed("teamspaces are not configured")
+        teamspace = await self._teamspaces.get(caller.tenant_id, teamspace_id)
+        if teamspace is None:
+            raise NotFound("teamspace not found")
+        if teamspace.workspace_id != workspace_id:
+            raise ValidationFailed("teamspace belongs to another workspace")
+        await self._access.require_teamspace(caller, teamspace, Role.EDITOR)
 
     async def get(self, caller: CallerContext, document_id: DocumentId) -> Document:
         document = await self._get_or_raise(caller, document_id)

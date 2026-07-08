@@ -21,11 +21,13 @@ from cyberarche.application.testing.fakes import (
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
+    InMemoryFavoriteRepository,
     InMemoryIngestionRepository,
     InMemoryMembershipRepository,
     InMemoryRag,
     InMemoryShareLinkRepository,
     InMemorySnapshotRepository,
+    InMemoryTeamspaceRepository,
     InMemoryTaskQueue,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
@@ -42,6 +44,10 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.teamspaces import (
+    FavoriteUseCases,
+    TeamspaceUseCases,
+)
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.domain.ids import TenantId, UserId
@@ -108,6 +114,16 @@ def snapshots_repo() -> InMemorySnapshotRepository:
 
 
 @pytest.fixture
+def teamspace_repo() -> InMemoryTeamspaceRepository:
+    return InMemoryTeamspaceRepository()
+
+
+@pytest.fixture
+def favorite_repo() -> InMemoryFavoriteRepository:
+    return InMemoryFavoriteRepository()
+
+
+@pytest.fixture
 def use_cases(
     clock: FixedClock,
     update_log: InMemoryUpdateLog,
@@ -121,13 +137,15 @@ def use_cases(
     blobs: InMemoryBlobStorage,
     task_queue: InMemoryTaskQueue,
     snapshots_repo: InMemorySnapshotRepository,
+    teamspace_repo: InMemoryTeamspaceRepository,
+    favorite_repo: InMemoryFavoriteRepository,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
     snapshots = snapshots_repo
     ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
-    access = AccessControl(memberships)
+    access = AccessControl(memberships, teamspace_repo)
     engine = PycrdtEngine()
     realtime = RealtimeUseCases(
         documents, update_log, engine, access, snapshots, clock, ids
@@ -155,7 +173,7 @@ def use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids),
+        documents=DocumentUseCases(documents, access, clock, ids, teamspace_repo),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=realtime,
         knowledge=knowledge,
@@ -176,6 +194,8 @@ def use_cases(
         ),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
+        teamspaces=TeamspaceUseCases(teamspace_repo, documents, access, clock, ids),
+        favorites=FavoriteUseCases(favorite_repo, documents, access),
     )
 
 

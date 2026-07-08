@@ -22,6 +22,7 @@ class CreateDocumentRequest(BaseModel):
     workspace_id: str
     title: str = ""
     parent_id: str | None = None
+    teamspace_id: str | None = None
 
 
 class RetitleDocumentRequest(BaseModel):
@@ -69,6 +70,7 @@ class DocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     trashed: bool
+    teamspace_id: str | None = None
 
     @staticmethod
     def from_domain(document: Document) -> "DocumentResponse":
@@ -82,6 +84,7 @@ class DocumentResponse(BaseModel):
             created_at=document.created_at,
             updated_at=document.updated_at,
             trashed=document.trashed,
+            teamspace_id=document.teamspace_id,
         )
 
 

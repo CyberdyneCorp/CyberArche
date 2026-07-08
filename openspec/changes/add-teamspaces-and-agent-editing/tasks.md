@@ -7,12 +7,12 @@
 
 ## 2. Teamspaces + favourites (backend)
 
-- [ ] 2.1 Domain: `Teamspace`, `TeamspaceMembership`, `Favorite`; `Document.teamspace_id`
-- [ ] 2.2 Ports + in-memory fakes + Postgres adapters + `0006_teamspaces_favorites` migration
-- [ ] 2.3 `AccessControl`: effective role = strongest(workspace, teamspace), document grant overrides
-- [ ] 2.4 `TeamspaceUseCases` (create/list/members/documents) and `FavoriteUseCases` (add/remove/list)
-- [ ] 2.5 HTTP routers: `/workspaces/{id}/teamspaces`, `/teamspaces/{id}/members`, `/favorites`
-- [ ] 2.6 Tests: creation, membership grants access, non-member denied, cross-workspace rejected, favourites are private; repository contract suite
+- [x] 2.1 Domain: `Teamspace`, `TeamspaceMembership`, `Favorite`; `Document.teamspace_id`
+- [x] 2.2 Ports + in-memory fakes + Postgres adapters + `0006_teamspaces_favorites` migration
+- [x] 2.3 `AccessControl`: effective role = strongest(workspace, teamspace), document grant overrides
+- [x] 2.4 `TeamspaceUseCases` (create/list/members/documents) and `FavoriteUseCases` (add/remove/list)
+- [x] 2.5 HTTP routers: `/workspaces/{id}/teamspaces`, `/teamspaces/{id}/members`, `/favorites`
+- [x] 2.6 Tests: creation, membership grants access, non-member denied, cross-workspace rejected, favourites are private; repository contract suite
 
 ## 3. Web
 

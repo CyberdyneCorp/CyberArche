@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Protocol
 
 from cyberarche.domain.documents import Document
-from cyberarche.domain.ids import DocumentId, SnapshotId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    DocumentId,
+    SnapshotId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 from cyberarche.domain.memberships import DocumentGrant, WorkspaceMembership
 from cyberarche.domain.snapshots import Snapshot
 from cyberarche.domain.workspaces import Workspace
@@ -45,6 +52,12 @@ class DocumentRepository(Protocol):
     async def list_trashed(
         self, tenant_id: TenantId, workspace_id: WorkspaceId
     ) -> list[Document]: ...
+
+    async def list_for_teamspace(
+        self, tenant_id: TenantId, teamspace_id: TeamspaceId
+    ) -> list[Document]:
+        """Untrashed documents belonging to a teamspace, in tree order."""
+        ...
 
     async def update(self, document: Document) -> None: ...
 

@@ -11,6 +11,10 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.teamspaces import (
+    FavoriteUseCases,
+    TeamspaceUseCases,
+)
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 
@@ -28,3 +32,5 @@ class UseCases:
     agent: AgentUseCases
     sharing: SharingUseCases
     api_keys: ApiKeyUseCases
+    teamspaces: TeamspaceUseCases
+    favorites: FavoriteUseCases

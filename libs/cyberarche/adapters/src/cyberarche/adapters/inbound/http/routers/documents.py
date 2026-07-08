@@ -14,7 +14,7 @@ from cyberarche.adapters.inbound.http.schemas import (
     SnapshotDetailResponse,
     SnapshotResponse,
 )
-from cyberarche.domain.ids import DocumentId, SnapshotId, WorkspaceId
+from cyberarche.domain.ids import DocumentId, SnapshotId, TeamspaceId, WorkspaceId
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
 
@@ -28,6 +28,7 @@ async def create_document(
         workspace_id=WorkspaceId(body.workspace_id),
         title=body.title,
         parent_id=DocumentId(body.parent_id) if body.parent_id else None,
+        teamspace_id=TeamspaceId(body.teamspace_id) if body.teamspace_id else None,
     )
     return DocumentResponse.from_domain(document)
 

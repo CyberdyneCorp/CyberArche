@@ -41,6 +41,10 @@ from cyberarche.application.ports.queue import TaskQueuePort
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRepository
 from cyberarche.application.ports.storage import BlobStoragePort
+from cyberarche.application.ports.teamspaces import (
+    FavoriteRepository,
+    TeamspaceRepository,
+)
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.api_keys import (
@@ -52,6 +56,10 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.teamspaces import (
+    FavoriteUseCases,
+    TeamspaceUseCases,
+)
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
@@ -121,6 +129,8 @@ class Container:
     secret_box: SecretBoxPort
     share_links: ShareLinkRepository
     comments: CommentRepository
+    teamspaces: TeamspaceRepository
+    favorites: FavoriteRepository
     blobs: BlobStoragePort
     queue: TaskQueuePort
     peer_bus: PeerBusPort
@@ -148,6 +158,8 @@ def _build_use_cases(
     secret_box: SecretBoxPort,
     share_links: ShareLinkRepository,
     comments: CommentRepository,
+    teamspaces: TeamspaceRepository,
+    favorites: FavoriteRepository,
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
     peer_bus: PeerBusPort,
@@ -156,7 +168,7 @@ def _build_use_cases(
     clock,
     ids,
 ) -> UseCases:
-    access = AccessControl(memberships)
+    access = AccessControl(memberships, teamspaces)
     realtime = RealtimeUseCases(
         documents, update_log, crdt_engine, access, snapshots, clock, ids, peer_bus
     )
@@ -168,7 +180,7 @@ def _build_use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids),
+        documents=DocumentUseCases(documents, access, clock, ids, teamspaces),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=realtime,
         knowledge=knowledge,
@@ -191,6 +203,8 @@ def _build_use_cases(
             documents, memberships, share_links, comments, access, clock, ids
         ),
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
+        teamspaces=TeamspaceUseCases(teamspaces, documents, access, clock, ids),
+        favorites=FavoriteUseCases(favorites, documents, access),
     )
 
 
@@ -224,6 +238,8 @@ class _Repositories:
     share_links: ShareLinkRepository
     comments: CommentRepository
     api_keys: ApiKeyRepository
+    teamspaces: TeamspaceRepository
+    favorites: FavoriteRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -251,6 +267,10 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         PostgresCommentRepository,
         PostgresShareLinkRepository,
     )
+    from cyberarche.adapters.outbound.postgres.teamspaces import (
+        PostgresFavoriteRepository,
+        PostgresTeamspaceRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -267,6 +287,8 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         share_links=PostgresShareLinkRepository(pool),
         comments=PostgresCommentRepository(pool),
         api_keys=PostgresApiKeyRepository(pool),
+        teamspaces=PostgresTeamspaceRepository(pool),
+        favorites=PostgresFavoriteRepository(pool),
     )
 
 
@@ -285,6 +307,8 @@ def _memory_repositories() -> _Repositories:
         share_links=fakes.InMemoryShareLinkRepository(),
         comments=fakes.InMemoryCommentRepository(),
         api_keys=fakes.InMemoryApiKeyRepository(),
+        teamspaces=fakes.InMemoryTeamspaceRepository(),
+        favorites=fakes.InMemoryFavoriteRepository(),
     )
 
 
@@ -484,6 +508,8 @@ async def build_container(
         secret_box=secret_box,
         share_links=share_links,
         comments=comments,
+        teamspaces=repos.teamspaces,
+        favorites=repos.favorites,
         blobs=blobs,
         queue=queue,
         peer_bus=peer_bus,
@@ -503,6 +529,8 @@ async def build_container(
             secret_box,
             share_links,
             comments,
+            repos.teamspaces,
+            repos.favorites,
             blobs,
             queue,
             peer_bus,

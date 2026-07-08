@@ -30,9 +30,17 @@ from cyberarche.application.ports.rag import (
 )
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthenticated, NotFound
-from cyberarche.domain.ids import DocumentId, SnapshotId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    DocumentId,
+    SnapshotId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 from cyberarche.domain.memberships import DocumentGrant, WorkspaceMembership
 from cyberarche.domain.snapshots import Snapshot
+from cyberarche.domain.teamspaces import Teamspace, TeamspaceMembership
 from cyberarche.domain.workspaces import Workspace
 
 
@@ -125,6 +133,18 @@ class InMemoryDocumentRepository:
     async def update_many(self, documents: list[Document]) -> None:
         for document in documents:
             self._items[document.id] = document
+
+    async def list_for_teamspace(
+        self, tenant_id: TenantId, teamspace_id: TeamspaceId
+    ) -> list[Document]:
+        matches = [
+            d
+            for d in self._items.values()
+            if d.tenant_id == tenant_id
+            and d.teamspace_id == teamspace_id
+            and not d.trashed
+        ]
+        return sorted(matches, key=lambda d: d.position)
 
     async def search_by_title(
         self, tenant_id: TenantId, query: str, *, limit: int = 20
@@ -564,6 +584,73 @@ class InMemoryApiKeyRepository:
 
     async def update(self, key: ApiKey) -> None:
         self._items[key.id] = key
+
+
+class InMemoryTeamspaceRepository:
+    def __init__(self) -> None:
+        self._items: dict[TeamspaceId, Teamspace] = {}
+        self._members: dict[tuple[TeamspaceId, UserId], TeamspaceMembership] = {}
+
+    async def add(self, teamspace: Teamspace) -> None:
+        self._items[teamspace.id] = teamspace
+
+    async def get(
+        self, tenant_id: TenantId, teamspace_id: TeamspaceId
+    ) -> Teamspace | None:
+        teamspace = self._items.get(teamspace_id)
+        if teamspace is None or teamspace.tenant_id != tenant_id:
+            return None
+        return teamspace
+
+    async def list_for_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Teamspace]:
+        return [
+            t
+            for t in self._items.values()
+            if t.tenant_id == tenant_id and t.workspace_id == workspace_id
+        ]
+
+    async def add_member(self, membership: TeamspaceMembership) -> None:
+        self._members[(membership.teamspace_id, membership.user_id)] = membership
+
+    async def remove_member(self, teamspace_id: TeamspaceId, user_id: UserId) -> None:
+        self._members.pop((teamspace_id, user_id), None)
+
+    async def member_role(
+        self, teamspace_id: TeamspaceId, user_id: UserId
+    ) -> TeamspaceMembership | None:
+        return self._members.get((teamspace_id, user_id))
+
+    async def members(self, teamspace_id: TeamspaceId) -> list[TeamspaceMembership]:
+        return [m for m in self._members.values() if m.teamspace_id == teamspace_id]
+
+    async def teamspaces_for_user(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId, user_id: UserId
+    ) -> list[Teamspace]:
+        mine = {m.teamspace_id for m in self._members.values() if m.user_id == user_id}
+        return [
+            t
+            for t in await self.list_for_workspace(tenant_id, workspace_id)
+            if t.id in mine
+        ]
+
+
+class InMemoryFavoriteRepository:
+    def __init__(self) -> None:
+        self._items: set[tuple[UserId, DocumentId]] = set()
+
+    async def add(self, user_id: UserId, document_id: DocumentId) -> None:
+        self._items.add((user_id, document_id))
+
+    async def remove(self, user_id: UserId, document_id: DocumentId) -> None:
+        self._items.discard((user_id, document_id))
+
+    async def list_for_user(self, user_id: UserId) -> list[DocumentId]:
+        return [d for (u, d) in self._items if u == user_id]
+
+    async def is_favorite(self, user_id: UserId, document_id: DocumentId) -> bool:
+        return (user_id, document_id) in self._items
 
 
 class StaticTokenPort:

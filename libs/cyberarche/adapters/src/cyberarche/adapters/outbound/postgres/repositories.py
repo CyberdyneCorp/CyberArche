@@ -15,6 +15,7 @@ from cyberarche.domain.documents import Document
 from cyberarche.domain.ids import (
     DocumentId,
     SnapshotId,
+    TeamspaceId,
     TenantId,
     UserId,
     WorkspaceId,
@@ -51,6 +52,9 @@ def _document_from_row(row: asyncpg.Record) -> Document:
             DocumentId(row["trashed_from_parent_id"])
             if row["trashed_from_parent_id"]
             else None
+        ),
+        teamspace_id=(
+            TeamspaceId(row["teamspace_id"]) if row["teamspace_id"] else None
         ),
     )
 
@@ -119,8 +123,9 @@ class PostgresDocumentRepository:
             """
             INSERT INTO documents
                 (id, workspace_id, tenant_id, title, parent_id, position,
-                 created_by, created_at, updated_at, trashed, trashed_from_parent_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 created_by, created_at, updated_at, trashed,
+                 trashed_from_parent_id, teamspace_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             """,
             *_document_params(document),
         )
@@ -176,6 +181,20 @@ class PostgresDocumentRepository:
         )
         return [_document_from_row(r) for r in rows]
 
+    async def list_for_teamspace(
+        self, tenant_id: TenantId, teamspace_id: TeamspaceId
+    ) -> list[Document]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM documents
+            WHERE tenant_id = $1 AND teamspace_id = $2 AND trashed = FALSE
+            ORDER BY position
+            """,
+            tenant_id,
+            teamspace_id,
+        )
+        return [_document_from_row(r) for r in rows]
+
     async def update(self, document: Document) -> None:
         await self._pool.execute(_UPDATE_SQL, *_document_update_params(document))
 
@@ -210,7 +229,7 @@ class PostgresDocumentRepository:
 _UPDATE_SQL = """
     UPDATE documents SET
         title = $2, parent_id = $3, position = $4, updated_at = $5,
-        trashed = $6, trashed_from_parent_id = $7
+        trashed = $6, trashed_from_parent_id = $7, teamspace_id = $8
     WHERE id = $1
 """
 
@@ -224,6 +243,7 @@ def _document_update_params(document: Document) -> tuple[Any, ...]:
         document.updated_at,
         document.trashed,
         document.trashed_from_parent_id,
+        document.teamspace_id,
     )
 
 
@@ -240,6 +260,7 @@ def _document_params(document: Document) -> tuple[Any, ...]:
         document.updated_at,
         document.trashed,
         document.trashed_from_parent_id,
+        document.teamspace_id,
     )
 
 

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 
 from cyberarche.domain.documents import Document
-from cyberarche.domain.ids import DocumentId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import DocumentId, TeamspaceId, TenantId, UserId, WorkspaceId
 from cyberarche.domain.workspaces import Workspace
 
 BACKENDS = ["memory"] + (["postgres"] if os.environ.get("TEST_DATABASE_URL") else [])
@@ -35,6 +35,8 @@ async def adapters(request):
             "blobs": fakes.InMemoryBlobStorage(),
             "queue": fakes.InMemoryTaskQueue(),
             "api_keys": fakes.InMemoryApiKeyRepository(),
+            "teamspaces": fakes.InMemoryTeamspaceRepository(),
+            "favorites": fakes.InMemoryFavoriteRepository(),
         }
         return
     # postgres: real adapters over TEST_DATABASE_URL (integration runs)
@@ -45,6 +47,10 @@ async def adapters(request):
         PostgresWorkspaceRepository,
     )
     from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
+    from cyberarche.adapters.outbound.postgres.teamspaces import (
+        PostgresFavoriteRepository,
+        PostgresTeamspaceRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
     from cyberarche.application.testing import fakes
 
@@ -54,7 +60,8 @@ async def adapters(request):
         await pool.execute(
             "TRUNCATE workspaces, documents, snapshots, crdt_updates, "
             "workspace_memberships, document_grants, share_links, agent_runs, "
-            "mcp_connectors, ingestion_tasks, comments, api_keys CASCADE"
+            "mcp_connectors, ingestion_tasks, comments, api_keys, "
+            "teamspaces, teamspace_memberships, favorites CASCADE"
         )
         yield {
             "workspaces": PostgresWorkspaceRepository(pool),
@@ -63,6 +70,8 @@ async def adapters(request):
             "blobs": fakes.InMemoryBlobStorage(),
             "queue": fakes.InMemoryTaskQueue(),
             "api_keys": PostgresApiKeyRepository(pool),
+            "teamspaces": PostgresTeamspaceRepository(pool),
+            "favorites": PostgresFavoriteRepository(pool),
         }
     finally:
         await pool.close()
@@ -209,3 +218,75 @@ async def test_api_key_repository_contract(adapters):
     await repo.update(key.revoke(NOW).touched(NOW))
     stored = await repo.by_hash("hash-1")
     assert stored.revoked_at == NOW and stored.last_used_at == NOW
+
+
+async def test_teamspace_repository_contract(adapters):
+    from cyberarche.domain.memberships import Role
+    from cyberarche.domain.teamspaces import Teamspace, TeamspaceMembership
+
+    ws_repo, repo = adapters["workspaces"], adapters["teamspaces"]
+    await ws_repo.add(workspace())
+    teamspace = Teamspace(
+        id=TeamspaceId("ts-1"), workspace_id=WorkspaceId("ws-1"),
+        tenant_id=TenantId("acme"), name="Tessera", icon="T",
+        created_by=UserId("alice"), created_at=NOW,
+    )
+    await repo.add(teamspace)
+
+    assert (await repo.get(TenantId("acme"), TeamspaceId("ts-1"))).name == "Tessera"
+    assert await repo.get(TenantId("globex"), TeamspaceId("ts-1")) is None
+    assert [t.id for t in await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1"))] == ["ts-1"]
+
+    await repo.add_member(TeamspaceMembership(
+        teamspace_id=TeamspaceId("ts-1"), user_id=UserId("bob"),
+        role=Role.EDITOR, granted_at=NOW))
+    assert (await repo.member_role(TeamspaceId("ts-1"), UserId("bob"))).role is Role.EDITOR
+    assert await repo.member_role(TeamspaceId("ts-1"), UserId("carol")) is None
+    assert [m.user_id for m in await repo.members(TeamspaceId("ts-1"))] == ["bob"]
+    mine = await repo.teamspaces_for_user(TenantId("acme"), WorkspaceId("ws-1"), UserId("bob"))
+    assert [t.id for t in mine] == ["ts-1"]
+
+    await repo.remove_member(TeamspaceId("ts-1"), UserId("bob"))
+    assert await repo.member_role(TeamspaceId("ts-1"), UserId("bob")) is None
+
+
+async def test_document_teamspace_listing_contract(adapters):
+    ws_repo, doc_repo, ts_repo = adapters["workspaces"], adapters["documents"], adapters["teamspaces"]
+    from cyberarche.domain.teamspaces import Teamspace
+
+    await ws_repo.add(workspace())
+    await ts_repo.add(Teamspace(
+        id=TeamspaceId("ts-1"), workspace_id=WorkspaceId("ws-1"),
+        tenant_id=TenantId("acme"), name="T", icon="T",
+        created_by=UserId("alice"), created_at=NOW))
+    inside = document("d-1")
+    from dataclasses import replace
+    await doc_repo.add(replace(inside, teamspace_id=TeamspaceId("ts-1")))
+    await doc_repo.add(document("d-2"))  # workspace-level
+
+    listed = await doc_repo.list_for_teamspace(TenantId("acme"), TeamspaceId("ts-1"))
+    assert [d.id for d in listed] == ["d-1"]
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d-1"))).teamspace_id == "ts-1"
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d-2"))).teamspace_id is None
+
+    # update() must persist teamspace_id too (moving a document into a teamspace).
+    moved = replace(await doc_repo.get(TenantId("acme"), DocumentId("d-2")),
+                    teamspace_id=TeamspaceId("ts-1"))
+    await doc_repo.update(moved)
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d-2"))).teamspace_id == "ts-1"
+    assert len(await doc_repo.list_for_teamspace(TenantId("acme"), TeamspaceId("ts-1"))) == 2
+
+
+async def test_favorite_repository_contract(adapters):
+    ws_repo, doc_repo, repo = adapters["workspaces"], adapters["documents"], adapters["favorites"]
+    await ws_repo.add(workspace())
+    await doc_repo.add(document("d-1"))
+
+    await repo.add(UserId("alice"), DocumentId("d-1"))
+    await repo.add(UserId("alice"), DocumentId("d-1"))  # idempotent
+    assert await repo.list_for_user(UserId("alice")) == ["d-1"]
+    assert await repo.is_favorite(UserId("alice"), DocumentId("d-1"))
+    assert await repo.list_for_user(UserId("bob")) == []  # per user
+
+    await repo.remove(UserId("alice"), DocumentId("d-1"))
+    assert await repo.list_for_user(UserId("alice")) == []

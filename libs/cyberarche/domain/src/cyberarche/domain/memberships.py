@@ -51,10 +51,20 @@ class DocumentGrant:
     granted_at: datetime
 
 
+def strongest(*roles: Role | None) -> Role | None:
+    """The most capable of the given roles, ignoring absent ones."""
+    present = [role for role in roles if role is not None]
+    return max(present, key=lambda role: _ROLE_RANK[role]) if present else None
+
+
 def effective_role(
-    workspace_role: Role | None, document_grant: Role | None
+    workspace_role: Role | None,
+    document_grant: Role | None,
+    teamspace_role: Role | None = None,
 ) -> Role | None:
-    """The more specific document grant wins over the inherited workspace role."""
+    """A document-level grant overrides everything (it may deliberately
+    demote); otherwise the user gets the strongest of their inherited roles:
+    workspace membership or membership of the document's teamspace."""
     if document_grant is not None:
         return document_grant
-    return workspace_role
+    return strongest(workspace_role, teamspace_role)
