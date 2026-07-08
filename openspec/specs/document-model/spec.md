@@ -3,9 +3,7 @@
 ## Purpose
 
 Workspaces, the document tree, the typed block model, and version snapshots — the structural core every other capability builds on.
-
 ## Requirements
-
 ### Requirement: Workspace container
 The system SHALL organize documents inside workspaces, and each workspace SHALL
 belong to exactly one tenant (organization) derived from the caller's verified
@@ -67,3 +65,16 @@ trashed documents SHALL be restorable until permanently purged.
 - **WHEN** a user deletes a document
 - **THEN** the document SHALL be marked trashed and hidden from normal listings
 - **AND** the user SHALL be able to restore it to its previous parent
+
+### Requirement: Documents may belong to a teamspace
+A document SHALL optionally reference a teamspace of its own workspace, and the
+system SHALL list a workspace's documents by teamspace.
+
+#### Scenario: Create a document in a teamspace
+- **WHEN** a document is created with a teamspace of the same workspace
+- **THEN** the document SHALL record that teamspace
+
+#### Scenario: Documents without a teamspace remain workspace-level
+- **WHEN** a document is created without a teamspace
+- **THEN** it SHALL appear in the workspace's document tree, not under a teamspace
+
