@@ -203,6 +203,32 @@ class SharingUseCases:
         await self._comments.update(resolved)
         return resolved
 
+    # ---- shared with me -----------------------------------------------------
+
+    async def list_shared_with_me(self, caller: CallerContext) -> list[Document]:
+        """Documents the caller can only reach through a document-level grant.
+
+        Documents already reachable via a workspace or teamspace role are
+        excluded: those are the caller's own, not shared *with* them.
+        """
+        grants = await self._memberships.document_grants_for_user(caller.user_id)
+        shared: list[Document] = []
+        for grant in grants:
+            document = await self._documents.get_any_tenant(grant.document_id)
+            if document is None or document.trashed:
+                continue
+            workspace_role = await self._access.workspace_role(
+                caller, document.workspace_id
+            )
+            teamspace_role = (
+                await self._access.teamspace_role(caller, document.teamspace_id)
+                if document.teamspace_id
+                else None
+            )
+            if workspace_role is None and teamspace_role is None:
+                shared.append(document)
+        return shared
+
     async def _document(
         self, caller: CallerContext, document_id: DocumentId
     ) -> Document:

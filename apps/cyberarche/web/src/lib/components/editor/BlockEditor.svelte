@@ -66,6 +66,13 @@
 						>💬</button
 					>
 				{/if}
+				<button
+					class="gutter-btn danger"
+					title="Delete block"
+					aria-label="Delete block"
+					data-testid="block-delete"
+					onclick={() => editor.remove(block.id)}>🗑</button
+				>
 			</div>
 			<div class="body" class:peered={peer !== null}>
 				{#if peer}
@@ -113,8 +120,9 @@
 		visibility: hidden;
 		align-items: flex-start;
 		padding-top: 5px;
-		margin-left: -78px;
-		width: 74px;
+		/* Fits add / up / down / comments / delete without overflowing. */
+		margin-left: -122px;
+		width: 118px;
 		justify-content: flex-end;
 	}
 	.row:hover .gutter {
@@ -133,6 +141,10 @@
 	.gutter-btn.has-comments {
 		visibility: visible;
 		color: var(--acc);
+	}
+	.gutter-btn.danger:hover {
+		background: var(--aibg);
+		color: var(--rose);
 	}
 	.body {
 		flex: 1;

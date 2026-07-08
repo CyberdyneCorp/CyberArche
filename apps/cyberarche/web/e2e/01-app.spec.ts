@@ -25,9 +25,14 @@ test('sign in, create workspace and documents, organize the tree', async ({ page
 	await page.getByTestId('create-workspace').click();
 	await expect(page.getByTestId('workspace-name')).toHaveText('Arche Labs');
 
-	// Create a document and give it a title.
+	// Create a document and give it a title. Wait for the document to sync
+	// before typing: the title input mounts in the same flush that seeds its
+	// value, and a fill() landing inside that flush is overwritten by the
+	// binding — a race only an automated driver can hit, but it silently
+	// dropped the rename and left the tree showing "Untitled".
 	await page.getByTestId('new-document').click();
 	await page.waitForURL('**/d/**');
+	await expect(page.getByTestId('sync-status')).toHaveText('Synced');
 	await page.getByTestId('doc-title').fill('Retrieval Pipeline RFC');
 	await page.getByTestId('doc-title').press('Enter');
 	await expect(page.getByTestId('tree-doc').first()).toContainText(

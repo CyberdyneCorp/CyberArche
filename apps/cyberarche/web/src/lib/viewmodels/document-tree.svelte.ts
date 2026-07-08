@@ -26,6 +26,13 @@ export function createDocumentTree() {
 	let roots = $state<TreeNode[]>([]);
 	let trash = $state<Document[]>([]);
 
+	/** The in-flight initial listing, if any. `open()` replaces `roots`
+	 * wholesale, so a mutation racing it would be clobbered by a listing that
+	 * predates the mutation — a created document could vanish from the sidebar.
+	 * Mutations await this first. */
+	let loading: Promise<void> | null = null;
+	const settled = () => loading ?? Promise.resolve();
+
 	function findNode(nodes: TreeNode[], id: string): TreeNode | null {
 		for (const item of nodes) {
 			if (item.document.id === id) return item;
@@ -57,8 +64,16 @@ export function createDocumentTree() {
 
 		async open(workspace: string) {
 			workspaceId = workspace;
-			roots = (await listChildren(workspace)).map(node);
-			trash = [];
+			loading = (async () => {
+				const documents = await listChildren(workspace);
+				roots = documents.map(node);
+				trash = [];
+			})();
+			try {
+				await loading;
+			} finally {
+				loading = null;
+			}
 		},
 
 		async toggle(id: string) {
@@ -77,9 +92,18 @@ export function createDocumentTree() {
 			item.childrenLoaded = true;
 		},
 
-		async create(title = '', parentId?: string): Promise<Document> {
+		async create(
+			title = '',
+			parentId?: string,
+			teamspaceId?: string
+		): Promise<Document> {
 			if (!workspaceId) throw new Error('no workspace open');
-			const document = await createDocument(workspaceId, title, parentId);
+			await settled();
+			const document = await createDocument(workspaceId, title, parentId, teamspaceId);
+			if (teamspaceId) {
+				// Teamspace documents are listed under their teamspace, not the tree.
+				return document;
+			}
 			if (parentId) {
 				const parent = findNode(roots, parentId);
 				if (parent) {
@@ -94,18 +118,21 @@ export function createDocumentTree() {
 		},
 
 		async rename(id: string, title: string) {
+			await settled();
 			const updated = await retitleDocument(id, title);
 			const item = findNode(roots, id);
 			if (item) item.document = updated;
 		},
 
 		async moveToTrash(id: string) {
+			await settled();
 			const trashed = await trashDocument(id);
 			roots = removeNode(roots, id);
 			trash = [...trash, trashed];
 		},
 
 		async restore(id: string) {
+			await settled();
 			const restored = await restoreDocument(id);
 			trash = trash.filter((d) => d.id !== id);
 			if (restored.parent_id === null) {

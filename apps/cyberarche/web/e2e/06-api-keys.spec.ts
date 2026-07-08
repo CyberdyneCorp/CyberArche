@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { loadSession, type Session } from './session';
+
 /** API keys: minted in the UI, usable as an MCP-client credential, revocable. */
 
 const EMAIL = process.env.CYBERARCHE_IT_EMAIL ?? '';
@@ -7,23 +9,11 @@ const PASSWORD = process.env.CYBERARCHE_IT_PASSWORD ?? '';
 
 test.skip(!EMAIL || !PASSWORD, 'CYBERARCHE_IT_EMAIL / _PASSWORD not configured');
 
-let session: { access: string; refresh: string };
+let session: Session;
 let workspaceId: string;
 
 test.beforeAll(async ({ request }) => {
-	let tokens: { access_token?: string; refresh_token?: string } = {};
-	for (const delay of [0, 2000, 5000, 10_000]) {
-		if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-		const login = await request.post('http://127.0.0.1:8123/api/v1/auth/session', {
-			data: { email: EMAIL, password: PASSWORD }
-		});
-		if (login.ok()) {
-			tokens = await login.json();
-			break;
-		}
-	}
-	if (!tokens.access_token) throw new Error('e2e login failed after retries');
-	session = { access: tokens.access_token!, refresh: tokens.refresh_token! };
+	session = loadSession();
 	const workspace = await (
 		await request.post('http://127.0.0.1:8123/api/v1/workspaces', {
 			data: { name: 'API Keys E2E' },

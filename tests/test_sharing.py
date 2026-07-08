@@ -191,3 +191,56 @@ def test_share_flow_over_http(api):
         f"/api/v1/share-links/{link['id']}/open", headers=auth("mallory-token")
     )
     assert denied.status_code == 403
+
+
+# ---- shared-with-me listing (permissions-sharing spec) ----------------------
+
+
+async def test_shared_with_me_lists_documents_reachable_only_by_grant(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    # Dave is in another tenant entirely — no workspace role at all.
+    assert await use_cases.sharing.list_shared_with_me(OUTSIDER) == []
+
+    await use_cases.sharing.grant_on_document(
+        alice, document.id, user_id=OUTSIDER.user_id, role=Role.VIEWER
+    )
+
+    shared = await use_cases.sharing.list_shared_with_me(OUTSIDER)
+    assert [d.id for d in shared] == [document.id]
+
+
+async def test_shared_with_me_excludes_documents_reachable_by_workspace_role(
+    use_cases, alice
+):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+    # Even with an explicit grant, Bob inherits access -> not "shared with" him.
+    await use_cases.sharing.grant_on_document(
+        alice, document.id, user_id=BOB.user_id, role=Role.VIEWER
+    )
+
+    assert await use_cases.sharing.list_shared_with_me(BOB) == []
+
+
+async def test_shared_with_me_excludes_trashed_documents(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.sharing.grant_on_document(
+        alice, document.id, user_id=OUTSIDER.user_id, role=Role.VIEWER
+    )
+    assert len(await use_cases.sharing.list_shared_with_me(OUTSIDER)) == 1
+
+    await use_cases.documents.trash(alice, document.id)
+
+    assert await use_cases.sharing.list_shared_with_me(OUTSIDER) == []
+
+
+async def test_shared_with_me_is_scoped_to_the_calling_user(use_cases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.sharing.grant_on_document(
+        alice, document.id, user_id=OUTSIDER.user_id, role=Role.VIEWER
+    )
+
+    # Carol was granted nothing; Dave's grant must not leak to her.
+    assert await use_cases.sharing.list_shared_with_me(CAROL) == []

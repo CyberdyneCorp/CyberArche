@@ -149,4 +149,22 @@ describe('editor ViewModel', () => {
 		expect(table().header).toHaveLength(3);
 		expect(table().rows[0]).toHaveLength(3);
 	});
+
+	it('deleting a block is its own undo step, even right after typing', () => {
+		// Regression: Yjs merges ops within ~500ms into one undo capture, so a
+		// quick type-then-delete collapsed into a single step and Ctrl+Z wiped
+		// both blocks instead of restoring the deleted one.
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		const second = vm.insertAfter(first, 'paragraph');
+		vm.updateData(second, { text: 'delete me' });
+		expect(vm.blocks).toHaveLength(2);
+
+		vm.remove(second);
+		expect(vm.blocks).toHaveLength(1);
+
+		vm.undo();
+		expect(vm.blocks).toHaveLength(2);
+		expect(vm.blocks[1].data.text).toBe('delete me'); // recovered, not wiped
+	});
 });

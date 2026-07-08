@@ -247,6 +247,15 @@ def _document_update_params(document: Document) -> tuple[Any, ...]:
     )
 
 
+def _document_grant(row: Any) -> DocumentGrant:
+    return DocumentGrant(
+        document_id=DocumentId(row["document_id"]),
+        user_id=UserId(row["user_id"]),
+        role=Role(row["role"]),
+        granted_at=row["granted_at"],
+    )
+
+
 def _document_params(document: Document) -> tuple[Any, ...]:
     return (
         document.id,
@@ -371,9 +380,15 @@ class PostgresMembershipRepository:
         )
         if row is None:
             return None
-        return DocumentGrant(
-            document_id=DocumentId(row["document_id"]),
-            user_id=UserId(row["user_id"]),
-            role=Role(row["role"]),
-            granted_at=row["granted_at"],
+        return _document_grant(row)
+
+    async def document_grants_for_user(self, user_id: UserId) -> list[DocumentGrant]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM document_grants
+            WHERE user_id = $1
+            ORDER BY granted_at DESC
+            """,
+            user_id,
         )
+        return [_document_grant(row) for row in rows]

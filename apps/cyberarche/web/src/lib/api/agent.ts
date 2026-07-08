@@ -1,4 +1,4 @@
-import { get, post, request } from './http';
+import { get, patch, post, request } from './http';
 
 export interface AgentRun {
 	id: string;
@@ -15,8 +15,14 @@ export interface BlocksResponse {
 	inserted: boolean;
 }
 
+export interface AskResult {
+	answer: string;
+	/** Insertable representation of the answer. */
+	blocks: Record<string, unknown>[];
+}
+
 export const askAgent = (documentId: string, instruction: string) =>
-	post<{ answer: string }>(`/api/v1/documents/${documentId}/agent/ask`, { instruction });
+	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, { instruction });
 
 export const summarizeDocument = (documentId: string) =>
 	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/summarize`);
@@ -38,3 +44,9 @@ export const ingestFile = (documentId: string, file: File) => {
 
 export const listAgentRuns = (documentId: string) =>
 	get<AgentRun[]>(`/api/v1/documents/${documentId}/agent/runs`);
+
+/** Replace a block's text via the agent's CRDT-peer edit path. */
+export const replaceBlockText = (documentId: string, blockId: string, text: string) =>
+	patch<{ block_id: string }>(`/api/v1/documents/${documentId}/agent/blocks/${blockId}`, {
+		text
+	});

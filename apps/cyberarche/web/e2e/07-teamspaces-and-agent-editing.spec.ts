@@ -1,0 +1,183 @@
+import { expect, test, type Page } from '@playwright/test';
+
+import { loadSession, type Session } from './session';
+
+/** The four UI/UX gaps reported from the deployed product:
+ *  1. no block delete control     2. agent cannot edit the document
+ *  3. no insert-as-block on answers   4. no workspace switcher / Teamspaces
+ */
+
+const EMAIL = process.env.CYBERARCHE_IT_EMAIL ?? '';
+const PASSWORD = process.env.CYBERARCHE_IT_PASSWORD ?? '';
+const API = 'http://127.0.0.1:8123';
+
+test.skip(!EMAIL || !PASSWORD, 'CYBERARCHE_IT_EMAIL / _PASSWORD not configured');
+
+let session: Session;
+let workspaceId: string;
+
+test.beforeAll(async ({ request }) => {
+	session = loadSession();
+	const workspace = await (
+		await request.post(`${API}/api/v1/workspaces`, {
+			data: { name: 'Teamspace E2E' },
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	workspaceId = workspace.id;
+});
+
+async function openDocument(
+	page: Page,
+	request: import('@playwright/test').APIRequestContext
+): Promise<string> {
+	const document = await (
+		await request.post(`${API}/api/v1/documents`, {
+			data: { workspace_id: workspaceId, title: `Doc ${Date.now()}` },
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	await page.addInitScript((stored) => {
+		localStorage.setItem('cyberarche.session', JSON.stringify(stored));
+	}, session);
+	await page.goto(`/w/${workspaceId}/d/${document.id}`);
+	await page.getByTestId('block-editor').waitFor();
+	await expect(page.getByTestId('sync-status')).toHaveText('Synced');
+	return document.id;
+}
+
+test('a block can be deleted from its controls, and undone', async ({ page, request }) => {
+	await openDocument(page, request);
+
+	// Two blocks: the seeded paragraph plus one appended.
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('delete me');
+	await expect(page.locator('[data-block-id]')).toHaveCount(2);
+
+	const row = page.getByTestId('block-editor').locator('.row').last();
+	await row.hover();
+	await row.getByTestId('block-delete').click();
+	await expect(page.locator('[data-block-id]')).toHaveCount(1);
+	await expect(page.locator('.editable', { hasText: 'delete me' })).toHaveCount(0);
+
+	// Undoable (block-editor spec).
+	await page.keyboard.press('ControlOrMeta+z');
+	await expect(page.locator('[data-block-id]')).toHaveCount(2);
+});
+
+test('workspace switcher lists workspaces and creates a new one', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+
+	await page.getByTestId('workspace-switcher').click();
+	const menu = page.getByTestId('workspace-menu');
+	await expect(menu).toBeVisible();
+	await expect(menu.getByTestId('workspace-option').first()).toBeVisible();
+
+	await menu.getByTestId('new-workspace').click();
+	await page.getByTestId('new-workspace-name').fill('Switched WS');
+	await page.getByTestId('new-workspace-create').click();
+
+	await page.waitForURL(/\/w\/(?!new)/);
+	await expect(page.getByTestId('workspace-name')).toHaveText('Switched WS');
+});
+
+test('create a teamspace, add a page to it, and favourite a document', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+
+	// Teamspaces section starts empty.
+	await expect(page.getByTestId('no-teamspaces')).toBeVisible();
+
+	await page.getByTestId('new-teamspace').click();
+	await page.getByTestId('teamspace-name').fill('Tessera');
+	await page.getByTestId('teamspace-name').press('Enter');
+	await expect(page.getByTestId('teamspace-name-label')).toHaveText('Tessera');
+
+	// Add a page inside the teamspace -> it lands under it, not the tree root.
+	const teamspaceRow = page.getByTestId('teamspace-row');
+	await teamspaceRow.hover();
+	await teamspaceRow.getByTestId('teamspace-add-page').click();
+	await page.waitForURL(/\/d\//);
+	await expect(page.getByTestId('teamspace-doc')).toHaveCount(1);
+
+	// Favourite a workspace-level document -> it appears under Favorites.
+	const treeRow = page.getByTestId('document-tree').locator('.item').first();
+	await treeRow.hover();
+	await treeRow.getByTestId('favorite-toggle').click();
+	await expect(page.getByTestId('favorite-doc')).toHaveCount(1);
+});
+
+test('agent answers offer Insert / Replace / Copy', async ({ page, request }) => {
+	// No LLM key needed: the panel's actions come from the answer's blocks, so
+	// stub the ask endpoint to keep this deterministic and fast.
+	await page.route('**/agent/ask', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				answer: 'CRDTs converge without a central authority.',
+				blocks: [
+					{ id: 'a1', type: 'paragraph', data: { text: 'CRDTs converge.' } }
+				]
+			})
+		})
+	);
+	await openDocument(page, request);
+
+	await page.getByTestId('agent-toggle').click();
+	await page.getByTestId('agent-prompt').fill('What is a CRDT?');
+	await page.getByTestId('agent-prompt').press('Enter');
+
+	// Every conversational answer carries the three actions (ai-agent spec).
+	await expect(page.getByTestId('insert-as-block')).toBeVisible();
+	await expect(page.getByTestId('replace-selection')).toBeVisible();
+	await expect(page.getByTestId('copy-answer')).toBeVisible();
+
+	const before = await page.locator('[data-block-id]').count();
+	await page.getByTestId('insert-as-block').click();
+	await expect(page.getByTestId('insert-as-block')).toHaveText(/Inserted/);
+	await expect
+		.poll(async () => page.locator('[data-block-id]').count(), { timeout: 10_000 })
+		.toBeGreaterThan(before);
+});
+
+test('the sidebar surfaces documents shared with me', async ({ page, request }) => {
+	// A true end-to-end needs a SECOND identity (a document granted to us in a
+	// workspace we don't belong to) and the suite has one test account. The
+	// grant semantics — inherited access excluded, trashed excluded, per-user
+	// scoping — are covered by tests/test_sharing.py against the real use case
+	// and by the Postgres contract test. Here we pin the rendering contract.
+	await page.route('**/api/v1/shared', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify([
+				{
+					id: 'granted-1',
+					workspace_id: 'someone-elses-ws',
+					title: 'Design Review (shared)',
+					parent_id: null,
+					position: 0,
+					created_by: 'someone-else',
+					created_at: '2026-01-01T00:00:00Z',
+					updated_at: '2026-01-01T00:00:00Z',
+					trashed: false,
+					teamspace_id: null
+				}
+			])
+		})
+	);
+	await openDocument(page, request);
+
+	const shared = page.getByTestId('shared-doc');
+	await expect(shared).toHaveCount(1);
+	await expect(shared).toContainText('Design Review (shared)');
+
+	// It lives in its own section, never in the workspace tree.
+	await expect(page.getByTestId('document-tree')).not.toContainText('shared');
+});

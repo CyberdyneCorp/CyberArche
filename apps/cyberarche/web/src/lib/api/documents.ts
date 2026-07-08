@@ -10,13 +10,20 @@ export interface Document {
 	created_at: string;
 	updated_at: string;
 	trashed: boolean;
+	teamspace_id: string | null;
 }
 
-export const createDocument = (workspaceId: string, title = '', parentId?: string) =>
+export const createDocument = (
+	workspaceId: string,
+	title = '',
+	parentId?: string,
+	teamspaceId?: string
+) =>
 	post<Document>('/api/v1/documents', {
 		workspace_id: workspaceId,
 		title,
-		parent_id: parentId ?? null
+		parent_id: parentId ?? null,
+		teamspace_id: teamspaceId ?? null
 	});
 
 export const getDocument = (id: string) => get<Document>(`/api/v1/documents/${id}`);

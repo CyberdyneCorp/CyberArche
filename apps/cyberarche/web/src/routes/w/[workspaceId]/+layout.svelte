@@ -4,10 +4,13 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
+	import { createTeamspaces, type TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
 
 	let { children } = $props();
 	const workspaceId = $derived(page.params.workspaceId!);
+
+	let teamspaces = $state<TeamspacesVM | null>(null);
 
 	$effect(() => {
 		if (!session.isAuthenticated) {
@@ -20,6 +23,9 @@
 			if (documentTree.workspaceId !== workspaceId) {
 				await documentTree.open(workspaceId);
 			}
+			const vm = createTeamspaces(workspaceId);
+			teamspaces = vm;
+			await vm.load();
 		})();
 	});
 </script>
@@ -45,7 +51,7 @@
 	</main>
 {:else}
 	<div class="shell">
-		<Sidebar {workspaceId} />
+		<Sidebar {workspaceId} {teamspaces} />
 		<main class="content">
 			{@render children()}
 		</main>

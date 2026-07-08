@@ -91,6 +91,33 @@ async def insert_blocks(
     return BlocksResponse(blocks=body.blocks, inserted=True)
 
 
+class ReplaceBlockRequest(BaseModel):
+    text: str
+
+
+@router.patch("/blocks/{block_id}")
+async def replace_block_text(
+    document_id: str,
+    block_id: str,
+    body: ReplaceBlockRequest,
+    cases: Cases,
+    caller: Caller,
+) -> dict:
+    """Replace a block's text (agent 'Replace selection'), applied through
+    the CRDT so collaborators see it live."""
+    await cases.agent.update_block(
+        caller, DocumentId(document_id), block_id, {"text": body.text}
+    )
+    return {"block_id": block_id}
+
+
+@router.delete("/blocks/{block_id}", status_code=204)
+async def delete_block(
+    document_id: str, block_id: str, cases: Cases, caller: Caller
+) -> None:
+    await cases.agent.delete_block(caller, DocumentId(document_id), block_id)
+
+
 @router.post("/ingest", status_code=201)
 async def ingest(
     document_id: str, file: UploadFile, cases: Cases, caller: Caller

@@ -9,7 +9,7 @@ adapters plug into the same assertions instead of ad-hoc tests.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -37,6 +37,7 @@ async def adapters(request):
             "api_keys": fakes.InMemoryApiKeyRepository(),
             "teamspaces": fakes.InMemoryTeamspaceRepository(),
             "favorites": fakes.InMemoryFavoriteRepository(),
+            "memberships": fakes.InMemoryMembershipRepository(),
         }
         return
     # postgres: real adapters over TEST_DATABASE_URL (integration runs)
@@ -44,6 +45,7 @@ async def adapters(request):
 
     from cyberarche.adapters.outbound.postgres.repositories import (
         PostgresDocumentRepository,
+        PostgresMembershipRepository,
         PostgresWorkspaceRepository,
     )
     from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
@@ -72,6 +74,7 @@ async def adapters(request):
             "api_keys": PostgresApiKeyRepository(pool),
             "teamspaces": PostgresTeamspaceRepository(pool),
             "favorites": PostgresFavoriteRepository(pool),
+            "memberships": PostgresMembershipRepository(pool),
         }
     finally:
         await pool.close()
@@ -290,3 +293,45 @@ async def test_favorite_repository_contract(adapters):
 
     await repo.remove(UserId("alice"), DocumentId("d-1"))
     assert await repo.list_for_user(UserId("alice")) == []
+
+
+async def test_membership_repository_contract(adapters):
+    from cyberarche.domain.memberships import (
+        DocumentGrant,
+        Role,
+        WorkspaceMembership,
+    )
+
+    ws_repo, doc_repo = adapters["workspaces"], adapters["documents"]
+    repo = adapters["memberships"]
+    await ws_repo.add(workspace())
+    await doc_repo.add(document("doc-1"))
+    await doc_repo.add(document("doc-2"))
+
+    await repo.add_workspace_member(WorkspaceMembership(
+        workspace_id=WorkspaceId("ws-1"), user_id=UserId("bob"),
+        role=Role.EDITOR, granted_at=NOW))
+    assert (await repo.workspace_role(WorkspaceId("ws-1"), UserId("bob"))).role is Role.EDITOR
+    assert await repo.workspace_role(WorkspaceId("ws-1"), UserId("carol")) is None
+
+    await repo.add_document_grant(DocumentGrant(
+        document_id=DocumentId("doc-1"), user_id=UserId("carol"),
+        role=Role.VIEWER, granted_at=NOW))
+    assert (await repo.document_grant(DocumentId("doc-1"), UserId("carol"))).role is Role.VIEWER
+    assert await repo.document_grant(DocumentId("doc-2"), UserId("carol")) is None
+
+    # Re-granting upserts rather than duplicating.
+    await repo.add_document_grant(DocumentGrant(
+        document_id=DocumentId("doc-1"), user_id=UserId("carol"),
+        role=Role.EDITOR, granted_at=NOW))
+    grants = await repo.document_grants_for_user(UserId("carol"))
+    assert [(g.document_id, g.role) for g in grants] == [(DocumentId("doc-1"), Role.EDITOR)]
+
+    # Scoped to the user: bob's grants never surface carol's.
+    assert await repo.document_grants_for_user(UserId("bob")) == []
+
+    await repo.add_document_grant(DocumentGrant(
+        document_id=DocumentId("doc-2"), user_id=UserId("carol"),
+        role=Role.VIEWER, granted_at=NOW + timedelta(minutes=1)))
+    newest_first = await repo.document_grants_for_user(UserId("carol"))
+    assert [g.document_id for g in newest_first] == ["doc-2", "doc-1"]

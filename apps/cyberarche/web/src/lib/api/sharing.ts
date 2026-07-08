@@ -1,4 +1,5 @@
 import { del, get, post } from './http';
+import type { Document } from './documents';
 
 export type ShareRole = 'owner' | 'editor' | 'commenter' | 'viewer';
 export type SharePermission = 'view' | 'comment' | 'edit';
@@ -44,3 +45,7 @@ export const listComments = (documentId: string) =>
 
 export const resolveComment = (documentId: string, commentId: string) =>
 	post<Comment>(`/api/v1/documents/${documentId}/comments/${commentId}/resolve`);
+
+/** Documents reachable only through a document-level grant
+ * (permissions-sharing spec: shared-with-me listing). */
+export const listSharedWithMe = () => get<Document[]>('/api/v1/shared');

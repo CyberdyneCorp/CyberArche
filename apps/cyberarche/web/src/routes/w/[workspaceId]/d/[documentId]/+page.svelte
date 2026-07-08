@@ -133,7 +133,13 @@
 		</div>
 	</article>
 	{#if agentOpen && agent}
-		<AgentPanel {agent} {connectors} {workspaceId} onclose={() => (agentOpen = false)} />
+		<AgentPanel
+			{agent}
+			{connectors}
+			{workspaceId}
+			focusedBlockId={editor?.focusedId ?? null}
+			onclose={() => (agentOpen = false)}
+		/>
 	{/if}
 	{#if shareOpen && sharing}
 		<ShareDialog {sharing} onclose={() => (shareOpen = false)} />

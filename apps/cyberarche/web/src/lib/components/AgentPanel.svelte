@@ -7,13 +7,18 @@
 		agent,
 		connectors = null,
 		workspaceId = '',
+		/** Block the user last focused — the target of "Replace selection". */
+		focusedBlockId = null,
 		onclose
 	}: {
 		agent: AgentPanelVM;
 		connectors?: ConnectorsVM | null;
 		workspaceId?: string;
+		focusedBlockId?: string | null;
 		onclose: () => void;
 	} = $props();
+
+	let copied = $state<number | null>(null);
 
 	let toolsOpen = $state(false);
 	const enabledConnectors = $derived(
@@ -120,13 +125,35 @@
 					{#if message.blocks?.length}
 						<div class="actions">
 							<button
-								class="btn btn-ai"
+								class="act insert"
+								title="Insert as block"
 								data-testid="insert-as-block"
 								disabled={message.inserted}
 								onclick={() => agent.insert(message)}
 							>
-								{message.inserted ? 'Inserted ✓' : 'Insert as block'}
+								{message.inserted ? '✓ Inserted' : '⊕ Insert'}
 							</button>
+							<button
+								class="act"
+								title={focusedBlockId
+									? 'Replace the focused block'
+									: 'Focus a block in the document first'}
+								data-testid="replace-selection"
+								disabled={message.inserted}
+								onclick={() => agent.replaceSelection(message, focusedBlockId)}
+								>⇄ Replace</button
+							>
+							<button
+								class="act"
+								title="Copy"
+								aria-label="Copy answer"
+								data-testid="copy-answer"
+								onclick={async () => {
+									await agent.copy(message);
+									copied = index;
+									setTimeout(() => (copied = null), 1200);
+								}}>{copied === index ? '✓' : '⧉'}</button
+							>
 						</div>
 					{/if}
 				</div>
@@ -325,7 +352,29 @@
 	.actions {
 		margin-top: 8px;
 		display: flex;
-		gap: 6px;
+		gap: 4px;
+	}
+	.act {
+		padding: 3px 9px;
+		border-radius: var(--r-control);
+		border: 1px solid var(--line2);
+		font-size: 11.5px;
+		color: var(--tx2);
+		background: var(--bg1);
+	}
+	.act:hover:not([disabled]) {
+		background: var(--aibg);
+		border-color: var(--ai);
+		color: var(--ai);
+	}
+	.act.insert {
+		background: var(--ai);
+		border-color: var(--ai);
+		color: #fff;
+	}
+	.act[disabled] {
+		opacity: 0.55;
+		cursor: default;
 	}
 	.error {
 		color: var(--rose);

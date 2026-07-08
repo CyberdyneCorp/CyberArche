@@ -200,6 +200,10 @@ class InMemoryMembershipRepository:
     ) -> DocumentGrant | None:
         return self._document.get((document_id, user_id))
 
+    async def document_grants_for_user(self, user_id: UserId) -> list[DocumentGrant]:
+        grants = [g for g in self._document.values() if g.user_id == user_id]
+        return sorted(grants, key=lambda g: g.granted_at, reverse=True)
+
 
 class InMemoryUpdateLog:
     def __init__(self, clock: FixedClock | None = None) -> None:

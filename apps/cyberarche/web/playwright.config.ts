@@ -2,13 +2,18 @@ import { defineConfig } from '@playwright/test';
 
 /** E2E against the real backend: Playwright boots our FastAPI service
  * (in-memory store, LIVE CyberdyneAuth for tokens) plus the vite dev
- * server, and signs in with the CYBERARCHE_IT_* test user. */
+ * server, and signs in with the CYBERARCHE_IT_* test user.
+ *
+ * globalSetup acquires ONE session for the whole suite — logging in per
+ * spec trips the live auth service's rate limit, and the throttled spec
+ * then fails far from the cause. */
 
 const AUTH_URL =
 	process.env.CYBERARCHE_IT_AUTH_URL ?? 'https://auth.backend.coolify.cyberdynecorp.ai';
 
 export default defineConfig({
 	testDir: 'e2e',
+	globalSetup: './e2e/global-setup.ts',
 	timeout: 45_000,
 	retries: process.env.CI ? 1 : 0,
 	// Tests share one in-memory backend: run them serially so state

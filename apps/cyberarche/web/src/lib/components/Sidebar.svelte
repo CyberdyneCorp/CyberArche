@@ -1,57 +1,168 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
+	import type { TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
-	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
 	import TreeItem from './TreeItem.svelte';
+	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 
-	let { workspaceId }: { workspaceId: string } = $props();
+	let {
+		workspaceId,
+		teamspaces
+	}: { workspaceId: string; teamspaces: TeamspacesVM | null } = $props();
 
-	const workspace = $derived(workspaces.byId(workspaceId));
-	const initials = $derived(
-		(workspace?.name ?? 'CA')
-			.split(/\s+/)
-			.map((part) => part[0])
-			.join('')
-			.slice(0, 2)
-			.toUpperCase()
-	);
+	let creatingTeamspace = $state(false);
+	let teamspaceName = $state('');
 
-	async function newDocument() {
-		const document = await documentTree.create('');
+	async function newDocument(teamspaceId?: string) {
+		const document = await documentTree.create('', undefined, teamspaceId);
+		if (teamspaceId) await teamspaces?.reload(teamspaceId);
 		await goto(`/w/${workspaceId}/d/${document.id}`);
+	}
+
+	async function createTeamspace(event: SubmitEvent) {
+		event.preventDefault();
+		const name = teamspaceName.trim();
+		if (!name || !teamspaces) return;
+		await teamspaces.create(name);
+		teamspaceName = '';
+		creatingTeamspace = false;
 	}
 
 	async function signOut() {
 		session.logout();
 		await goto('/signin');
 	}
+
+	const docHref = (id: string) => `/w/${workspaceId}/d/${id}`;
 </script>
 
 <aside class="sidebar">
-	<header class="workspace">
-		<div class="mark">{initials}</div>
-		<div class="meta">
-			<strong data-testid="workspace-name">{workspace?.name ?? '…'}</strong>
-		</div>
-	</header>
+	<WorkspaceSwitcher {workspaceId} />
 
-	<button class="new" data-testid="new-document" onclick={newDocument}>
+	<button class="new" data-testid="new-document" onclick={() => newDocument()}>
 		<span class="plus">＋</span> New document
 	</button>
 
-	<nav class="section">
+	{#if teamspaces && teamspaces.favorites.length > 0}
+		<nav class="section">
+			<h2>Favorites</h2>
+			{#each teamspaces.favorites as doc (doc.id)}
+				<a
+					class="row"
+					class:active={page.url.pathname === docHref(doc.id)}
+					href={docHref(doc.id)}
+					data-testid="favorite-doc"
+				>
+					<span class="icon">★</span>
+					<span class="title">{doc.title}</span>
+				</a>
+			{/each}
+		</nav>
+	{/if}
+
+	{#if teamspaces}
+		<nav class="section">
+			<div class="section-head">
+				<h2>Teamspaces</h2>
+				<button
+					class="section-add"
+					title="New teamspace"
+					aria-label="New teamspace"
+					data-testid="new-teamspace"
+					onclick={() => (creatingTeamspace = !creatingTeamspace)}>＋</button
+				>
+			</div>
+
+			{#if creatingTeamspace}
+				<form class="inline-create" onsubmit={createTeamspace}>
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						class="input"
+						placeholder="Teamspace name"
+						bind:value={teamspaceName}
+						autofocus
+						data-testid="teamspace-name"
+					/>
+				</form>
+			{/if}
+
+			{#each teamspaces.nodes as node (node.teamspace.id)}
+				<div class="row group" data-testid="teamspace-row">
+					<button
+						class="disclosure"
+						aria-label={node.expanded ? 'Collapse' : 'Expand'}
+						onclick={() => teamspaces!.toggle(node.teamspace.id)}
+						>{node.expanded ? '▾' : '▸'}</button
+					>
+					<span class="ts-icon">{node.teamspace.icon}</span>
+					<span class="title" data-testid="teamspace-name-label">{node.teamspace.name}</span>
+					<button
+						class="row-add"
+						title="Add a page"
+						aria-label="Add a page"
+						data-testid="teamspace-add-page"
+						onclick={() => newDocument(node.teamspace.id)}>＋</button
+					>
+				</div>
+				{#if node.expanded}
+					{#each node.documents as doc (doc.id)}
+						<a
+							class="row nested"
+							class:active={page.url.pathname === docHref(doc.id)}
+							href={docHref(doc.id)}
+							data-testid="teamspace-doc"
+						>
+							<span class="icon">▤</span>
+							<span class="title">{doc.title}</span>
+						</a>
+					{:else}
+						<p class="empty nested">No pages yet</p>
+					{/each}
+				{/if}
+			{:else}
+				{#if !creatingTeamspace}
+					<p class="empty" data-testid="no-teamspaces">No teamspaces yet</p>
+				{/if}
+			{/each}
+		</nav>
+	{/if}
+
+	<nav class="section grow">
 		<h2>Documents</h2>
 		<div class="tree" data-testid="document-tree">
 			{#each documentTree.roots as node (node.document.id)}
-				<TreeItem {node} />
+				{#if !node.document.teamspace_id}
+					<TreeItem {node} {teamspaces} />
+				{/if}
 			{/each}
 			{#if documentTree.roots.length === 0}
 				<p class="empty">No documents yet</p>
 			{/if}
 		</div>
 	</nav>
+
+	<!-- Documents reachable only through a direct grant: they belong to a
+	     workspace or teamspace the user is not a member of, so they cannot
+	     appear in the tree above. -->
+	{#if teamspaces && teamspaces.shared.length > 0}
+		<nav class="section">
+			<h2>Shared with me</h2>
+			{#each teamspaces.shared as doc (doc.id)}
+				<a
+					class="row"
+					class:active={page.url.pathname === docHref(doc.id)}
+					href={docHref(doc.id)}
+					data-testid="shared-doc"
+				>
+					<span class="icon">👤</span>
+					<span class="title">{doc.title}</span>
+				</a>
+			{/each}
+		</nav>
+	{/if}
 
 	{#if documentTree.trash.length > 0}
 		<nav class="section">
@@ -86,23 +197,7 @@
 		background: var(--bg0);
 		border-right: 1px solid var(--line);
 		padding: 10px;
-	}
-	.workspace {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 6px;
-	}
-	.mark {
-		display: grid;
-		place-items: center;
-		width: 26px;
-		height: 26px;
-		border-radius: 7px;
-		background: var(--tx);
-		color: var(--bg1);
-		font-size: 10.5px;
-		font-weight: 700;
+		overflow: hidden;
 	}
 	.new {
 		display: flex;
@@ -121,8 +216,18 @@
 		font-size: 12px;
 	}
 	.section {
-		margin-top: 10px;
+		margin-top: 8px;
 		overflow-y: auto;
+		flex-shrink: 0;
+	}
+	.section.grow {
+		flex: 1;
+		min-height: 60px;
+	}
+	.section-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 	}
 	.section h2 {
 		margin: 6px;
@@ -132,9 +237,84 @@
 		text-transform: uppercase;
 		color: var(--tx3);
 	}
+	.section-add,
+	.row-add {
+		color: var(--tx3);
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-size: 12px;
+	}
+	.section-add:hover,
+	.row-add:hover {
+		background: var(--bg2);
+		color: var(--tx);
+	}
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 6px;
+		border-radius: var(--r-control);
+		color: var(--tx);
+		text-decoration: none;
+		min-width: 0;
+	}
+	.row:hover {
+		background: var(--bg2);
+	}
+	.row.active {
+		background: var(--accbg);
+		color: var(--acc-strong);
+		font-weight: 500;
+	}
+	.row.nested {
+		padding-left: 26px;
+	}
+	.row.group .row-add {
+		visibility: hidden;
+	}
+	.row.group:hover .row-add {
+		visibility: visible;
+	}
+	.disclosure {
+		width: 14px;
+		color: var(--tx3);
+		font-size: 9px;
+	}
+	.ts-icon {
+		display: grid;
+		place-items: center;
+		width: 16px;
+		height: 16px;
+		border-radius: 4px;
+		background: var(--rose);
+		color: #fff;
+		font-size: 9px;
+		font-weight: 700;
+	}
+	.icon {
+		color: var(--tx3);
+		font-size: 11px;
+	}
+	.title {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.inline-create {
+		padding: 2px 6px 6px;
+	}
+	.inline-create .input {
+		width: 100%;
+		font-size: 12px;
+	}
 	.empty {
 		margin: 4px 6px;
 		color: var(--tx3);
+	}
+	.empty.nested {
+		padding-left: 20px;
 	}
 	.trash-row {
 		display: flex;

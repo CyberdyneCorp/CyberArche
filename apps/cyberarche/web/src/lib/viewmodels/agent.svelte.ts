@@ -3,6 +3,7 @@
 
 import {
 	askAgent,
+	replaceBlockText,
 	draftContent,
 	ingestFile,
 	insertBlocks,
@@ -57,10 +58,12 @@ export function createAgentPanel(documentId: string) {
 			return ingesting;
 		},
 
+		/** Conversational ask. The reply carries insertable blocks, so every
+		 * answer offers Insert / Replace / Copy (ai-agent spec). */
 		async ask(instruction: string) {
 			await perform(instruction, async () => {
-				const { answer } = await askAgent(documentId, instruction);
-				return { role: 'agent', text: answer };
+				const { answer, blocks } = await askAgent(documentId, instruction);
+				return { role: 'agent', text: answer, blocks };
 			});
 		},
 
@@ -92,6 +95,20 @@ export function createAgentPanel(documentId: string) {
 			if (!message.blocks?.length) return;
 			await insertBlocks(documentId, message.blocks);
 			messages = messages.map((m) => (m === message ? { ...m, inserted: true } : m));
+		},
+
+		/** Replace the focused block's text with the answer, keeping its type. */
+		async replaceSelection(message: AgentMessage, blockId: string | null) {
+			if (!blockId) {
+				error = 'Select a block in the document first.';
+				return;
+			}
+			await replaceBlockText(documentId, blockId, message.text);
+			messages = messages.map((m) => (m === message ? { ...m, inserted: true } : m));
+		},
+
+		async copy(message: AgentMessage) {
+			await navigator.clipboard.writeText(message.text);
 		},
 
 		async ingest(file: File) {

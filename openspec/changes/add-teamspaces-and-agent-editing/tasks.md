@@ -16,9 +16,9 @@
 
 ## 3. Web
 
-- [ ] 3.1 Block delete control in the editor gutter (undoable)
-- [ ] 3.2 Agent message actions: Insert as block / Replace selection / Copy on every answer
-- [ ] 3.3 Sidebar: workspace switcher (current, new workspace, settings)
-- [ ] 3.4 Sidebar sections: Favorites, Teamspaces (with documents), Shared with me
-- [ ] 3.5 Create teamspace + add document to teamspace from the sidebar
-- [ ] 3.6 Vitest for the new ViewModels; e2e: delete a block, agent edits the open document, create a teamspace, switch workspace
+- [x] 3.1 Block delete control in the editor gutter (undoable)
+- [x] 3.2 Agent message actions: Insert as block / Replace selection / Copy on every answer
+- [x] 3.3 Sidebar: workspace switcher (current, new workspace, settings)
+- [x] 3.4 Sidebar sections: Favorites, Teamspaces (with documents), Shared with me
+- [x] 3.5 Create teamspace + add document to teamspace from the sidebar
+- [x] 3.6 Vitest for the new ViewModels; e2e: delete a block, agent edits the open document, create a teamspace, switch workspace

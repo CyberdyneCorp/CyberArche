@@ -92,3 +92,7 @@ class MembershipRepository(Protocol):
     async def document_grant(
         self, document_id: DocumentId, user_id: UserId
     ) -> DocumentGrant | None: ...
+
+    async def document_grants_for_user(self, user_id: UserId) -> list[DocumentGrant]:
+        """Every document-level grant issued to this user, newest first."""
+        ...

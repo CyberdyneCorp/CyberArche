@@ -356,3 +356,32 @@ async def test_viewer_agent_edit_is_denied_and_reported_to_the_model(
     assert "permission" in tool_reply
     state = await use_cases.realtime.current_state(alice, document.id)
     assert use_cases.agent._engine.read_blocks(state)[0]["data"]["text"] == "original"
+
+
+def test_agent_block_endpoints_replace_and_delete(api):
+    """Agent panel 'Replace selection' and the block delete path over HTTP."""
+    headers = {"Authorization": "Bearer alice-token"}
+    workspace = api.post("/api/v1/workspaces", json={"name": "WS"}, headers=headers).json()
+    document = api.post(
+        "/api/v1/documents", json={"workspace_id": workspace["id"], "title": "D"},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{document['id']}/agent/blocks",
+        json={"blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "old"}}]},
+        headers=headers,
+    )
+
+    replaced = api.patch(
+        f"/api/v1/documents/{document['id']}/agent/blocks/b1",
+        json={"text": "new text"}, headers=headers,
+    )
+    assert replaced.status_code == 200
+
+    assert api.delete(
+        f"/api/v1/documents/{document['id']}/agent/blocks/b1", headers=headers
+    ).status_code == 204
+    # Deleting a missing block is a 404, not a 500.
+    assert api.delete(
+        f"/api/v1/documents/{document['id']}/agent/blocks/b1", headers=headers
+    ).status_code == 404

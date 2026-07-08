@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from cyberarche.adapters.inbound.http.dependencies import Caller, Cases
+from cyberarche.adapters.inbound.http.schemas import DocumentResponse
 from cyberarche.domain.ids import DocumentId, ShareLinkId, UserId, WorkspaceId
 from cyberarche.domain.memberships import Role
 from cyberarche.domain.sharing import Comment, ShareLink, SharePermission
@@ -111,6 +112,12 @@ async def create_share_link(
         expires_at=body.expires_at,
     )
     return ShareLinkResponse.from_domain(link)
+
+
+@router.get("/shared")
+async def list_shared_with_me(cases: Cases, caller: Caller) -> list[DocumentResponse]:
+    documents = await cases.sharing.list_shared_with_me(caller)
+    return [DocumentResponse.from_domain(document) for document in documents]
 
 
 @router.get("/documents/{document_id}/share-links")

@@ -141,7 +141,13 @@ export function createEditor(documentId: string, token: string, userId: string) 
 			const index = indexOf(id);
 			if (index < 0) return { previousId: null };
 			const previous = index > 0 ? (yblocks.get(index - 1).get('id') as string) : null;
+			// Close the capture window first: Yjs merges operations within
+			// ~500ms into one undo step, so a quick type-then-delete would be
+			// undone as a single action and the block could not be recovered.
+			// A deletion is always its own undo step (block-editor spec).
+			undoManager.stopCapturing();
 			transact(() => yblocks.delete(index, 1));
+			undoManager.stopCapturing();
 			focusedId = previous;
 			return { previousId: previous };
 		},

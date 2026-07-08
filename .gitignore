@@ -26,3 +26,6 @@ apps/**/.svelte-kit/
 
 # Local blob storage (CYBERARCHE_BLOB_DIR)
 data/
+
+# Playwright suite-wide session (global-setup)
+apps/cyberarche/web/e2e/.auth/
