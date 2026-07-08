@@ -1,0 +1,194 @@
+/* CyberArche design tokens — "Quiet chrome, warm precision".
+   Source of truth: CyberArche UI Design System (Claude design).
+   Two accents, strict roles: amber = human intent, violet = AI authorship.
+   Warm neutrals over gray; density 13px chrome / 15.5px prose. */
+
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+:root {
+	/* surfaces */
+	--bg0: #f6f4f0; /* chrome */
+	--bg1: #ffffff; /* canvas */
+	--bg2: #efece6; /* hover */
+	--bg3: #e6e2da;
+	--tx: #241f18;
+	--tx2: #6f6759;
+	--tx3: #6e6759;
+	--line: rgba(38, 32, 24, 0.09);
+	--line2: rgba(38, 32, 24, 0.17);
+
+	/* amber — human intent */
+	--acc: oklch(0.56 0.12 62);
+	--acc-strong: oklch(0.48 0.11 62);
+	--accbg: oklch(0.955 0.032 80);
+	--accbg2: oklch(0.91 0.055 80);
+	--sf: oklch(0.52 0.12 62); /* selection/focus */
+
+	/* violet — AI authorship */
+	--ai: oklch(0.52 0.12 300);
+	--aibg: oklch(0.955 0.032 300);
+	--aibg2: oklch(0.91 0.05 300);
+
+	/* collaborator colors (never overlap AI violet) */
+	--rose: oklch(0.62 0.14 15);
+	--teal: oklch(0.6 0.1 190);
+	--blue: oklch(0.58 0.11 250);
+	--ok: oklch(0.6 0.13 150);
+
+	/* elevation */
+	--sh1: 0 1px 2px rgba(35, 28, 18, 0.06), 0 1px 6px rgba(35, 28, 18, 0.05);
+	--sh2: 0 4px 14px rgba(35, 28, 18, 0.1), 0 1px 3px rgba(35, 28, 18, 0.08);
+	--sh3: 0 16px 48px rgba(35, 28, 18, 0.18), 0 3px 10px rgba(35, 28, 18, 0.1);
+
+	/* type */
+	--font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+	--font-mono: 'IBM Plex Mono', monospace;
+	--font-math: Georgia, serif;
+
+	/* radii: 6 controls · 10 blocks · 14 dialogs · pill chips */
+	--r-control: 6px;
+	--r-block: 10px;
+	--r-dialog: 14px;
+	--r-pill: 99px;
+}
+
+:root[data-theme='dark'] {
+	--bg0: #151310;
+	--bg1: #1c1915;
+	--bg2: #242019;
+	--bg3: #2e2921;
+	--tx: #ece7de;
+	--tx2: #a79e8f;
+	--tx3: #a59c8d;
+	--line: rgba(238, 228, 210, 0.09);
+	--line2: rgba(238, 228, 210, 0.18);
+
+	--acc: oklch(0.78 0.12 75);
+	--acc-strong: oklch(0.85 0.12 78);
+	--accbg: oklch(0.27 0.04 75);
+	--accbg2: oklch(0.34 0.06 75);
+	--sf: oklch(0.78 0.12 75);
+
+	--ai: oklch(0.76 0.11 300);
+	--aibg: oklch(0.28 0.045 300);
+	--aibg2: oklch(0.35 0.06 300);
+
+	--rose: oklch(0.72 0.13 15);
+	--teal: oklch(0.72 0.09 190);
+	--blue: oklch(0.7 0.1 250);
+	--ok: oklch(0.72 0.12 150);
+
+	--sh1: 0 1px 2px rgba(0, 0, 0, 0.3);
+	--sh2: 0 4px 14px rgba(0, 0, 0, 0.4);
+	--sh3: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--bg0);
+	color: var(--tx);
+	font-family: var(--font-ui);
+	font-size: 13px; /* chrome density */
+	-webkit-font-smoothing: antialiased;
+}
+
+button {
+	font-family: inherit;
+	font-size: inherit;
+	cursor: pointer;
+	border: none;
+	background: none;
+	color: inherit;
+}
+
+input,
+textarea {
+	font-family: inherit;
+	font-size: inherit;
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 3px solid var(--accbg2);
+	outline-offset: 1px;
+}
+
+/* Shared primitives (style guide "Core components") */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 14px;
+	border-radius: var(--r-control);
+	font-weight: 500;
+	transition: background 120ms ease-out;
+}
+.btn-primary {
+	background: var(--acc);
+	color: var(--bg1);
+}
+.btn-primary:hover {
+	background: var(--acc-strong);
+}
+.btn-secondary {
+	background: var(--bg1);
+	border: 1px solid var(--line2);
+}
+.btn-secondary:hover {
+	background: var(--bg2);
+}
+.btn-ghost:hover {
+	background: var(--bg2);
+	border-radius: var(--r-control);
+}
+.btn-ai {
+	background: var(--ai);
+	color: var(--bg1);
+}
+.btn[disabled] {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.input {
+	padding: 7px 10px;
+	border: 1px solid var(--line2);
+	border-radius: var(--r-control);
+	background: var(--bg1);
+}
+.input:focus {
+	outline: none;
+	border-color: var(--acc);
+	box-shadow: 0 0 0 3px var(--accbg2);
+}
+
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: var(--r-pill);
+	font-size: 11px;
+	font-weight: 500;
+	background: var(--bg2);
+	color: var(--tx2);
+}
+.chip-accent {
+	background: var(--accbg);
+	color: var(--acc-strong);
+}
+.chip-ai {
+	background: var(--aibg);
+	color: var(--ai);
+}

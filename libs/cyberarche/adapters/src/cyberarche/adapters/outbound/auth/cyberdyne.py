@@ -22,7 +22,7 @@ import httpx
 import jwt
 from jwt import InvalidTokenError, PyJWK
 
-from cyberarche.application.ports.identity import Claims
+from cyberarche.application.ports.identity import Claims, TokenPair
 from cyberarche.domain.errors import NotAuthenticated
 
 _JWKS_TTL_SECONDS = 300.0
@@ -51,6 +51,14 @@ class CyberdyneAuthConfig:
     @property
     def iam_evaluate_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/api/v1/admin/iam/evaluate"
+
+    @property
+    def login_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/api/v1/auth/login"
+
+    @property
+    def refresh_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/api/v1/auth/refresh"
 
 
 def claims_from_payload(payload: dict, *, tenant_claim: str) -> Claims:
@@ -170,6 +178,37 @@ class ClientCredentialsTokenSource:
         payload = response.json()
         self._token = payload["access_token"]
         self._expires_at = time.monotonic() + float(payload.get("expires_in", 300))
+
+
+class CyberdyneAuthGateway:
+    """AuthGatewayPort adapter: forwards SPA credential exchanges."""
+
+    def __init__(self, config: CyberdyneAuthConfig, http: httpx.AsyncClient) -> None:
+        self._config = config
+        self._http = http
+
+    async def password_login(self, *, email: str, password: str) -> TokenPair:
+        response = await self._http.post(
+            self._config.login_url, json={"email": email, "password": password}
+        )
+        if response.status_code != 200:
+            raise NotAuthenticated("invalid credentials")
+        return _token_pair(response.json())
+
+    async def refresh(self, *, refresh_token: str) -> TokenPair:
+        response = await self._http.post(
+            self._config.refresh_url, json={"refresh_token": refresh_token}
+        )
+        if response.status_code != 200:
+            raise NotAuthenticated("refresh token rejected")
+        return _token_pair(response.json())
+
+
+def _token_pair(payload: dict) -> TokenPair:
+    access, refresh = payload.get("access_token"), payload.get("refresh_token")
+    if not access or not refresh:
+        raise NotAuthenticated("auth service returned no tokens")
+    return TokenPair(access_token=access, refresh_token=refresh)
 
 
 class IamAuthorization:

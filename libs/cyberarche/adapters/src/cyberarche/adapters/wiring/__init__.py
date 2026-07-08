@@ -16,6 +16,7 @@ import httpx
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.ports.identity import (
+    AuthGatewayPort,
     AuthorizationPort,
     ServiceTokenPort,
     TokenPort,
@@ -53,6 +54,7 @@ from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.adapters.outbound.auth.cyberdyne import (
     ClientCredentialsTokenSource,
     CyberdyneAuthConfig,
+    CyberdyneAuthGateway,
     IamAuthorization,
     JwksTokenVerifier,
 )
@@ -98,6 +100,7 @@ class Container:
     token_port: TokenPort
     service_tokens: ServiceTokenPort | None
     authorization: AuthorizationPort | None
+    auth_gateway: AuthGatewayPort | None
     workspaces: WorkspaceRepository
     documents: DocumentRepository
     snapshots: SnapshotRepository
@@ -317,17 +320,21 @@ def _build_secret_box(config: WiringConfig) -> SecretBoxPort:
     return NaiveSecretBox()  # tests/sample runtime only
 
 
-def _build_auth_stack(config: WiringConfig, shared_http):
-    """(token_port, service_tokens, authorization) from CyberdyneAuth config."""
-    if not config.auth_base_url:
-        raise ValueError("auth_base_url is required unless a token_port is injected")
-    auth_config = CyberdyneAuthConfig(
+def _auth_config(config: WiringConfig) -> CyberdyneAuthConfig:
+    return CyberdyneAuthConfig(
         base_url=config.auth_base_url,
         client_id=config.auth_client_id,
         client_secret=config.auth_client_secret,
         audience=config.auth_audience,
         tenant_claim=config.auth_tenant_claim,
     )
+
+
+def _build_auth_stack(config: WiringConfig, shared_http):
+    """(token_port, service_tokens, authorization) from CyberdyneAuth config."""
+    if not config.auth_base_url:
+        raise ValueError("auth_base_url is required unless a token_port is injected")
+    auth_config = _auth_config(config)
     credentials = ClientCredentialsTokenSource(auth_config, shared_http())
     token_port = JwksTokenVerifier(auth_config, shared_http(), credentials)
     authorization = IamAuthorization(auth_config, shared_http(), credentials)
@@ -388,6 +395,9 @@ async def build_container(
         token_port, service_tokens, authorization = _build_auth_stack(
             config, shared_http
         )
+    auth_gateway: AuthGatewayPort | None = None
+    if config.auth_base_url:
+        auth_gateway = CyberdyneAuthGateway(_auth_config(config), shared_http())
 
     if rag is None:
         rag = _build_rag(config, service_tokens, shared_http)
@@ -440,6 +450,7 @@ async def build_container(
         token_port=token_port,
         service_tokens=service_tokens,
         authorization=authorization,
+        auth_gateway=auth_gateway,
         workspaces=workspaces,
         documents=documents,
         snapshots=snapshots,

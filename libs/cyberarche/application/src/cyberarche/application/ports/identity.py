@@ -32,6 +32,22 @@ class ServiceTokenPort(Protocol):
     async def service_token(self) -> str: ...
 
 
+@dataclass(frozen=True, slots=True)
+class TokenPair:
+    access_token: str
+    refresh_token: str
+
+
+class AuthGatewayPort(Protocol):
+    """Session gateway for the SPA: the browser talks only to our API,
+    which forwards credential exchanges to CyberdyneAuth (its CORS policy
+    does not admit browser origins)."""
+
+    async def password_login(self, *, email: str, password: str) -> TokenPair: ...
+
+    async def refresh(self, *, refresh_token: str) -> TokenPair: ...
+
+
 class AuthorizationPort(Protocol):
     """Evaluates whether an identity may perform an action on a resource.
 

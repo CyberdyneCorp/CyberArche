@@ -4,7 +4,7 @@
 - [x] 1.2 Configure Python workspace (pyproject), FastAPI, FastMCP, pycrdt, LiteLLM/Anthropic SDK, and import-linter with the hexagonal dependency contract
 - [x] 1.3 Add the `wiring/` composition root building a `Container` (ports → adapters), consumed by all three services
 - [x] 1.4 FastAPI factory: `Container` on `app.state`, `Caller`/`Cases` DI, single DomainError→HTTP seam, CORS + observability
-- [ ] 1.5 Scaffold SvelteKit + Svelte 5 web app with MVVM folders (`lib/components`, `lib/viewmodels` `.svelte.ts`, `lib/api`, `lib/data`, `lib/crdt`)
+- [x] 1.5 Scaffold SvelteKit + Svelte 5 web app with MVVM folders (`lib/components`, `lib/viewmodels` `.svelte.ts`, `lib/api`, `lib/data`, `lib/crdt`)
 - [x] 1.6 Provision Postgres schema migrations (documents, blocks/snapshots, crdt_updates, memberships, share_grants, agent_runs, mcp_connectors) with RLS
 
 ## 2. Auth Integration (auth-integration)
@@ -14,7 +14,7 @@
 - [x] 2.3 `require_caller` builds `CallerContext(user_id, tenant_id, roles)` from claims only; 401 seam before use cases
 - [x] 2.4 Client-credentials adapter for worker/service-to-service tokens
 - [x] 2.5 IAM authorization: delegate policy evaluation to CyberdyneAuth `iam/evaluate` behind an `AuthorizationPort`
-- [ ] 2.6 Web: OIDC auth-code + PKCE sign-in flow, session handling, `lib/api/auth.ts`, auth ViewModel
+- [x] 2.6 Web: OIDC auth-code + PKCE sign-in flow, session handling, `lib/api/auth.ts`, auth ViewModel
 - [x] 2.7 BDD tests: reject invalid/expired token, tenant-not-spoofable, worker gets service token
 
 ## 3. Document Model (document-model)
@@ -24,7 +24,7 @@
 - [x] 3.3 Use cases: create/list/move workspace & document, reorder children, soft-delete/restore, snapshot list/restore
 - [x] 3.4 Postgres adapters for the repositories with tenant RLS
 - [x] 3.5 HTTP routers: workspaces, documents (CRUD, move, trash/restore), snapshots
-- [ ] 3.6 Web: workspace sidebar + document tree Views/ViewModels; `lib/api/documents.ts`, `lib/data/workspace.ts`
+- [x] 3.6 Web: workspace sidebar + document tree Views/ViewModels; `lib/api/documents.ts`, `lib/data/workspace.ts`
 - [x] 3.7 BDD tests: nesting/reorder, tenant isolation, trash+restore, snapshot restore
 
 ## 4. Realtime Collaboration (realtime-collaboration)

@@ -1,0 +1,90 @@
+<script lang="ts">
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import Sidebar from '$lib/components/Sidebar.svelte';
+	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { session } from '$lib/viewmodels/session.svelte';
+	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
+
+	let { children } = $props();
+	const workspaceId = $derived(page.params.workspaceId!);
+
+	$effect(() => {
+		if (!session.isAuthenticated) {
+			goto('/signin');
+			return;
+		}
+		(async () => {
+			if (!workspaces.loaded) await workspaces.load();
+			if (workspaceId === 'new') return;
+			if (documentTree.workspaceId !== workspaceId) {
+				await documentTree.open(workspaceId);
+			}
+		})();
+	});
+</script>
+
+{#if workspaceId === 'new'}
+	<main class="first-run">
+		<div class="card">
+			<h1>Create your first workspace</h1>
+			<form
+				onsubmit={async (event) => {
+					event.preventDefault();
+					const input = (event.currentTarget as HTMLFormElement).elements.namedItem(
+						'name'
+					) as HTMLInputElement;
+					const workspace = await workspaces.create(input.value || 'My Workspace');
+					await goto(`/w/${workspace.id}`);
+				}}
+			>
+				<input class="input" name="name" placeholder="Workspace name" data-testid="workspace-name-input" />
+				<button class="btn btn-primary" type="submit" data-testid="create-workspace">Create</button>
+			</form>
+		</div>
+	</main>
+{:else}
+	<div class="shell">
+		<Sidebar {workspaceId} />
+		<main class="content">
+			{@render children()}
+		</main>
+	</div>
+{/if}
+
+<style>
+	.shell {
+		display: flex;
+		height: 100vh;
+		overflow: hidden;
+	}
+	.content {
+		flex: 1;
+		background: var(--bg1);
+		overflow-y: auto;
+	}
+	.first-run {
+		display: grid;
+		place-items: center;
+		height: 100vh;
+	}
+	.card {
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: var(--r-dialog);
+		box-shadow: var(--sh2);
+		padding: 28px;
+		width: 380px;
+	}
+	.card h1 {
+		margin: 0 0 14px;
+		font-size: 20px;
+	}
+	.card form {
+		display: flex;
+		gap: 8px;
+	}
+	.card input {
+		flex: 1;
+	}
+</style>

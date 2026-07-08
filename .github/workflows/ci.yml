@@ -55,10 +55,14 @@ jobs:
         if: steps.web.outputs.present == 'true'
         with:
           node-version: 22
+      - uses: pnpm/action-setup@v4
+        if: steps.web.outputs.present == 'true'
+        with:
+          version: 10
       - name: Install, check, test
         if: steps.web.outputs.present == 'true'
         working-directory: apps/cyberarche/web
         run: |
-          npm ci
-          npm run check --if-present
-          npm test --if-present
+          pnpm install --frozen-lockfile
+          pnpm run check
+          pnpm test
