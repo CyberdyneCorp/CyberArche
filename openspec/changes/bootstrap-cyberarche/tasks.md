@@ -9,7 +9,7 @@
 
 ## 2. Auth Integration (auth-integration)
 
-- [ ] 2.1 Register CyberArche as a CyberdyneAuth OAuth client; store client config
+- [x] 2.1 Register CyberArche as a CyberdyneAuth OAuth client; store client config
 - [x] 2.2 `TokenPort`/`AuthProviderPort` + adapter: verify JWT via JWKS, introspect for opaque/service tokens; cache JWKS
 - [x] 2.3 `require_caller` builds `CallerContext(user_id, tenant_id, roles)` from claims only; 401 seam before use cases
 - [x] 2.4 Client-credentials adapter for worker/service-to-service tokens
