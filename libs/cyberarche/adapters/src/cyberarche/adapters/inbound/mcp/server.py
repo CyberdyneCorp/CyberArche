@@ -37,7 +37,8 @@ def _http_caller_resolver(container: "Container") -> CallerResolver:
     async def resolve() -> CallerContext:
         from fastmcp.server.dependencies import get_http_headers
 
-        header = get_http_headers().get("authorization", "")
+        # include_all: fastmcp strips the authorization header by default.
+        header = get_http_headers(include_all=True).get("authorization", "")
         scheme, _, token = header.partition(" ")
         if scheme.lower() != "bearer" or not token.strip():
             raise NotAuthenticated("missing bearer token")

@@ -14,7 +14,7 @@ from cyberarche.adapters.wiring import WiringConfig, build_container
 
 
 class McpSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="CYBERARCHE_", env_file=".env")
+    model_config = SettingsConfigDict(env_prefix="CYBERARCHE_", env_file=".env", extra="ignore")
 
     backend: str = "memory"
     database_url: str = ""
