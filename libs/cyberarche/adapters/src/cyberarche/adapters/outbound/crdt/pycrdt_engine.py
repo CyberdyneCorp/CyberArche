@@ -11,6 +11,8 @@ from typing import Any
 
 from pycrdt import Array, Doc, Map
 
+from cyberarche.domain.errors import NotFound
+
 
 def _load(state: bytes) -> Doc:
     doc = Doc()
@@ -46,3 +48,33 @@ class PycrdtEngine:
         for block in blocks:
             array.append(Map(block))
         return doc.get_update(before)
+
+    def update_block(self, state: bytes, block_id: str, data: dict[str, Any]) -> bytes:
+        doc = _load(state)
+        before = doc.get_state()
+        array = doc.get("blocks", type=Array)
+        index = _index_of(array, block_id)
+        if index is None:
+            raise NotFound(f"block not found: {block_id}")
+        block = array[index]
+        # Merge into data so a text edit never drops a whiteboard scene etc.
+        merged = {**(block.get("data") or {}), **data}
+        block["data"] = merged
+        return doc.get_update(before)
+
+    def delete_block(self, state: bytes, block_id: str) -> bytes:
+        doc = _load(state)
+        before = doc.get_state()
+        array = doc.get("blocks", type=Array)
+        index = _index_of(array, block_id)
+        if index is None:
+            raise NotFound(f"block not found: {block_id}")
+        del array[index]
+        return doc.get_update(before)
+
+
+def _index_of(array: Array, block_id: str) -> int | None:
+    for index, item in enumerate(array):
+        if isinstance(item, Map) and item.get("id") == block_id:
+            return index
+    return None

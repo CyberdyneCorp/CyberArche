@@ -316,11 +316,13 @@ class ScriptedLLM:
     def __init__(self, responses: list[LLMResponse]) -> None:
         self._responses = list(responses)
         self.requests: list[list[LLMMessage]] = []
+        self.tools_seen: list[list[ToolSpec]] = []
 
     async def complete(
         self, messages: list[LLMMessage], *, tools: list[ToolSpec] | None = None
     ) -> LLMResponse:
         self.requests.append(list(messages))
+        self.tools_seen.append(list(tools or []))
         if not self._responses:
             return LLMResponse(text="(exhausted)")
         return self._responses.pop(0)

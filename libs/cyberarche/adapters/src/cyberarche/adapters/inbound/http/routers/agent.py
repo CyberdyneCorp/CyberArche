@@ -20,6 +20,9 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
+    # Insertable representation of the answer (ai-agent spec: every answer
+    # can be inserted into the document without retyping it).
+    blocks: list[dict]
 
 
 class BlocksResponse(BaseModel):
@@ -60,7 +63,7 @@ async def ask(
     answer = await cases.agent.ask(
         caller, DocumentId(document_id), instruction=body.instruction
     )
-    return AskResponse(answer=answer)
+    return AskResponse(answer=answer.text, blocks=answer.blocks)
 
 
 @router.post("/summarize")

@@ -33,7 +33,7 @@ from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.domain.blocks import validate_block_type
 from cyberarche.domain.connectors import split_qualified
 from cyberarche.domain.ids import WorkspaceId
-from cyberarche.domain.errors import NotFound, ValidationFailed
+from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
 from cyberarche.domain.ids import AgentRunId, DocumentId
 from cyberarche.domain.memberships import Role
 
@@ -72,12 +72,23 @@ class ToolRegistry:
             return f"error: {error}"
 
 
+@dataclass(frozen=True, slots=True)
+class AgentAnswer:
+    """An answer plus the blocks the user may insert into the document."""
+
+    text: str
+    blocks: list[dict]
+
+
 _SYSTEM_PROMPT = (
-    "You are CyberArche's document agent. You help create, summarize, and "
-    "restructure documents. Ground answers in the provided document content "
-    "and knowledge-base results; cite block ids (e.g. [block:abc123]) or "
-    "source filenames for every claim you take from them. When asked to "
-    "produce content, return it as plain paragraphs separated by blank lines."
+    "You are CyberArche's document agent. You help create, summarize, "
+    "restructure, and EDIT the open document. Ground answers in the provided "
+    "document content and knowledge-base results; cite block ids (e.g. "
+    "[block:abc123]) or source filenames for every claim you take from them. "
+    "The open document and its block ids are given to you — never look it up "
+    "by title. To change it, call insert_blocks / update_block / delete_block; "
+    "these act on the open document only. When asked to produce content "
+    "without editing, return plain paragraphs separated by blank lines."
 )
 
 
@@ -117,40 +128,73 @@ class AgentUseCases:
 
     async def ask(
         self, caller: CallerContext, document_id: DocumentId, *, instruction: str
-    ) -> str:
-        """Answer/act grounded in the document, with tool use."""
+    ) -> AgentAnswer:
+        """Answer/act grounded in the document, with tool use.
+
+        The reply always carries insertable blocks so the UI can offer
+        'Insert as block' on any answer (ai-agent spec).
+        """
         document, context = await self._document_context(caller, document_id)
         messages = [
             LLMMessage(role="system", content=_SYSTEM_PROMPT),
             LLMMessage(
                 role="user",
-                content=f"Document '{document.title}':\n{context}\n\n{instruction}",
+                content=(
+                    f"Open document '{document.title}' (id: {document.id}).\n"
+                    f"Its blocks:\n{context}\n\n{instruction}"
+                ),
             ),
         ]
-        return await self._run_loop(
+        text = await self._run_loop(
             caller, document_id, document.workspace_id, instruction, messages
         )
+        return AgentAnswer(text=text, blocks=_paragraph_blocks(self._ids, text))
 
     async def summarize(
         self, caller: CallerContext, document_id: DocumentId
     ) -> list[dict]:
-        text = await self.ask(
+        answer = await self.ask(
             caller,
             document_id,
             instruction="Summarize this document concisely for a reader who has "
             "not seen it. Cite the block ids you drew from.",
         )
-        return _paragraph_blocks(self._ids, text)
+        return answer.blocks
 
     async def draft(
         self, caller: CallerContext, document_id: DocumentId, *, instruction: str
     ) -> list[dict]:
-        text = await self.ask(
+        answer = await self.ask(
             caller,
             document_id,
             instruction=f"Draft the following as document content:\n{instruction}",
         )
-        return _paragraph_blocks(self._ids, text)
+        return answer.blocks
+
+    # ---- document editing (agent as a CRDT peer) ---------------------------
+
+    async def update_block(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        block_id: str,
+        data: dict,
+    ) -> bytes:
+        """Merge `data` into a block; permission checked like a human edit."""
+        state = await self._realtime.current_state(caller, document_id)
+        update = self._engine.update_block(state, block_id, data)
+        return await self._realtime.apply(
+            caller, document_id, update, origin=f"agent:{caller.user_id}"
+        )
+
+    async def delete_block(
+        self, caller: CallerContext, document_id: DocumentId, block_id: str
+    ) -> bytes:
+        state = await self._realtime.current_state(caller, document_id)
+        update = self._engine.delete_block(state, block_id)
+        return await self._realtime.apply(
+            caller, document_id, update, origin=f"agent:{caller.user_id}"
+        )
 
     async def apply_blocks(
         self, caller: CallerContext, document_id: DocumentId, blocks: list[dict]
@@ -213,7 +257,7 @@ class AgentUseCases:
         messages: list[LLMMessage],
     ) -> str:
         tools_used: list[str] = []
-        tools = await self._available_tools(caller, workspace_id)
+        tools = await self._available_tools(caller, workspace_id, document_id)
         response = await self._llm.complete(messages, tools=tools)
         for _ in range(MAX_TOOL_ROUNDS):
             if not response.wants_tools:
@@ -227,7 +271,9 @@ class AgentUseCases:
             )
             for call in response.tool_calls:
                 tools_used.append(call.name)
-                result = await self._dispatch(caller, workspace_id, call)
+                result = await self._dispatch(
+                    caller, workspace_id, document_id, call
+                )
                 messages.append(
                     LLMMessage(
                         role="tool",
@@ -246,18 +292,32 @@ class AgentUseCases:
         return response.text
 
     async def _available_tools(
-        self, caller: CallerContext, workspace_id: WorkspaceId
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
     ) -> list[ToolSpec]:
-        """Built-in tools plus the workspace's enabled external MCP tools
-        (namespaced by connector — external-mcp-connectors spec)."""
-        tools = self._tools.specs()
+        """Document-bound editing tools, the built-in tools, and the
+        workspace's enabled external MCP tools (namespaced by connector)."""
+        tools = [spec for spec, _ in _editing_tools()] + self._tools.specs()
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(caller, workspace_id)
         return tools
 
     async def _dispatch(
-        self, caller: CallerContext, workspace_id: WorkspaceId, call: ToolCall
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
+        call: ToolCall,
     ) -> str:
+        """Editing tools bind to the OPEN document (design D-2), so a
+        hallucinated id can never reach another document."""
+        for spec, operation in _editing_tools():
+            if spec.name == call.name:
+                return await self._run_editing_tool(
+                    caller, document_id, operation, call.arguments
+                )
         if self._connectors is not None and split_qualified(call.name):
             try:
                 return await self._connectors.call(
@@ -269,6 +329,44 @@ class AgentUseCases:
             except Exception as error:  # external failures go back to the model
                 return f"error: {error}"
         return await self._tools.dispatch(caller, call)
+
+    async def _run_editing_tool(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        operation: str,
+        arguments: dict,
+    ) -> str:
+        try:
+            if operation == "insert_blocks":
+                blocks = [
+                    {
+                        "id": self._ids.new_id(),
+                        "type": block.get("type", "paragraph"),
+                        "data": block.get("data", {}),
+                    }
+                    for block in arguments.get("blocks", [])
+                ]
+                if not blocks:
+                    return "error: no blocks provided"
+                await self.apply_blocks(caller, document_id, blocks)
+                return f"inserted {len(blocks)} block(s): {[b['id'] for b in blocks]}"
+            if operation == "update_block":
+                await self.update_block(
+                    caller,
+                    document_id,
+                    str(arguments["block_id"]),
+                    {"text": str(arguments["text"])},
+                )
+                return f"updated block {arguments['block_id']}"
+            if operation == "delete_block":
+                await self.delete_block(caller, document_id, str(arguments["block_id"]))
+                return f"deleted block {arguments['block_id']}"
+        except NotAuthorized:
+            return "error: you do not have permission to edit this document"
+        except Exception as error:
+            return f"error: {error}"
+        return f"error: unknown operation {operation}"
 
     async def _document_context(
         self, caller: CallerContext, document_id: DocumentId
@@ -356,6 +454,66 @@ class AgentUseCases:
         document_id = DocumentId(str(arguments["document_id"]))
         document, rendered = await self._document_context(caller, document_id)
         return f"# {document.title}\n{rendered}"
+
+
+def _editing_tools() -> list[tuple[ToolSpec, str]]:
+    """(spec, operation) pairs. These act on the agent's OPEN document — the
+    model never supplies a document id, so it cannot address another one."""
+    return [
+        (
+            ToolSpec(
+                name="insert_blocks",
+                description="Append blocks to the open document. Each block is "
+                "{type, data}; text blocks use data.text.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "blocks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "data": {"type": "object"},
+                                },
+                                "required": ["type", "data"],
+                            },
+                        }
+                    },
+                    "required": ["blocks"],
+                },
+            ),
+            "insert_blocks",
+        ),
+        (
+            ToolSpec(
+                name="update_block",
+                description="Replace the text of a block of the open document, "
+                "identified by the block id shown in the context.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "block_id": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["block_id", "text"],
+                },
+            ),
+            "update_block",
+        ),
+        (
+            ToolSpec(
+                name="delete_block",
+                description="Delete a block of the open document by its id.",
+                parameters={
+                    "type": "object",
+                    "properties": {"block_id": {"type": "string"}},
+                    "required": ["block_id"],
+                },
+            ),
+            "delete_block",
+        ),
+    ]
 
 
 def _render_block(block: dict) -> str:

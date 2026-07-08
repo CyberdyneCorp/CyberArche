@@ -39,10 +39,12 @@ async def test_answer_is_grounded_in_document_blocks(use_cases, llm, alice):
         alice, document.id, instruction="When is the launch?"
     )
 
-    assert answer == "March 3 [block:b1]"
+    assert answer.text == "March 3 [block:b1]"
+    assert answer.blocks and answer.blocks[0]["type"] == "paragraph"
     # The document content was in the prompt the model saw.
     prompt = llm.requests[0][-1].content
     assert "The launch is on March 3." in prompt
+    assert document.id in prompt  # the agent is told which document is open
     assert "[block:b1]" in prompt
 
 
@@ -69,7 +71,7 @@ async def test_tool_loop_executes_rag_query_and_feeds_result_back(
 
     answer = await use_cases.agent.ask(alice, document.id, instruction="what spec?")
 
-    assert answer == "Answer citing specs.md"
+    assert answer.text == "Answer citing specs.md"
     tool_message = llm.requests[1][-1]
     assert tool_message.role == "tool"
     assert "specs.md" in tool_message.tool_result.content  # RAG result fed back
@@ -242,3 +244,115 @@ def _tiny_pdf(text: bytes) -> bytes:
         f"startxref\n{xref_at}\n%%EOF".encode()
     )
     return out.getvalue()
+
+
+# ---- agent document editing (the reported bug: "agent cannot edit") --------
+
+
+async def test_agent_adds_text_to_an_existing_block(use_cases, llm, alice):
+    """Regression: 'add the text Hello World on the current block' used to
+    fail because the agent had no editing tool and guessed read_document."""
+    _, document = await make_document(use_cases, alice, title="Test Document")
+    await seed_blocks(use_cases, alice, document.id, ["Hi"])
+
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(id="c1", name="update_block",
+                         arguments={"block_id": "b1", "text": "Hi Hello World"}),
+            ),
+        ),
+        LLMResponse(text="Done — I updated the block.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice, document.id, instruction="Add the text Hello World to that block"
+    )
+
+    assert answer.text == "Done — I updated the block."
+    state = await use_cases.realtime.current_state(alice, document.id)
+    assert use_cases.agent._engine.read_blocks(state)[0]["data"]["text"] == "Hi Hello World"
+
+
+async def test_agent_update_merges_data_and_keeps_other_keys(use_cases, alice):
+    """A text edit must not drop a whiteboard scene stored on the same block."""
+    _, document = await make_document(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [
+        {"id": "wb", "type": "whiteboard", "data": {"elements": {"a": {"kind": "rect"}}}},
+    ])
+
+    await use_cases.agent.update_block(alice, document.id, "wb", {"caption": "diagram"})
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    data = use_cases.agent._engine.read_blocks(state)[0]["data"]
+    assert data["caption"] == "diagram"
+    assert data["elements"] == {"a": {"kind": "rect"}}  # scene survived
+
+
+async def test_agent_inserts_and_deletes_blocks_via_tools(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["keep", "remove me"])
+
+    llm._responses = [
+        LLMResponse(text="", tool_calls=(
+            ToolCall(id="c1", name="insert_blocks",
+                     arguments={"blocks": [{"type": "heading", "data": {"text": "Goals"}}]}),
+            ToolCall(id="c2", name="delete_block", arguments={"block_id": "b2"}),
+        )),
+        LLMResponse(text="ok", model="m"),
+    ]
+
+    await use_cases.agent.ask(alice, document.id, instruction="restructure")
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    blocks = use_cases.agent._engine.read_blocks(state)
+    assert [b["type"] for b in blocks] == ["paragraph", "heading"]
+    assert blocks[0]["data"]["text"] == "keep"
+
+
+async def test_editing_tools_are_offered_and_bound_to_the_open_document(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    _, other = await make_document(use_cases, alice, title="Other")
+    await seed_blocks(use_cases, alice, other.id, ["untouched"])
+    llm._responses = [LLMResponse(text="hi", model="m")]
+
+    await use_cases.agent.ask(alice, document.id, instruction="hello")
+
+    # The model is offered the editing tools alongside rag_query/read_document.
+    offered = {spec.name for spec in llm.tools_seen[0]}
+    assert {"insert_blocks", "update_block", "delete_block"} <= offered
+    # No tool takes a document_id -> the model cannot address another document.
+    for spec in llm.tools_seen[0]:
+        if spec.name in {"insert_blocks", "update_block", "delete_block"}:
+            assert "document_id" not in spec.parameters["properties"]
+
+
+async def test_viewer_agent_edit_is_denied_and_reported_to_the_model(
+    use_cases, llm, memberships, clock, alice
+):
+    from tests.conftest import caller
+
+    viewer = caller("carol", "acme")
+    workspace, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["original"])
+    await memberships.add_workspace_member(
+        WorkspaceMembership(workspace_id=workspace.id, user_id=viewer.user_id,
+                            role=Role.VIEWER, granted_at=clock.now())
+    )
+    llm._responses = [
+        LLMResponse(text="", tool_calls=(
+            ToolCall(id="c1", name="update_block",
+                     arguments={"block_id": "b1", "text": "sneaky"}),
+        )),
+        LLMResponse(text="I cannot edit this document.", model="m"),
+    ]
+
+    await use_cases.agent.ask(viewer, document.id, instruction="change it")
+
+    tool_reply = llm.requests[1][-1].tool_result.content
+    assert "permission" in tool_reply
+    state = await use_cases.realtime.current_state(alice, document.id)
+    assert use_cases.agent._engine.read_blocks(state)[0]["data"]["text"] == "original"

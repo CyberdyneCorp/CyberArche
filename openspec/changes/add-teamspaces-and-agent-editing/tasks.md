@@ -1,9 +1,9 @@
 ## 1. Agent editing + insertable answers
 
-- [ ] 1.1 `CrdtEnginePort.update_block` / `delete_block` + pycrdt adapter (data merge, not replace)
-- [ ] 1.2 `AgentUseCases`: per-run document-bound tools (insert_blocks / update_block / delete_block), dispatched before the global registry; block ids in the prompt context
-- [ ] 1.3 `ask()` returns text + insertable blocks; HTTP `AskResponse` carries them
-- [ ] 1.4 Tests: agent adds text to an existing block, inserts, deletes; viewer denied; tools cannot touch another document; answers carry blocks
+- [x] 1.1 `CrdtEnginePort.update_block` / `delete_block` + pycrdt adapter (data merge, not replace)
+- [x] 1.2 `AgentUseCases`: per-run document-bound tools (insert_blocks / update_block / delete_block), dispatched before the global registry; block ids in the prompt context
+- [x] 1.3 `ask()` returns text + insertable blocks; HTTP `AskResponse` carries them
+- [x] 1.4 Tests: agent adds text to an existing block, inserts, deletes; viewer denied; tools cannot touch another document; answers carry blocks
 
 ## 2. Teamspaces + favourites (backend)
 

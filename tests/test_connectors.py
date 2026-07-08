@@ -146,7 +146,7 @@ async def test_agent_calls_external_tool_through_connector(
 
     answer = await use_cases.agent.ask(alice, document.id, instruction="?")
 
-    assert answer == "The answer is 42"
+    assert answer.text == "The answer is 42"
     assert mcp_client.calls == [
         ("https://a.example/mcp", "", "search", {"q": "meaning"})
     ]

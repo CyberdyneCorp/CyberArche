@@ -39,6 +39,18 @@ class CrdtEnginePort(Protocol):
         """
         ...
 
+    def update_block(self, state: bytes, block_id: str, data: dict) -> bytes:
+        """Incremental update merging `data` into the block's data map.
+
+        Merging (not replacing) so editing a block's text never drops other
+        keys — e.g. a whiteboard scene or a table's rows.
+        """
+        ...
+
+    def delete_block(self, state: bytes, block_id: str) -> bytes:
+        """Incremental update removing the block from the document body."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class LoggedUpdate:
