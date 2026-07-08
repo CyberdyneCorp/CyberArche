@@ -6,6 +6,7 @@ import LatexBlock from '$lib/components/editor/blocks/LatexBlock.svelte';
 import MermaidBlock from '$lib/components/editor/blocks/MermaidBlock.svelte';
 import TableBlock from '$lib/components/editor/blocks/TableBlock.svelte';
 import TextBlocks from '$lib/components/editor/blocks/TextBlocks.svelte';
+import WhiteboardBlock from '$lib/components/editor/blocks/WhiteboardBlock.svelte';
 import { registerBlock } from './registry';
 
 let registered = false;
@@ -120,6 +121,15 @@ export function registerBuiltinBlocks(): void {
 		hint: 'Diagram from source',
 		create: () => ({ source: '' }),
 		component: MermaidBlock
+	});
+	registerBlock({
+		type: 'whiteboard',
+		label: 'Whiteboard',
+		icon: '✦',
+		group: 'media',
+		hint: 'Canvas + mind maps',
+		create: () => ({ elements: {} }),
+		component: WhiteboardBlock
 	});
 	registerBlock({
 		type: 'table',

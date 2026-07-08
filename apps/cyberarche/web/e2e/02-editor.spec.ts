@@ -177,3 +177,47 @@ test('undo and redo restore local edits', async ({ page, request }) => {
 	await page.keyboard.press('ControlOrMeta+Shift+z');
 	await expect(page.locator('.editable', { hasText: 'undo me' })).toHaveCount(1);
 });
+
+test('whiteboard: shapes, mind-map child, arrow follows drag, persistence', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/white');
+	await page.keyboard.press('Enter');
+	const board = page.getByTestId('whiteboard-block');
+	await expect(board).toBeVisible();
+
+	// Draw a rectangle, label it.
+	await board.getByTestId('wb-tool-rect').click();
+	await board.getByTestId('wb-canvas').click({ position: { x: 200, y: 120 } });
+	await expect(board.getByTestId('wb-shape')).toHaveCount(1);
+	await page.getByTestId('wb-label-input').fill('Root');
+	await page.getByTestId('wb-label-input').press('Enter');
+
+	// Mind map: add a connected child.
+	await board.getByTestId('wb-shape').first().click();
+	await board.getByTestId('wb-add-child').click();
+	await expect(board.getByTestId('wb-shape')).toHaveCount(2);
+	await expect(board.getByTestId('wb-arrow')).toHaveCount(1);
+
+	// The bound arrow follows when the child moves.
+	const arrow = board.getByTestId('wb-arrow');
+	const y2Before = await arrow.getAttribute('y2');
+	const child = board.getByTestId('wb-shape').nth(1);
+	const box = (await child.boundingBox())!;
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 120, { steps: 5 });
+	await page.mouse.up();
+	const y2After = await arrow.getAttribute('y2');
+	expect(Number(y2After)).toBeGreaterThan(Number(y2Before) + 100);
+
+	// Scene survives a reload (CRDT log + data mirror).
+	await page.reload();
+	await page.getByTestId('whiteboard-block').waitFor();
+	await expect(page.getByTestId('wb-shape')).toHaveCount(2);
+	await expect(page.getByTestId('wb-arrow')).toHaveCount(1);
+});

@@ -49,11 +49,11 @@
 
 ## 6. Whiteboard Canvas (whiteboard-canvas)
 
-- [ ] 6.1 Web: `whiteboard` block embedding an Excalidraw-style canvas, scene stored in the document CRDT
-- [ ] 6.2 Canvas primitives (rect/ellipse/diamond/arrow/freehand/text/image) with styling and bound connectors
-- [ ] 6.3 Mind-map support: node/branch model, manual add-child
-- [ ] 6.4 Collaborative canvas editing merged via the document CRDT
-- [ ] 6.5 Tests: persistence/restore, bound arrow follows shape, concurrent shape edits converge
+- [x] 6.1 Web: `whiteboard` block embedding an Excalidraw-style canvas, scene stored in the document CRDT
+- [x] 6.2 Canvas primitives (rect/ellipse/diamond/arrow/freehand/text/image) with styling and bound connectors
+- [x] 6.3 Mind-map support: node/branch model, manual add-child
+- [x] 6.4 Collaborative canvas editing merged via the document CRDT
+- [x] 6.5 Tests: persistence/restore, bound arrow follows shape, concurrent shape edits converge
 
 ## 7. RAG Knowledge (rag-knowledge)
 

@@ -98,6 +98,11 @@ export function createEditor(documentId: string, token: string, userId: string) 
 		get readOnly() {
 			return readOnly;
 		},
+		/** The shared Y.Doc — heavy blocks (whiteboard) attach their own
+		 * fine-grained structures to it. */
+		get doc() {
+			return provider.doc;
+		},
 		userId,
 
 		/** Insert a new block after `afterId` (or append); returns its id. */
