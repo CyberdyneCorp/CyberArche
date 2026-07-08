@@ -218,7 +218,7 @@ export function createEditor(documentId: string, token: string, userId: string) 
 				if (match) {
 					const rest = text.slice(match[0].length);
 					vm.transform(id, definition.type, {
-						...definition.create(),
+						...(definition.fromMarkdown?.(match) ?? definition.create()),
 						text: rest
 					});
 					return;

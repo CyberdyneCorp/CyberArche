@@ -88,6 +88,7 @@ describe('editor ViewModel', () => {
 
 		vm.handleTextInput(id, '# ');
 		expect(vm.blocks[0].type).toBe('heading');
+		expect(vm.blocks[0].data.level).toBe(1);
 
 		const second = vm.insertAfter(vm.blocks[0].id, 'paragraph');
 		vm.handleTextInput(second, '- ');
@@ -134,6 +135,33 @@ describe('editor ViewModel', () => {
 
 		vm.redo();
 		expect(vm.blocks).toHaveLength(1);
+	});
+
+	it('heading shortcut honours the hash count (# -> h1, ### -> h3)', () => {
+		// Regression: `create()` hard-coded level 2 and the captured `#{1,3}`
+		// group was discarded, so `# ` and `### ` both produced an h2. The old
+		// test only asserted `type === 'heading'`, so the spec's "level-1
+		// heading" scenario passed while the behaviour was wrong.
+		for (const [prefix, level] of [
+			['# ', 1],
+			['## ', 2],
+			['### ', 3]
+		] as const) {
+			const vm = editor();
+			const id = vm.insertAfter(null, 'paragraph');
+			vm.handleTextInput(id, prefix);
+			expect(vm.blocks[0].type).toBe('heading');
+			expect(vm.blocks[0].data.level).toBe(level);
+		}
+	});
+
+	it('slash-menu headings still use the default level', () => {
+		// fromMarkdown must not leak into the non-markdown path.
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.handleTextInput(id, '/head');
+		vm.applySlash('heading');
+		expect(vm.blocks[0].data.level).toBe(2);
 	});
 
 	it('table data operations keep rows and columns consistent', () => {

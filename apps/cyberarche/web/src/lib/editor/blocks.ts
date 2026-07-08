@@ -32,7 +32,9 @@ export function registerBuiltinBlocks(): void {
 		hint: 'Section heading',
 		create: () => ({ text: '', level: 2 }),
 		component: TextBlocks,
-		markdownPrefix: /^(#{1,3})\s$/
+		markdownPrefix: /^(#{1,3})\s$/,
+		// `#` -> h1, `##` -> h2, `###` -> h3 (block-editor spec).
+		fromMarkdown: (match) => ({ text: '', level: match[1].length })
 	});
 	registerBlock({
 		type: 'bulleted_list',

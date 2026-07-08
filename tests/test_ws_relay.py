@@ -147,3 +147,43 @@ def test_unknown_document_is_refused(api):
         raise
     except Exception:
         pass  # closed with 4404 before accept
+
+
+def test_join_without_any_role_is_refused(api):
+    """realtime-collaboration spec: "a client SHALL only join a document it is
+    permitted to view". The 4403 branch of the handshake was unexercised — a
+    regression dropping the require() from join() would have made every
+    document readable by any authenticated member of the tenant.
+    """
+    _, document_id = make_document(api)
+    # Same tenant as the owner, but granted nothing at all.
+    api.app.state.container.token_port._inner.register(
+        "eve-token", Claims(subject="eve", tenant_id="acme")
+    )
+
+    try:
+        with api.websocket_connect(
+            f"/api/v1/documents/{document_id}/sync?token=eve-token"
+        ) as ws:
+            ws.receive_bytes()
+        raise AssertionError("expected the join to be refused")
+    except AssertionError:
+        raise
+    except Exception:
+        pass  # closed with 4403 before accept
+
+
+def test_viewer_may_join(api):
+    """The counterpart: a viewer IS permitted to join (only updates are barred),
+    so the refusal above is about authorization, not a blanket denial.
+    """
+    workspace_id, document_id = make_document(api)
+    api.app.state.container.token_port._inner.register(
+        "dave-token", Claims(subject="dave", tenant_id="acme")
+    )
+    grant(api, workspace_id, "dave", Role.VIEWER)
+
+    with api.websocket_connect(
+        f"/api/v1/documents/{document_id}/sync?token=dave-token"
+    ) as ws:
+        assert ws.receive_bytes() is not None

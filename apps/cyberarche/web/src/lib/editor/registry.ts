@@ -24,6 +24,10 @@ export interface BlockDefinition {
 	component: Component<BlockComponentProps>;
 	/** Markdown-style input prefix that transforms a paragraph, e.g. "# ". */
 	markdownPrefix?: RegExp;
+	/** Derive block data from the matched prefix, when the prefix carries
+	 * information the factory cannot know (e.g. `###` -> heading level 3).
+	 * Falls back to create() when absent, so the engine stays block-agnostic. */
+	fromMarkdown?(match: RegExpExecArray): Record<string, unknown>;
 }
 
 export interface BlockComponentProps {
