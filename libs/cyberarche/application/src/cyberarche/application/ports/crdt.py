@@ -51,6 +51,24 @@ class CrdtEnginePort(Protocol):
         """Incremental update removing the block from the document body."""
         ...
 
+    def is_empty(self, update: bytes) -> bool:
+        """True when the update encodes no changes.
+
+        Lets callers skip appending a no-op to the update log without knowing
+        the wire encoding.
+        """
+        ...
+
+    def replace_blocks(self, state: bytes, blocks: list[dict]) -> bytes:
+        """Incremental update making the document body equal `blocks`.
+
+        Reconciles by block id rather than clearing and re-appending, so blocks
+        present in both keep their identity (comments anchor to block ids) and a
+        concurrent peer edit merges instead of being clobbered. Returns an empty
+        update when the body already matches. Used by snapshot restore.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class LoggedUpdate:

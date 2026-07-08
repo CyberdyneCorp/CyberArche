@@ -187,3 +187,52 @@ def test_viewer_may_join(api):
         f"/api/v1/documents/{document_id}/sync?token=dave-token"
     ) as ws:
         assert ws.receive_bytes() is not None
+
+
+def test_snapshot_restore_reaches_open_websocket_clients(api):
+    """realtime-collaboration spec: a restore is an ordinary CRDT update, so a
+    connected editor converges on the restored content without reloading.
+    Writing the document row directly would leave this client divergent.
+    """
+    _, document_id = make_document(api)
+    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
+
+    blocks = [{"id": "b1", "type": "paragraph", "data": {"text": "v1"}}]
+    api.post(
+        f"/api/v1/documents/{document_id}/agent/blocks",
+        json={"blocks": blocks},
+        headers=auth(),
+    )
+    snapshot = api.post(
+        f"/api/v1/documents/{document_id}/snapshots",
+        json={"content": {"blocks": blocks}},
+        headers=auth(),
+    ).json()
+    api.post(
+        f"/api/v1/documents/{document_id}/agent/blocks",
+        json={"blocks": [{"id": "b2", "type": "paragraph", "data": {"text": "v2"}}]},
+        headers=auth(),
+    )
+
+    # A real client: hydrate from the initial state, then apply live deltas.
+    doc = Doc()
+    with api.websocket_connect(url) as client:
+        initial = client.receive_bytes()
+        assert initial[0] == FRAME_UPDATE
+        doc.apply_update(initial[1:])
+        from pycrdt import Array
+
+        assert [dict(m)["id"] for m in doc.get("blocks", type=Array)] == ["b1", "b2"]
+
+        response = api.post(
+            f"/api/v1/documents/{document_id}/snapshots/{snapshot['id']}/restore",
+            headers=auth(),
+        )
+        assert response.status_code == 200
+
+        frame = client.receive_bytes()
+        assert frame[0] == FRAME_UPDATE
+        doc.apply_update(frame[1:])  # the restore, delivered as a delta
+
+    # The open client converged on v1 without reloading.
+    assert [dict(m)["id"] for m in doc.get("blocks", type=Array)] == ["b1"]

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cyberarche.application.authz import AccessControl
+from cyberarche.application.ports.crdt import CrdtEnginePort
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
@@ -16,6 +17,9 @@ from cyberarche.domain.ids import DocumentId, SnapshotId
 from cyberarche.domain.memberships import Role
 from cyberarche.domain.snapshots import Snapshot
 
+if TYPE_CHECKING:  # composition only; avoids a use-case import cycle
+    from cyberarche.application.use_cases.realtime import RealtimeUseCases
+
 
 class SnapshotUseCases:
     def __init__(
@@ -25,12 +29,16 @@ class SnapshotUseCases:
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
+        engine: CrdtEnginePort,
+        realtime: "RealtimeUseCases",
     ) -> None:
         self._snapshots = snapshots
         self._documents = documents
         self._access = access
         self._clock = clock
         self._ids = ids
+        self._engine = engine
+        self._realtime = realtime
 
     async def record(
         self,
@@ -66,11 +74,25 @@ class SnapshotUseCases:
         self, caller: CallerContext, document_id: DocumentId, snapshot_id: SnapshotId
     ) -> Snapshot:
         """Replace current content with a prior snapshot; the restore is itself
-        recorded as a new snapshot (document-model spec)."""
+        recorded as a new snapshot (document-model spec).
+
+        The replacement goes through the CRDT and the realtime apply path
+        (design D-1), so it is persisted to the update log and broadcast to
+        every connected editor — writing the document row directly would leave
+        open browsers holding a divergent replica.
+        """
         document = await self._require(caller, document_id, Role.EDITOR)
         source = await self._snapshots.get(document.id, snapshot_id)
         if source is None:
             raise NotFound("snapshot not found")
+
+        state = await self._realtime.current_state(caller, document.id)
+        update = self._engine.replace_blocks(state, source.content.get("blocks", []))
+        if not self._engine.is_empty(update):  # D-5: no empty log entries
+            await self._realtime.apply(
+                caller, document.id, update, origin=f"restore:{caller.user_id}"
+            )
+
         return await self.record(
             caller,
             document.id,

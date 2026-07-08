@@ -4,7 +4,12 @@
 
 import * as Y from 'yjs';
 
-import { ArcheProvider, type PresencePeer, type ProviderStatus } from '$lib/crdt/provider';
+import {
+	ArcheProvider,
+	type PresencePeer,
+	type ProviderStatus,
+	type TokenSource
+} from '$lib/crdt/provider';
 import {
 	allBlockDefinitions,
 	markdownTransforms,
@@ -22,8 +27,8 @@ export function colorFor(userId: string): string {
 	return PEER_COLORS[Math.abs(hash) % PEER_COLORS.length];
 }
 
-export function createEditor(documentId: string, token: string, userId: string) {
-	const provider = new ArcheProvider(documentId, token);
+export function createEditor(documentId: string, tokens: TokenSource, userId: string) {
+	const provider = new ArcheProvider(documentId, tokens);
 	const yblocks = provider.doc.getArray<Y.Map<unknown>>('blocks');
 	const undoManager = new Y.UndoManager(yblocks, {
 		trackedOrigins: new Set([LOCAL_ORIGIN])

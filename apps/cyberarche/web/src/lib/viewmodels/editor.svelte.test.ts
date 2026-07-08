@@ -26,7 +26,11 @@ beforeAll(() => {
 });
 
 function editor() {
-	return createEditor('doc-1', 'token', 'alice');
+	return createEditor(
+		'doc-1',
+		{ getAccessToken: () => 'token', tryRefresh: async () => false },
+		'alice'
+	);
 }
 
 describe('block registry (12.1)', () => {

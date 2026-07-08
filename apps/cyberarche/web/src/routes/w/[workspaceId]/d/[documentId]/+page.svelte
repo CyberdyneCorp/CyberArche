@@ -49,9 +49,10 @@
 			if (cancelled) return;
 			doc = loaded;
 			titleDraft = loaded.title === 'Untitled' ? '' : loaded.title;
-			const token = session.getAccessToken();
-			if (token) {
-				instance = createEditor(id, token, session.userId ?? 'me');
+			if (session.getAccessToken()) {
+				// Pass the session itself, not a token snapshot: the WS reconnects
+				// long after a 15-minute access token has expired.
+				instance = createEditor(id, session, session.userId ?? 'me');
 				editor = instance;
 			}
 		});

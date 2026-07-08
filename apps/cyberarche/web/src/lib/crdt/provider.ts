@@ -22,8 +22,23 @@ export interface PresencePeer {
 
 export type ProviderStatus = 'connecting' | 'connected' | 'offline';
 
+/** How the provider obtains a *current* access token.
+ *
+ * Access tokens are short-lived (15 min). Capturing one at construction and
+ * reusing it forever means every reconnect after expiry is refused with 4401,
+ * and the provider retries the dead token until the tab is closed. The
+ * provider therefore reads the token afresh on each connect, and refreshes
+ * once when the server rejects it. */
+export interface TokenSource {
+	getAccessToken(): string | null;
+	tryRefresh(): Promise<boolean>;
+}
+
 const RECONNECT_DELAY_MS = 1500;
 const PEER_TTL_MS = 30_000;
+/** Server close codes (adapters/inbound/http/realtime.py). */
+const CLOSE_UNAUTHENTICATED = 4401;
+const CLOSE_FORBIDDEN = 4403;
 
 export class ArcheProvider {
 	readonly doc: Y.Doc;
@@ -41,9 +56,13 @@ export class ArcheProvider {
 	private closed = false;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+	/** Set while a refresh-and-retry is in flight, so an expiry storm triggers
+	 * exactly one refresh. */
+	private refreshing = false;
+
 	constructor(
 		private readonly documentId: string,
-		private readonly token: string,
+		private readonly tokens: TokenSource,
 		doc?: Y.Doc
 	) {
 		this.doc = doc ?? new Y.Doc();
@@ -58,7 +77,7 @@ export class ArcheProvider {
 			`/api/v1/documents/${this.documentId}/sync`,
 			origin.replace(/^http/, 'ws')
 		);
-		url.searchParams.set('token', this.token);
+		url.searchParams.set('token', this.tokens.getAccessToken() ?? '');
 		return url.toString();
 	}
 
@@ -76,14 +95,40 @@ export class ArcheProvider {
 			socket.send(concat(0x00, state));
 		};
 		socket.onmessage = (event) => this.handleMessage(event);
-		socket.onclose = () => {
-			this.socket = null;
-			if (!this.closed) {
-				this.setStatus('offline');
-				this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
-			}
-		};
+		socket.onclose = (event) => this.handleClose(event);
 		socket.onerror = () => socket.close();
+	}
+
+	private handleClose(event: CloseEvent): void {
+		this.socket = null;
+		if (this.closed) return;
+		this.setStatus('offline');
+
+		if (event.code === CLOSE_FORBIDDEN) {
+			this.onDenied(); // no role on this document — retrying cannot help
+			return;
+		}
+
+		if (event.code === CLOSE_UNAUTHENTICATED) {
+			// The access token expired mid-session. Refresh once, then retry
+			// with the new one; reconnecting with the same token would loop.
+			if (this.refreshing) return;
+			this.refreshing = true;
+			void this.tokens
+				.tryRefresh()
+				.then((ok) => {
+					this.refreshing = false;
+					if (this.closed) return;
+					if (ok) this.connect();
+					else this.onDenied(); // signed out; the app routes to /signin
+				})
+				.catch(() => {
+					this.refreshing = false;
+				});
+			return;
+		}
+
+		this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
 	}
 
 	private handleMessage(event: MessageEvent): void {

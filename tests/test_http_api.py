@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 
+from pycrdt import Array, Doc
+
+
 def auth(token: str = "alice-token") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _block_ids(api, document_id: str, headers: dict[str, str]) -> list[str]:
+    """The document's live blocks. No HTTP endpoint reads them — the editor
+    reads over the realtime socket, so a restore is only real if it shows up
+    there."""
+    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
+    with api.websocket_connect(url) as client:
+        frame = client.receive_bytes()  # FRAME_UPDATE + current state
+    doc = Doc()
+    doc.apply_update(frame[1:])
+    return [dict(m).get("id") for m in doc.get("blocks", type=Array)]
 
 
 def test_requests_without_token_get_401_before_any_use_case(api):
@@ -55,16 +70,34 @@ def test_vertical_flow_workspace_document_snapshot_trash_restore(api):
     ).json()
     assert [c["id"] for c in children] == [child["id"]]
 
+    # Snapshot the document, edit it, then restore over HTTP. Asserting only
+    # `restored_from` (as this test once did) passes against a restore that
+    # never touches the document — read the blocks back.
+    v1_blocks = [{"id": "b1", "type": "paragraph", "data": {"text": "hello"}}]
+    api.post(
+        f"/api/v1/documents/{parent['id']}/agent/blocks",
+        json={"blocks": v1_blocks},
+        headers=headers,
+    )
     snapshot = api.post(
         f"/api/v1/documents/{parent['id']}/snapshots",
-        json={"content": {"blocks": [{"type": "paragraph", "text": "hello"}]}},
+        json={"content": {"blocks": v1_blocks}},
         headers=headers,
     ).json()
+
+    api.post(
+        f"/api/v1/documents/{parent['id']}/agent/blocks",
+        json={"blocks": [{"id": "b2", "type": "paragraph", "data": {"text": "bye"}}]},
+        headers=headers,
+    )
+    assert _block_ids(api, parent["id"], headers) == ["b1", "b2"]
+
     restored = api.post(
         f"/api/v1/documents/{parent['id']}/snapshots/{snapshot['id']}/restore",
         headers=headers,
     ).json()
     assert restored["restored_from"] == snapshot["id"]
+    assert _block_ids(api, parent["id"], headers) == ["b1"]  # content really replaced
 
     assert api.delete(f"/api/v1/documents/{child['id']}", headers=headers).json()["trashed"]
     assert (

@@ -181,7 +181,9 @@ def _build_use_cases(
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids, teamspaces),
-        snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
+        snapshots=SnapshotUseCases(
+            snapshots, documents, access, clock, ids, crdt_engine, realtime
+        ),
         realtime=realtime,
         knowledge=knowledge,
         connectors=connector_use_cases,

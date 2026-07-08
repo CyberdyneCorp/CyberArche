@@ -174,7 +174,9 @@ def use_cases(
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids, teamspace_repo),
-        snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
+        snapshots=SnapshotUseCases(
+            snapshots, documents, access, clock, ids, engine, realtime
+        ),
         realtime=realtime,
         knowledge=knowledge,
         connectors=connectors,
