@@ -48,6 +48,12 @@ async def adapters(request):
 
     pool = await asyncpg.create_pool(os.environ["TEST_DATABASE_URL"])
     try:
+        # Isolate each test: the suite owns this database.
+        await pool.execute(
+            "TRUNCATE workspaces, documents, snapshots, crdt_updates, "
+            "workspace_memberships, document_grants, share_links, agent_runs, "
+            "mcp_connectors, ingestion_tasks, comments CASCADE"
+        )
         yield {
             "workspaces": PostgresWorkspaceRepository(pool),
             "documents": PostgresDocumentRepository(pool),

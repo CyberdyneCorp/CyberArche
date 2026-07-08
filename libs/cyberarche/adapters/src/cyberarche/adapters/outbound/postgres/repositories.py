@@ -177,15 +177,7 @@ class PostgresDocumentRepository:
         return [_document_from_row(r) for r in rows]
 
     async def update(self, document: Document) -> None:
-        await self._pool.execute(
-            """
-            UPDATE documents SET
-                title = $4, parent_id = $5, position = $6, updated_at = $9,
-                trashed = $10, trashed_from_parent_id = $11
-            WHERE id = $1
-            """,
-            *_document_params(document),
-        )
+        await self._pool.execute(_UPDATE_SQL, *_document_update_params(document))
 
     async def search_by_title(
         self, tenant_id: TenantId, query: str, *, limit: int = 20
@@ -193,7 +185,8 @@ class PostgresDocumentRepository:
         rows = await self._pool.fetch(
             """
             SELECT * FROM documents
-            WHERE tenant_id = $1 AND trashed = FALSE AND title ILIKE '%' || $2 || '%'
+            WHERE tenant_id = $1 AND trashed = FALSE
+              AND title ILIKE '%' || $2::text || '%'
             ORDER BY title
             LIMIT $3
             """,
@@ -208,14 +201,30 @@ class PostgresDocumentRepository:
             async with connection.transaction():
                 for document in documents:
                     await connection.execute(
-                        """
-                        UPDATE documents SET
-                            title = $4, parent_id = $5, position = $6, updated_at = $9,
-                            trashed = $10, trashed_from_parent_id = $11
-                        WHERE id = $1
-                        """,
-                        *_document_params(document),
+                        _UPDATE_SQL, *_document_update_params(document)
                     )
+
+
+# Only the mutable columns; every placeholder must be referenced so
+# asyncpg can type the prepared statement.
+_UPDATE_SQL = """
+    UPDATE documents SET
+        title = $2, parent_id = $3, position = $4, updated_at = $5,
+        trashed = $6, trashed_from_parent_id = $7
+    WHERE id = $1
+"""
+
+
+def _document_update_params(document: Document) -> tuple[Any, ...]:
+    return (
+        document.id,
+        document.title,
+        document.parent_id,
+        document.position,
+        document.updated_at,
+        document.trashed,
+        document.trashed_from_parent_id,
+    )
 
 
 def _document_params(document: Document) -> tuple[Any, ...]:
