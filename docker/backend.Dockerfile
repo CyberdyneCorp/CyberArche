@@ -48,7 +48,10 @@ RUN adduser --disabled-password --gecos '' appuser && \
     chown -R appuser:appuser /app /data
 USER appuser
 
-EXPOSE 8000
+# NO `EXPOSE` here. This image serves api (8000), mcp (8100), and workers
+# (none); each service declares its own `expose` in docker-compose. An image
+# EXPOSE would merge with it, leaving the mcp container with two exposed
+# ports — Traefik then cannot pick one and answers 502 on the public domain.
 
 # Default command = API (migrations first; exec so SIGTERM reaches uvicorn).
 CMD ["sh", "-c", "python scripts/migrate.py && exec uvicorn --factory cyberarche.api.bootstrap:create_app --host 0.0.0.0 --port 8000"]
