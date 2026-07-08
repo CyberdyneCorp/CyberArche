@@ -431,7 +431,9 @@ class InMemoryShareLinkRepository:
         return self._items.get(link_id)
 
     async def list_for_document(self, document_id: DocumentId) -> list[ShareLink]:
-        return [l for l in self._items.values() if l.document_id == document_id]
+        return [
+            link for link in self._items.values() if link.document_id == document_id
+        ]
 
     async def update(self, link: ShareLink) -> None:
         self._items[link.id] = link

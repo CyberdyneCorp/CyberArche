@@ -118,7 +118,7 @@ async def list_share_links(
     document_id: str, cases: Cases, caller: Caller
 ) -> list[ShareLinkResponse]:
     links = await cases.sharing.list_share_links(caller, DocumentId(document_id))
-    return [ShareLinkResponse.from_domain(l) for l in links]
+    return [ShareLinkResponse.from_domain(link) for link in links]
 
 
 @router.delete("/documents/{document_id}/share-links/{link_id}")
