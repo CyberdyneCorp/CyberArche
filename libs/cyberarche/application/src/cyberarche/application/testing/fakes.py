@@ -13,6 +13,9 @@ from cyberarche.application.ports.agent import AgentRun
 from cyberarche.application.ports.crdt import LoggedUpdate
 from cyberarche.application.ports.identity import Claims
 from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
+from cyberarche.application.ports.mcp import ExternalTool
+from cyberarche.domain.connectors import Connector
+from cyberarche.domain.ids import ConnectorId
 from cyberarche.application.ports.rag import (
     IngestionRecord,
     RagQueryMode,
@@ -329,6 +332,88 @@ class InMemoryAgentRunRepository:
             for r in self._items
             if r.tenant_id == tenant_id and r.document_id == document_id
         ]
+
+
+class FakeMcpClient:
+    """McpClientPort fake: scripted per-endpoint tools; unreachable endpoints
+    raise. Records calls with the credentials presented."""
+
+    def __init__(self, servers: dict[str, list[ExternalTool]] | None = None) -> None:
+        self.servers = servers or {}
+        self.calls: list[tuple[str, str, str, dict]] = []
+        self.results: dict[str, str] = {}
+
+    async def list_tools(self, endpoint: str, credentials: str) -> list[ExternalTool]:
+        if endpoint not in self.servers:
+            raise ConnectionError(f"unreachable: {endpoint}")
+        return list(self.servers[endpoint])
+
+    async def call_tool(
+        self, endpoint: str, credentials: str, tool: str, arguments: dict
+    ) -> str:
+        if endpoint not in self.servers:
+            raise ConnectionError(f"unreachable: {endpoint}")
+        self.calls.append((endpoint, credentials, tool, arguments))
+        return self.results.get(tool, f"{tool} ok")
+
+
+class NaiveSecretBox:
+    """SecretBoxPort fake: reversible obfuscation, clearly not plaintext."""
+
+    def encrypt(self, plaintext: str) -> bytes:
+        return b"enc:" + plaintext.encode()[::-1]
+
+    def decrypt(self, ciphertext: bytes) -> str:
+        return ciphertext[4:][::-1].decode()
+
+
+class InMemoryConnectorRepository:
+    def __init__(self) -> None:
+        self._items: dict[ConnectorId, Connector] = {}
+        self._secrets: dict[ConnectorId, bytes] = {}
+
+    async def add(self, connector: Connector, credentials_encrypted: bytes) -> None:
+        self._items[connector.id] = connector
+        self._secrets[connector.id] = credentials_encrypted
+
+    async def get(
+        self, tenant_id: TenantId, connector_id: ConnectorId
+    ) -> Connector | None:
+        connector = self._items.get(connector_id)
+        if connector is None or connector.tenant_id != tenant_id:
+            return None
+        return connector
+
+    async def credentials(self, connector_id: ConnectorId) -> bytes:
+        if connector_id not in self._secrets:
+            raise NotFound("connector not found")
+        return self._secrets[connector_id]
+
+    async def list_for_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Connector]:
+        return [
+            c
+            for c in self._items.values()
+            if c.tenant_id == tenant_id and c.workspace_id == workspace_id
+        ]
+
+    async def by_slug(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId, slug: str
+    ) -> Connector | None:
+        for connector in await self.list_for_workspace(tenant_id, workspace_id):
+            if connector.slug == slug:
+                return connector
+        return None
+
+    async def update(self, connector: Connector) -> None:
+        self._items[connector.id] = connector
+
+    async def delete(self, tenant_id: TenantId, connector_id: ConnectorId) -> None:
+        connector = self._items.get(connector_id)
+        if connector is not None and connector.tenant_id == tenant_id:
+            del self._items[connector_id]
+            self._secrets.pop(connector_id, None)
 
 
 class StaticTokenPort:

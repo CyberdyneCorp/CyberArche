@@ -29,9 +29,15 @@ from cyberarche.application.ports.repositories import (
 from cyberarche.application.ports.agent import AgentRunRepository
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
+from cyberarche.application.ports.mcp import (
+    ConnectorRepository,
+    McpClientPort,
+    SecretBoxPort,
+)
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -73,6 +79,7 @@ class WiringConfig:
     llm_model: str = "claude-sonnet-5"
     llm_api_key: str = ""
     llm_base_url: str = ""
+    connector_secret_key: str = ""
 
 
 @dataclass(slots=True)
@@ -91,6 +98,9 @@ class Container:
     rag: RagPort
     llm: LLMPort
     agent_runs: AgentRunRepository
+    connectors: ConnectorRepository
+    mcp_client: McpClientPort
+    secret_box: SecretBoxPort
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -110,6 +120,9 @@ def _build_use_cases(
     rag: RagPort,
     llm: LLMPort,
     agent_runs: AgentRunRepository,
+    connectors: ConnectorRepository,
+    mcp_client: McpClientPort,
+    secret_box: SecretBoxPort,
     model_name: str,
     clock,
     ids,
@@ -117,12 +130,16 @@ def _build_use_cases(
     access = AccessControl(memberships)
     realtime = RealtimeUseCases(documents, update_log, crdt_engine, access)
     knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
+    connector_use_cases = ConnectorUseCases(
+        connectors, mcp_client, secret_box, access, clock, ids
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=realtime,
         knowledge=knowledge,
+        connectors=connector_use_cases,
         agent=AgentUseCases(
             llm,
             documents,
@@ -135,6 +152,7 @@ def _build_use_cases(
             clock,
             ids,
             model_name=model_name,
+            connectors=connector_use_cases,
         ),
     )
 
@@ -162,9 +180,10 @@ async def build_container(
     token_port: TokenPort | None = None,
     rag: RagPort | None = None,
     llm: LLMPort | None = None,
+    mcp_client: McpClientPort | None = None,
 ) -> Container:
-    """Build the container. `token_port`, `rag`, and `llm` are injectable
-    for tests and the dockerless sample runtime."""
+    """Build the container. `token_port`, `rag`, `llm`, and `mcp_client`
+    are injectable for tests and the dockerless sample runtime."""
     clock = SystemClock()
     ids = UuidIds()
     closers = []
@@ -212,12 +231,36 @@ async def build_container(
         from cyberarche.adapters.outbound.postgres.agent_runs import (
             PostgresAgentRunRepository,
         )
+        from cyberarche.adapters.outbound.postgres.connectors import (
+            PostgresConnectorRepository,
+        )
 
         agent_runs = PostgresAgentRunRepository(pool)
+        connectors = PostgresConnectorRepository(pool)
     else:
-        from cyberarche.application.testing.fakes import InMemoryAgentRunRepository
+        from cyberarche.application.testing.fakes import (
+            InMemoryAgentRunRepository,
+            InMemoryConnectorRepository,
+        )
 
         agent_runs = InMemoryAgentRunRepository()
+        connectors = InMemoryConnectorRepository()
+
+    if mcp_client is None:
+        from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
+            FastMcpClientAdapter,
+        )
+
+        mcp_client = FastMcpClientAdapter()
+
+    if config.connector_secret_key:
+        from cyberarche.adapters.outbound.crypto import FernetSecretBox
+
+        secret_box: SecretBoxPort = FernetSecretBox(config.connector_secret_key)
+    else:
+        from cyberarche.application.testing.fakes import NaiveSecretBox
+
+        secret_box = NaiveSecretBox()  # tests/sample runtime only
 
     http: httpx.AsyncClient | None = None
 
@@ -290,6 +333,9 @@ async def build_container(
         rag=rag,
         llm=llm,
         agent_runs=agent_runs,
+        connectors=connectors,
+        mcp_client=mcp_client,
+        secret_box=secret_box,
         use_cases=_build_use_cases(
             workspaces,
             documents,
@@ -301,6 +347,9 @@ async def build_container(
             rag,
             llm,
             agent_runs,
+            connectors,
+            mcp_client,
+            secret_box,
             config.llm_model,
             clock,
             ids,

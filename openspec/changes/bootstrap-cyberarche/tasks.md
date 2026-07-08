@@ -71,7 +71,7 @@
 - [x] 8.2 Domain/use cases: document-scoped agent context (blocks + RAG), summarize, draft/rewrite selection
 - [x] 8.3 Agent applies edits through `CrdtEnginePort` as a peer (attributed, live)
 - [x] 8.4 File ingestion into blocks: PDF→blocks, CSV/Excel→`table` blocks; submit to RAG (worker job)
-- [ ] 8.5 Agent tool-use loop calling CyberArche MCP + external MCP tools, permission-scoped
+- [x] 8.5 Agent tool-use loop calling CyberArche MCP + external MCP tools, permission-scoped
 - [x] 8.6 `AgentRun` recording (prompt, tools, docs touched, model, outcome)
 - [ ] 8.7 Web: agent panel View/ViewModel, insert-as-blocks, run history
 - [x] 8.8 BDD tests: grounded answer with citations, live agent edit merges, PDF ingest, spreadsheet→table, run auditing
@@ -86,12 +86,12 @@
 
 ## 10. External MCP Connectors (external-mcp-connectors)
 
-- [ ] 10.1 `McpClientPort` + adapter to connect/handshake external MCP servers
-- [ ] 10.2 Connector registration use case (scope, endpoint, encrypted credentials), reject unreachable
-- [ ] 10.3 Envelope-encrypt credentials at rest; never return secrets
-- [ ] 10.4 Namespace external tools by connector; expose origin to the agent
-- [ ] 10.5 Per-session enable/disable; only enabled connectors' tools offered
-- [ ] 10.6 Tests: add/reject connector, secrets not readable, namespaced collision, disable removes tools
+- [x] 10.1 `McpClientPort` + adapter to connect/handshake external MCP servers
+- [x] 10.2 Connector registration use case (scope, endpoint, encrypted credentials), reject unreachable
+- [x] 10.3 Envelope-encrypt credentials at rest; never return secrets
+- [x] 10.4 Namespace external tools by connector; expose origin to the agent
+- [x] 10.5 Per-session enable/disable; only enabled connectors' tools offered
+- [x] 10.6 Tests: add/reject connector, secrets not readable, namespaced collision, disable removes tools
 
 ## 11. Permissions & Sharing (permissions-sharing)
 

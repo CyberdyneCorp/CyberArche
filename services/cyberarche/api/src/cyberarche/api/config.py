@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-5"
     llm_api_key: str = ""
     llm_base_url: str = ""
+    connector_secret_key: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]
 
     def wiring(self) -> WiringConfig:
@@ -42,4 +43,5 @@ class Settings(BaseSettings):
             llm_model=self.llm_model,
             llm_api_key=self.llm_api_key,
             llm_base_url=self.llm_base_url,
+            connector_secret_key=self.connector_secret_key,
         )

@@ -27,9 +27,12 @@ from cyberarche.application.ports.llm import (
 )
 from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
+from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.domain.blocks import validate_block_type
+from cyberarche.domain.connectors import split_qualified
+from cyberarche.domain.ids import WorkspaceId
 from cyberarche.domain.errors import NotFound, ValidationFailed
 from cyberarche.domain.ids import AgentRunId, DocumentId
 from cyberarche.domain.memberships import Role
@@ -93,6 +96,7 @@ class AgentUseCases:
         ids: IdPort,
         tools: ToolRegistry | None = None,
         model_name: str = "",
+        connectors: ConnectorUseCases | None = None,
     ) -> None:
         self._llm = llm
         self._documents = documents
@@ -106,6 +110,7 @@ class AgentUseCases:
         self._ids = ids
         self._tools = tools or ToolRegistry()
         self._model_name = model_name
+        self._connectors = connectors
         self._register_builtin_tools()
 
     # ---- public capabilities ----------------------------------------------
@@ -122,7 +127,9 @@ class AgentUseCases:
                 content=f"Document '{document.title}':\n{context}\n\n{instruction}",
             ),
         ]
-        return await self._run_loop(caller, document_id, instruction, messages)
+        return await self._run_loop(
+            caller, document_id, document.workspace_id, instruction, messages
+        )
 
     async def summarize(
         self, caller: CallerContext, document_id: DocumentId
@@ -201,11 +208,13 @@ class AgentUseCases:
         self,
         caller: CallerContext,
         document_id: DocumentId,
+        workspace_id: WorkspaceId,
         prompt: str,
         messages: list[LLMMessage],
     ) -> str:
         tools_used: list[str] = []
-        response = await self._llm.complete(messages, tools=self._tools.specs())
+        tools = await self._available_tools(caller, workspace_id)
+        response = await self._llm.complete(messages, tools=tools)
         for _ in range(MAX_TOOL_ROUNDS):
             if not response.wants_tools:
                 break
@@ -218,14 +227,14 @@ class AgentUseCases:
             )
             for call in response.tool_calls:
                 tools_used.append(call.name)
-                result = await self._tools.dispatch(caller, call)
+                result = await self._dispatch(caller, workspace_id, call)
                 messages.append(
                     LLMMessage(
                         role="tool",
                         tool_result=ToolResult(call_id=call.id, content=result),
                     )
                 )
-            response = await self._llm.complete(messages, tools=self._tools.specs())
+            response = await self._llm.complete(messages, tools=tools)
         await self._record(
             caller,
             document_id,
@@ -235,6 +244,31 @@ class AgentUseCases:
             model=response.model,
         )
         return response.text
+
+    async def _available_tools(
+        self, caller: CallerContext, workspace_id: WorkspaceId
+    ) -> list[ToolSpec]:
+        """Built-in tools plus the workspace's enabled external MCP tools
+        (namespaced by connector — external-mcp-connectors spec)."""
+        tools = self._tools.specs()
+        if self._connectors is not None:
+            tools = tools + await self._connectors.tools(caller, workspace_id)
+        return tools
+
+    async def _dispatch(
+        self, caller: CallerContext, workspace_id: WorkspaceId, call: ToolCall
+    ) -> str:
+        if self._connectors is not None and split_qualified(call.name):
+            try:
+                return await self._connectors.call(
+                    caller,
+                    workspace_id,
+                    qualified_name=call.name,
+                    arguments=call.arguments,
+                )
+            except Exception as error:  # external failures go back to the model
+                return f"error: {error}"
+        return await self._tools.dispatch(caller, call)
 
     async def _document_context(
         self, caller: CallerContext, document_id: DocumentId

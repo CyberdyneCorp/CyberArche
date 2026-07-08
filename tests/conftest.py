@@ -13,8 +13,10 @@ from cyberarche.application.ports.identity import Claims
 from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
 from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.application.testing.fakes import (
+    FakeMcpClient,
     FixedClock,
     InMemoryAgentRunRepository,
+    InMemoryConnectorRepository,
     InMemoryDocumentRepository,
     InMemoryIngestionRepository,
     InMemoryMembershipRepository,
@@ -22,12 +24,14 @@ from cyberarche.application.testing.fakes import (
     InMemorySnapshotRepository,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
+    NaiveSecretBox,
     ScriptedLLM,
     SequentialIds,
     StaticTokenPort,
 )
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -67,6 +71,21 @@ def agent_runs() -> InMemoryAgentRunRepository:
 
 
 @pytest.fixture
+def mcp_client() -> FakeMcpClient:
+    return FakeMcpClient()
+
+
+@pytest.fixture
+def secret_box() -> NaiveSecretBox:
+    return NaiveSecretBox()
+
+
+@pytest.fixture
+def connector_repo() -> InMemoryConnectorRepository:
+    return InMemoryConnectorRepository()
+
+
+@pytest.fixture
 def use_cases(
     clock: FixedClock,
     update_log: InMemoryUpdateLog,
@@ -74,6 +93,9 @@ def use_cases(
     rag: InMemoryRag,
     llm: ScriptedLLM,
     agent_runs: InMemoryAgentRunRepository,
+    mcp_client: FakeMcpClient,
+    secret_box: NaiveSecretBox,
+    connector_repo: InMemoryConnectorRepository,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
@@ -84,12 +106,16 @@ def use_cases(
     engine = PycrdtEngine()
     realtime = RealtimeUseCases(documents, update_log, engine, access)
     knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
+    connectors = ConnectorUseCases(
+        connector_repo, mcp_client, secret_box, access, clock, ids
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
         realtime=realtime,
         knowledge=knowledge,
+        connectors=connectors,
         agent=AgentUseCases(
             llm,
             documents,
@@ -102,6 +128,7 @@ def use_cases(
             clock,
             ids,
             model_name="scripted-test-model",
+            connectors=connectors,
         ),
     )
 
