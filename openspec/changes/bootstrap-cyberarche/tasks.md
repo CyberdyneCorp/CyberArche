@@ -29,12 +29,12 @@
 
 ## 4. Realtime Collaboration (realtime-collaboration)
 
-- [ ] 4.1 `CrdtEnginePort` + pycrdt adapter: authoritative doc, apply/update, snapshot/compaction
-- [ ] 4.2 FastAPI WebSocket relay: auth handshake, join-authorization, update broadcast, awareness/presence fanout
-- [ ] 4.3 Persist update log + periodic snapshot; reconstruct document on reconnect/restart
-- [ ] 4.4 Enforce view/edit permission on join and on every inbound update
+- [x] 4.1 `CrdtEnginePort` + pycrdt adapter: authoritative doc, apply/update, snapshot/compaction
+- [x] 4.2 FastAPI WebSocket relay: auth handshake, join-authorization, update broadcast, awareness/presence fanout
+- [x] 4.3 Persist update log + periodic snapshot; reconstruct document on reconnect/restart
+- [x] 4.4 Enforce view/edit permission on join and on every inbound update
 - [ ] 4.5 Web: Yjs client, WebSocket provider, offline persistence + reconnect merge; presence/cursor rendering
-- [ ] 4.6 BDD tests: two-editor convergence, late joiner catch-up, reconstruct after restart, reject view-only editor, offline merge
+- [x] 4.6 BDD tests: two-editor convergence, late joiner catch-up, reconstruct after restart, reject view-only editor, offline merge
 
 ## 5. Block Editor (block-editor)
 

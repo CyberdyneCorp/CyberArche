@@ -10,17 +10,20 @@ from cyberarche.api.config import Settings
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.identity import Claims
+from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
 from cyberarche.application.testing.fakes import (
     FixedClock,
     InMemoryDocumentRepository,
     InMemoryMembershipRepository,
     InMemorySnapshotRepository,
+    InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
     SequentialIds,
     StaticTokenPort,
 )
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.domain.ids import TenantId, UserId
@@ -32,17 +35,31 @@ def clock() -> FixedClock:
 
 
 @pytest.fixture
-def use_cases(clock: FixedClock) -> UseCases:
+def update_log(clock: FixedClock) -> InMemoryUpdateLog:
+    return InMemoryUpdateLog(clock)
+
+
+@pytest.fixture
+def memberships() -> InMemoryMembershipRepository:
+    return InMemoryMembershipRepository()
+
+
+@pytest.fixture
+def use_cases(
+    clock: FixedClock,
+    update_log: InMemoryUpdateLog,
+    memberships: InMemoryMembershipRepository,
+) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
     snapshots = InMemorySnapshotRepository()
-    memberships = InMemoryMembershipRepository()
     ids = SequentialIds()
     access = AccessControl(memberships)
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
+        realtime=RealtimeUseCases(documents, update_log, PycrdtEngine(), access),
     )
 
 

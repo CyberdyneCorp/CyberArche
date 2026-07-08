@@ -9,6 +9,7 @@ from __future__ import annotations
 import itertools
 from datetime import UTC, datetime, timedelta
 
+from cyberarche.application.ports.crdt import LoggedUpdate
 from cyberarche.application.ports.identity import Claims
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthenticated
@@ -147,6 +148,45 @@ class InMemoryMembershipRepository:
         self, document_id: DocumentId, user_id: UserId
     ) -> DocumentGrant | None:
         return self._document.get((document_id, user_id))
+
+
+class InMemoryUpdateLog:
+    def __init__(self, clock: FixedClock | None = None) -> None:
+        self._clock = clock or FixedClock()
+        self._items: dict[DocumentId, list[LoggedUpdate]] = {}
+        self._seq = itertools.count(1)
+
+    async def append(
+        self, document_id: DocumentId, update: bytes, *, origin: str | None
+    ) -> LoggedUpdate:
+        logged = LoggedUpdate(
+            seq=next(self._seq),
+            document_id=document_id,
+            update=update,
+            origin=origin,
+            created_at=self._clock.now(),
+        )
+        self._items.setdefault(document_id, []).append(logged)
+        return logged
+
+    async def list_for_document(self, document_id: DocumentId) -> list[LoggedUpdate]:
+        return list(self._items.get(document_id, []))
+
+    async def count(self, document_id: DocumentId) -> int:
+        return len(self._items.get(document_id, []))
+
+    async def replace_with(
+        self, document_id: DocumentId, merged: bytes, *, up_to_seq: int
+    ) -> None:
+        kept = [u for u in self._items.get(document_id, []) if u.seq > up_to_seq]
+        compacted = LoggedUpdate(
+            seq=next(self._seq),
+            document_id=document_id,
+            update=merged,
+            origin="compaction",
+            created_at=self._clock.now(),
+        )
+        self._items[document_id] = [compacted] + kept
 
 
 class StaticTokenPort:

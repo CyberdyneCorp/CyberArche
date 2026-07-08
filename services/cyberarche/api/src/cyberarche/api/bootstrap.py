@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from cyberarche.adapters.inbound.http.errors import install_error_handlers
+from cyberarche.adapters.inbound.http.realtime import DocumentPeers
+from cyberarche.adapters.inbound.http.realtime import router as realtime_router
 from cyberarche.adapters.inbound.http.routers import all_routers
 from cyberarche.adapters.wiring import build_container
 from cyberarche.api.config import Settings
@@ -47,4 +49,6 @@ def create_app(
     install_error_handlers(app)
     for router in all_routers:
         app.include_router(router)
+    app.include_router(realtime_router)
+    app.state.document_peers = DocumentPeers()
     return app

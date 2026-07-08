@@ -26,10 +26,13 @@ from cyberarche.application.ports.repositories import (
     SnapshotRepository,
     WorkspaceRepository,
 )
+from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
+from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
 from cyberarche.adapters.outbound.auth.cyberdyne import (
     ClientCredentialsTokenSource,
     CyberdyneAuthConfig,
@@ -69,6 +72,8 @@ class Container:
     documents: DocumentRepository
     snapshots: SnapshotRepository
     memberships: MembershipRepository
+    update_log: UpdateLogPort
+    crdt_engine: CrdtEnginePort
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -82,6 +87,8 @@ def _build_use_cases(
     documents: DocumentRepository,
     snapshots: SnapshotRepository,
     memberships: MembershipRepository,
+    update_log: UpdateLogPort,
+    crdt_engine: CrdtEnginePort,
     clock,
     ids,
 ) -> UseCases:
@@ -90,6 +97,7 @@ def _build_use_cases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
+        realtime=RealtimeUseCases(documents, update_log, crdt_engine, access),
     )
 
 
@@ -112,6 +120,7 @@ async def build_container(
             PostgresSnapshotRepository,
             PostgresWorkspaceRepository,
         )
+        from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
         pool = await asyncpg.create_pool(config.database_url)
         closers.append(pool.close)
@@ -119,11 +128,13 @@ async def build_container(
         documents = PostgresDocumentRepository(pool)
         snapshots = PostgresSnapshotRepository(pool)
         memberships = PostgresMembershipRepository(pool)
+        update_log = PostgresUpdateLog(pool)
     else:
         from cyberarche.application.testing.fakes import (
             InMemoryDocumentRepository,
             InMemoryMembershipRepository,
             InMemorySnapshotRepository,
+            InMemoryUpdateLog,
             InMemoryWorkspaceRepository,
         )
 
@@ -131,6 +142,7 @@ async def build_container(
         documents = InMemoryDocumentRepository()
         snapshots = InMemorySnapshotRepository()
         memberships = InMemoryMembershipRepository()
+        update_log = InMemoryUpdateLog()
 
     service_tokens: ServiceTokenPort | None = None
     authorization: AuthorizationPort | None = None
@@ -153,6 +165,7 @@ async def build_container(
         service_tokens = credentials
         authorization = IamAuthorization(auth_config, http, credentials)
 
+    crdt_engine = PycrdtEngine()
     return Container(
         config=config,
         token_port=token_port,
@@ -162,8 +175,10 @@ async def build_container(
         documents=documents,
         snapshots=snapshots,
         memberships=memberships,
+        update_log=update_log,
+        crdt_engine=crdt_engine,
         use_cases=_build_use_cases(
-            workspaces, documents, snapshots, memberships, clock, ids
+            workspaces, documents, snapshots, memberships, update_log, crdt_engine, clock, ids
         ),
         _closers=closers,
     )
