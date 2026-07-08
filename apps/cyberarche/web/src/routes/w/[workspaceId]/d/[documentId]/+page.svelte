@@ -1,20 +1,44 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { getDocument, type Document } from '$lib/api/documents';
+	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
+	import { registerBuiltinBlocks } from '$lib/editor/blocks';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { colorFor, createEditor, type EditorVM } from '$lib/viewmodels/editor.svelte';
+	import { session } from '$lib/viewmodels/session.svelte';
+
+	registerBuiltinBlocks();
 
 	const documentId = $derived(page.params.documentId!);
 
 	let doc = $state<Document | null>(null);
 	let titleDraft = $state('');
+	let editor = $state<EditorVM | null>(null);
 
+	// Depends only on documentId — never on `editor`, which it writes
+	// (reading it here would loop the effect through create/destroy).
 	$effect(() => {
 		const id = documentId;
+		let instance: EditorVM | null = null;
+		let cancelled = false;
 		doc = null;
+
 		getDocument(id).then((loaded) => {
+			if (cancelled) return;
 			doc = loaded;
 			titleDraft = loaded.title === 'Untitled' ? '' : loaded.title;
+			const token = session.getAccessToken();
+			if (token) {
+				instance = createEditor(id, token, session.userId ?? 'me');
+				editor = instance;
+			}
 		});
+
+		return () => {
+			cancelled = true;
+			instance?.destroy();
+			editor = null;
+		};
 	});
 
 	async function commitTitle() {
@@ -25,6 +49,14 @@
 			doc = { ...doc, title: next };
 		}
 	}
+
+	const statusLabel = $derived(
+		editor?.status === 'connected'
+			? 'Synced'
+			: editor?.status === 'connecting'
+				? 'Connecting…'
+				: 'Offline — will sync'
+	);
 </script>
 
 {#if doc}
@@ -33,7 +65,22 @@
 			<nav class="crumbs" aria-label="Breadcrumb">
 				<span class="crumb">{doc.title}</span>
 			</nav>
-			<span class="chip chip-accent">Synced</span>
+			<div class="right">
+				{#if editor && editor.peers.length > 0}
+					<div class="presence" data-testid="presence">
+						{#each editor.peers.slice(0, 4) as peer (peer.user_id)}
+							<span class="avatar" style:background={colorFor(peer.user_id)}>
+								{peer.user_id.slice(0, 2).toUpperCase()}
+							</span>
+						{/each}
+					</div>
+				{/if}
+				<span
+					class="chip"
+					class:chip-accent={editor?.status === 'connected'}
+					data-testid="sync-status">{statusLabel}</span
+				>
+			</div>
 		</header>
 
 		<div class="canvas">
@@ -45,9 +92,9 @@
 				onkeydown={(event) => event.key === 'Enter' && (event.target as HTMLInputElement).blur()}
 				data-testid="doc-title"
 			/>
-			<div class="editor-placeholder" data-testid="editor">
-				<p>The block editor lands here next — type <kbd>/</kbd> for blocks.</p>
-			</div>
+			{#if editor}
+				<BlockEditor {editor} />
+			{/if}
 		</div>
 	</article>
 {:else}
@@ -63,6 +110,7 @@
 	.topbar {
 		position: sticky;
 		top: 0;
+		z-index: 10;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -72,6 +120,26 @@
 	}
 	.crumbs {
 		color: var(--tx2);
+	}
+	.right {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.presence {
+		display: flex;
+	}
+	.avatar {
+		display: grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		color: #fff;
+		font-size: 9px;
+		font-weight: 600;
+		border: 2px solid var(--bg1);
+		margin-left: -6px;
 	}
 	.canvas {
 		width: min(760px, 92%);
@@ -88,22 +156,10 @@
 		font-weight: 700;
 		color: var(--tx);
 		padding: 0;
+		margin-bottom: 18px;
 	}
 	.title::placeholder {
 		color: var(--tx3);
-	}
-	.editor-placeholder {
-		margin-top: 24px;
-		color: var(--tx3);
-		font-size: 15.5px;
-		line-height: 1.7;
-	}
-	kbd {
-		font-family: var(--font-mono);
-		background: var(--bg2);
-		border: 1px solid var(--line2);
-		border-radius: 4px;
-		padding: 1px 5px;
 	}
 	.loading {
 		display: grid;

@@ -1,0 +1,136 @@
+/** Registers the built-in block types (12.1: adding one = one entry here). */
+
+import DividerBlock from '$lib/components/editor/blocks/DividerBlock.svelte';
+import CodeBlock from '$lib/components/editor/blocks/CodeBlock.svelte';
+import LatexBlock from '$lib/components/editor/blocks/LatexBlock.svelte';
+import MermaidBlock from '$lib/components/editor/blocks/MermaidBlock.svelte';
+import TableBlock from '$lib/components/editor/blocks/TableBlock.svelte';
+import TextBlocks from '$lib/components/editor/blocks/TextBlocks.svelte';
+import { registerBlock } from './registry';
+
+let registered = false;
+
+export function registerBuiltinBlocks(): void {
+	if (registered) return;
+	registered = true;
+
+	registerBlock({
+		type: 'paragraph',
+		label: 'Text',
+		icon: '¶',
+		group: 'text',
+		hint: 'Plain paragraph',
+		create: () => ({ text: '' }),
+		component: TextBlocks
+	});
+	registerBlock({
+		type: 'heading',
+		label: 'Heading',
+		icon: 'H',
+		group: 'text',
+		hint: 'Section heading',
+		create: () => ({ text: '', level: 2 }),
+		component: TextBlocks,
+		markdownPrefix: /^(#{1,3})\s$/
+	});
+	registerBlock({
+		type: 'bulleted_list',
+		label: 'Bulleted list',
+		icon: '•',
+		group: 'text',
+		hint: 'Simple list',
+		create: () => ({ text: '' }),
+		component: TextBlocks,
+		markdownPrefix: /^[-*]\s$/
+	});
+	registerBlock({
+		type: 'numbered_list',
+		label: 'Numbered list',
+		icon: '1.',
+		group: 'text',
+		hint: 'Ordered list',
+		create: () => ({ text: '' }),
+		component: TextBlocks,
+		markdownPrefix: /^1[.)]\s$/
+	});
+	registerBlock({
+		type: 'todo',
+		label: 'To-do',
+		icon: '☐',
+		group: 'text',
+		hint: 'Checkbox item',
+		create: () => ({ text: '', checked: false }),
+		component: TextBlocks,
+		markdownPrefix: /^\[\s?\]\s$/
+	});
+	registerBlock({
+		type: 'callout',
+		label: 'Callout',
+		icon: '◆',
+		group: 'text',
+		hint: 'Highlighted note',
+		create: () => ({ text: '' }),
+		component: TextBlocks,
+		markdownPrefix: /^>\s$/
+	});
+	registerBlock({
+		type: 'quote',
+		label: 'Quote',
+		icon: '❝',
+		group: 'text',
+		hint: 'Pull quote',
+		create: () => ({ text: '' }),
+		component: TextBlocks
+	});
+	registerBlock({
+		type: 'divider',
+		label: 'Divider',
+		icon: '—',
+		group: 'text',
+		hint: 'Horizontal rule',
+		create: () => ({}),
+		component: DividerBlock,
+		markdownPrefix: /^---\s?$/
+	});
+	registerBlock({
+		type: 'code',
+		label: 'Code',
+		icon: '⌘',
+		group: 'technical',
+		hint: 'Highlighted source',
+		create: () => ({ source: '', language: 'python' }),
+		component: CodeBlock,
+		markdownPrefix: /^```\s?$/
+	});
+	registerBlock({
+		type: 'latex',
+		label: 'LaTeX',
+		icon: '∑',
+		group: 'technical',
+		hint: 'Typeset math (KaTeX)',
+		create: () => ({ source: '' }),
+		component: LatexBlock,
+		markdownPrefix: /^\$\$\s?$/
+	});
+	registerBlock({
+		type: 'mermaid',
+		label: 'Mermaid',
+		icon: '⿻',
+		group: 'technical',
+		hint: 'Diagram from source',
+		create: () => ({ source: '' }),
+		component: MermaidBlock
+	});
+	registerBlock({
+		type: 'table',
+		label: 'Table',
+		icon: '▦',
+		group: 'technical',
+		hint: 'Rows and columns',
+		create: () => ({
+			header: ['Column 1', 'Column 2'],
+			rows: [['', '']]
+		}),
+		component: TableBlock
+	});
+}

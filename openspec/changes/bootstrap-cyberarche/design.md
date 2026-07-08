@@ -101,15 +101,22 @@ File ingestion (PDF/CSV/Excel → blocks + RAG) and long agent runs execute in
 client-credentials. **Rationale:** keeps request latency bounded; ingestion is
 inherently async (RAG returns a task_id).
 
-### D-9 — Frontend editor foundation
-The block editor is built on a ProseMirror-based rich-text core (e.g. TipTap)
-bound to the Yjs doc via `y-prosemirror`; heavy blocks are custom node views:
-KaTeX for `latex`, Mermaid for `mermaid`, a highlighter for `code`, an Excalidraw
-canvas for `whiteboard`. ViewModels (`*.svelte.ts`) own editor state and agent
-commands; Views (`*.svelte`) render; Models (`lib/api/*.ts`) are typed clients.
-**Rationale:** ProseMirror+Yjs is the mature multiplayer rich-text stack; keeps
-MVVM boundaries clean. **Alternative rejected:** hand-rolled contenteditable —
-too costly to make collaborative and correct.
+### D-9 — Frontend editor foundation (revised during implementation)
+The block editor is a registry-driven native Svelte block editor over the shared
+CRDT structure `Array("blocks")` of Maps — the same structure the backend agent
+edits as a CRDT peer. Each block type registers a Svelte component +
+create/serialize logic (the architecture-quality block registry); heavy blocks
+render with KaTeX (`latex`), Mermaid (`mermaid`), highlight.js (`code`), and an
+Excalidraw-style canvas (`whiteboard`). ViewModels (`*.svelte.ts`) own editor
+state, Yjs binding, and undo/redo; Views render; Models are typed clients.
+**Rationale:** the Python agent is a first-class editor of the document; a
+ProseMirror `XmlFragment` (original plan: TipTap + y-prosemirror) would force
+the agent to synthesize ProseMirror-schema XML from Python. Sharing the plain
+block Array keeps agent and human edits symmetric, and the registry satisfies
+the extensibility requirement directly. **Trade-off:** intra-block text merges
+are per-field LWW rather than character-wise (concurrent edits to *different
+blocks* merge perfectly; same-field simultaneous typing last-writes) — an
+upgrade path to Y.Text-per-block exists without changing the block schema.
 
 ### D-10 — Extensibility by construction (add features without editing the core)
 Extension happens at seams, not by modifying core code: block types register in a

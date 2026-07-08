@@ -49,6 +49,16 @@ export function createSession() {
 		getAccessToken(): string | null {
 			return access;
 		},
+		/** JWT subject (user id) from the access token, if present. */
+		get userId(): string | null {
+			if (!access) return null;
+			try {
+				const payload = access.split('.')[1];
+				return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))).sub ?? null;
+			} catch {
+				return null;
+			}
+		},
 
 		restore(): boolean {
 			const stored = loadStored();

@@ -33,19 +33,19 @@
 - [x] 4.2 FastAPI WebSocket relay: auth handshake, join-authorization, update broadcast, awareness/presence fanout
 - [x] 4.3 Persist update log + periodic snapshot; reconstruct document on reconnect/restart
 - [x] 4.4 Enforce view/edit permission on join and on every inbound update
-- [ ] 4.5 Web: Yjs client, WebSocket provider, offline persistence + reconnect merge; presence/cursor rendering
+- [x] 4.5 Web: Yjs client, WebSocket provider, offline persistence + reconnect merge; presence/cursor rendering
 - [x] 4.6 BDD tests: two-editor convergence, late joiner catch-up, reconstruct after restart, reject view-only editor, offline merge
 
 ## 5. Block Editor (block-editor)
 
-- [ ] 5.1 Web: ProseMirror/TipTap core bound to Yjs (`y-prosemirror`); base blocks (paragraph, heading, lists, todo, callout, quote, divider)
-- [ ] 5.2 Slash command menu + Markdown-style input shortcuts
-- [ ] 5.3 `code` block with language selection + syntax highlighting
-- [ ] 5.4 `latex` block with KaTeX live render + source preservation + inline error
-- [ ] 5.5 `mermaid` block with render + source preservation + parse-error display
-- [ ] 5.6 `table` block: rich-text cells, add/remove row & column
-- [ ] 5.7 Editor ViewModel (`active-editor.svelte.ts`) exposing commands + undo/redo
-- [ ] 5.8 Tests: slash insert, split/merge, LaTeX/Mermaid render + error, table row/column ops, heading shortcut
+- [x] 5.1 Web: ProseMirror/TipTap core bound to Yjs (`y-prosemirror`); base blocks (paragraph, heading, lists, todo, callout, quote, divider)
+- [x] 5.2 Slash command menu + Markdown-style input shortcuts
+- [x] 5.3 `code` block with language selection + syntax highlighting
+- [x] 5.4 `latex` block with KaTeX live render + source preservation + inline error
+- [x] 5.5 `mermaid` block with render + source preservation + parse-error display
+- [x] 5.6 `table` block: rich-text cells, add/remove row & column
+- [x] 5.7 Editor ViewModel (`active-editor.svelte.ts`) exposing commands + undo/redo
+- [x] 5.8 Tests: slash insert, split/merge, LaTeX/Mermaid render + error, table row/column ops, heading shortcut
 
 ## 6. Whiteboard Canvas (whiteboard-canvas)
 
@@ -106,7 +106,7 @@
 
 ## 12. Architecture Quality (architecture-quality)
 
-- [ ] 12.1 Block-type registry: add a block type via registration only (render/serialize), no core-editor edits; back-compat load test
+- [x] 12.1 Block-type registry: add a block type via registration only (render/serialize), no core-editor edits; back-compat load test
 - [x] 12.2 Port/adapter seams verified for every provider (LLM, RAG, auth, storage, CRDT); config-driven selection
 - [x] 12.3 Shared contract-test suites per port; run every real and fake adapter against them
 - [x] 12.4 Make API and MCP stateless (no in-process shared state); horizontal-replica test with no sticky sessions

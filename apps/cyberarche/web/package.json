@@ -13,7 +13,11 @@
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.1.0",
-    "@fontsource/ibm-plex-sans": "^5.1.0"
+    "@fontsource/ibm-plex-sans": "^5.1.0",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.17.0",
+    "mermaid": "^11.16.0",
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
