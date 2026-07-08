@@ -1,0 +1,21 @@
+[project]
+name = "cyberarche-api"
+version = "0.1.0"
+description = "CyberArche HTTP API service (FastAPI)"
+requires-python = ">=3.12"
+dependencies = [
+    "cyberarche-adapters",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic-settings>=2.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cyberarche"]
+
+[project.scripts]
+cyberarche-api = "cyberarche.api.main:run"

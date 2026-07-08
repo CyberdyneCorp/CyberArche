@@ -1,0 +1,20 @@
+[project]
+name = "cyberarche-mcp"
+version = "0.1.0"
+description = "CyberArche MCP server (FastMCP) — document and knowledge tools"
+requires-python = ">=3.12"
+dependencies = [
+    "cyberarche-adapters",
+    "fastmcp>=2.0",
+    "pydantic-settings>=2.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cyberarche"]
+
+[project.scripts]
+cyberarche-mcp = "cyberarche.mcp_server.main:run"

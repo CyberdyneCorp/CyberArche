@@ -1,0 +1,72 @@
+[project]
+name = "cyberarche"
+version = "0.1.0"
+description = "CyberArche — AI-centric collaborative document platform (workspace root)"
+requires-python = ">=3.12"
+dependencies = [
+    "cyberarche-domain",
+    "cyberarche-application",
+    "cyberarche-adapters",
+    "cyberarche-api",
+    "cyberarche-mcp",
+    "cyberarche-workers",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/cyberarche/domain",
+    "libs/cyberarche/application",
+    "libs/cyberarche/adapters",
+    "services/cyberarche/api",
+    "services/cyberarche/mcp",
+    "services/cyberarche/workers",
+]
+
+[tool.uv.sources]
+cyberarche-domain = { workspace = true }
+cyberarche-application = { workspace = true }
+cyberarche-adapters = { workspace = true }
+cyberarche-api = { workspace = true }
+cyberarche-mcp = { workspace = true }
+cyberarche-workers = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "import-linter>=2.1",
+    "ruff>=0.8",
+    "httpx>=0.27",
+    "cryptography>=43.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+# Hexagonal dependency rule (architecture-quality spec):
+#   domain <- application <- adapters; inbound never imports outbound.
+# Enforced in CI via `lint-imports`.
+[tool.importlinter]
+root_packages = ["cyberarche"]
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Hexagonal layers: adapters -> application -> domain"
+type = "layers"
+layers = [
+    "cyberarche.adapters",
+    "cyberarche.application",
+    "cyberarche.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Inbound adapters must not import outbound adapters"
+type = "forbidden"
+source_modules = ["cyberarche.adapters.inbound"]
+forbidden_modules = ["cyberarche.adapters.outbound"]
