@@ -66,6 +66,9 @@
 	{/if}
 
 	<footer class="footer">
+		<a class="foot-btn" href={`/w/${workspaceId}/settings`} data-testid="open-settings">
+			⚙ Settings &amp; connectors
+		</a>
 		<button class="foot-btn" onclick={() => theme.toggle()} data-testid="theme-toggle">
 			◐ {theme.mode === 'dark' ? 'Light' : 'Dark'} theme
 		</button>
@@ -162,6 +165,8 @@
 		padding: 5px 6px;
 		border-radius: var(--r-control);
 		color: var(--tx2);
+		text-decoration: none;
+		display: block;
 	}
 	.foot-btn:hover {
 		background: var(--bg2);

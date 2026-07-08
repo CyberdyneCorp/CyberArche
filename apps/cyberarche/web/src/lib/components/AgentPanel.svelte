@@ -1,8 +1,24 @@
 <script lang="ts">
 	/** The violet right rail (design: everything the AI touches is violet). */
 	import type { AgentPanelVM } from '$lib/viewmodels/agent.svelte';
+	import type { ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
 
-	let { agent, onclose }: { agent: AgentPanelVM; onclose: () => void } = $props();
+	let {
+		agent,
+		connectors = null,
+		workspaceId = '',
+		onclose
+	}: {
+		agent: AgentPanelVM;
+		connectors?: ConnectorsVM | null;
+		workspaceId?: string;
+		onclose: () => void;
+	} = $props();
+
+	let toolsOpen = $state(false);
+	const enabledConnectors = $derived(
+		(connectors?.items ?? []).filter((c) => c.enabled).length
+	);
 
 	let prompt = $state('');
 	let showRuns = $state(false);
@@ -129,6 +145,45 @@
 			<p class="ingest-state">Uploading → processing…</p>
 		{/if}
 	</div>
+
+	{#if connectors}
+		<section class="tools-bar">
+			<button
+				class="tools-summary"
+				data-testid="agent-tools-toggle"
+				onclick={() => (toolsOpen = !toolsOpen)}
+			>
+				<span>{toolsOpen ? '▾' : '▸'} Tools</span>
+				<span class="tools-meta"
+					>{connectors.tools.length} external · {enabledConnectors} MCP</span
+				>
+			</button>
+			{#if toolsOpen}
+				<div class="tools-list" data-testid="agent-tools">
+					{#each connectors.items as connector (connector.id)}
+						<label class="tool-row">
+							<input
+								type="checkbox"
+								checked={connector.enabled}
+								onchange={(event) =>
+									connectors!.setEnabled(
+										connector.id,
+										(event.target as HTMLInputElement).checked
+									)}
+							/>
+							<span class="tool-name">{connector.name}</span>
+							<span class="tool-count"
+								>{connectors.toolsOf(connector).length} tool(s)</span
+							>
+						</label>
+					{:else}
+						<p class="tools-empty">No external MCP servers attached.</p>
+					{/each}
+					<a class="manage" href={`/w/${workspaceId}/settings`}>Manage connectors →</a>
+				</div>
+			{/if}
+		</section>
+	{/if}
 
 	<form class="composer" onsubmit={submit}>
 		<input
@@ -281,6 +336,52 @@
 	}
 	.empty {
 		color: var(--tx3);
+	}
+	.tools-bar {
+		border-top: 1px solid var(--line);
+		padding: 6px 14px;
+	}
+	.tools-summary {
+		display: flex;
+		justify-content: space-between;
+		width: 100%;
+		font-size: 12px;
+		color: var(--tx2);
+		padding: 3px 0;
+	}
+	.tools-meta {
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: var(--tx3);
+	}
+	.tools-list {
+		padding: 4px 0 2px;
+	}
+	.tool-row {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		padding: 3px 0;
+		font-size: 12px;
+	}
+	.tool-name {
+		flex: 1;
+	}
+	.tool-count {
+		color: var(--tx3);
+		font-size: 10.5px;
+	}
+	.tools-empty {
+		color: var(--tx3);
+		font-size: 12px;
+		margin: 4px 0;
+	}
+	.manage {
+		display: block;
+		margin-top: 4px;
+		font-size: 11.5px;
+		color: var(--ai);
+		text-decoration: none;
 	}
 	.composer {
 		display: flex;

@@ -21,7 +21,7 @@ test.beforeAll(async ({ request }) => {
 	let tokens: { access_token?: string; refresh_token?: string } = {};
 	for (const delay of [0, 2000, 5000, 10_000]) {
 		if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-		const login = await request.post('http://localhost:8000/api/v1/auth/session', {
+		const login = await request.post('http://127.0.0.1:8123/api/v1/auth/session', {
 			data: { email: EMAIL, password: PASSWORD }
 		});
 		if (login.ok()) {
@@ -34,7 +34,7 @@ test.beforeAll(async ({ request }) => {
 	const headers = { Authorization: `Bearer ${session.access}` };
 
 	const workspace = await (
-		await request.post('http://localhost:8000/api/v1/workspaces', {
+		await request.post('http://127.0.0.1:8123/api/v1/workspaces', {
 			data: { name: 'Editor E2E' },
 			headers
 		})
@@ -48,7 +48,7 @@ async function openDocument(
 	request: import('@playwright/test').APIRequestContext
 ): Promise<void> {
 	const document = await (
-		await request.post('http://localhost:8000/api/v1/documents', {
+		await request.post('http://127.0.0.1:8123/api/v1/documents', {
 			data: { workspace_id: workspaceId, title: `Doc ${Date.now()}` },
 			headers: { Authorization: `Bearer ${session.access}` }
 		})

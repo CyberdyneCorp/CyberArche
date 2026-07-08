@@ -22,8 +22,8 @@ export default defineConfig({
 	webServer: [
 		{
 			command:
-				'uv run --directory ../../.. uvicorn --factory cyberarche.api.bootstrap:create_app --port 8000',
-			url: 'http://localhost:8000/api/v1/health',
+				'uv run --directory ../../.. uvicorn --factory cyberarche.api.bootstrap:create_app --host 127.0.0.1 --port 8123',
+			url: 'http://127.0.0.1:8123/api/v1/health',
 			reuseExistingServer: false, // fresh in-memory state every run
 			env: {
 				CYBERARCHE_BACKEND: 'memory',
@@ -36,7 +36,15 @@ export default defineConfig({
 			}
 		},
 		{
+			// External MCP fixture the connectors e2e attaches to.
+			command:
+				'uv run --directory ../../.. python apps/cyberarche/web/e2e/fixtures/ticketing_mcp.py',
+			url: 'http://127.0.0.1:8200/health',
+			reuseExistingServer: !process.env.CI
+		},
+		{
 			command: 'pnpm dev --port 5173 --strictPort',
+			env: { CYBERARCHE_API_ORIGIN: 'http://127.0.0.1:8123' },
 			url: 'http://localhost:5173',
 			reuseExistingServer: !process.env.CI
 		}

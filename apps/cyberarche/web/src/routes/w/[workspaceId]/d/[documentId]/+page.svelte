@@ -6,6 +6,7 @@
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import { createAgentPanel, type AgentPanelVM } from '$lib/viewmodels/agent.svelte';
+	import { createConnectors, type ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { colorFor, createEditor, type EditorVM } from '$lib/viewmodels/editor.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
@@ -24,11 +25,16 @@
 	let sharing = $state<SharingVM | null>(null);
 	let shareOpen = $state(false);
 
+	let connectors = $state<ConnectorsVM | null>(null);
+
 	$effect(() => {
 		agent = createAgentPanel(documentId);
-		const instance = createSharing(workspaceId, documentId);
-		sharing = instance;
-		instance.load();
+		const sharingVm = createSharing(workspaceId, documentId);
+		sharing = sharingVm;
+		sharingVm.load();
+		const connectorsVm = createConnectors(workspaceId);
+		connectors = connectorsVm;
+		connectorsVm.load();
 	});
 
 	// Depends only on documentId — never on `editor`, which it writes
@@ -127,7 +133,7 @@
 		</div>
 	</article>
 	{#if agentOpen && agent}
-		<AgentPanel {agent} onclose={() => (agentOpen = false)} />
+		<AgentPanel {agent} {connectors} {workspaceId} onclose={() => (agentOpen = false)} />
 	{/if}
 	{#if shareOpen && sharing}
 		<ShareDialog {sharing} onclose={() => (shareOpen = false)} />
