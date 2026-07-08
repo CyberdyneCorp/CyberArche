@@ -130,7 +130,9 @@ async def test_offline_edits_merge_on_reconnect(use_cases: UseCases, alice):
     assert "online " in merged and "offline " in merged
 
 
-async def test_compaction_preserves_content(use_cases: UseCases, update_log, alice):
+async def test_compaction_preserves_content_and_records_snapshot(
+    use_cases: UseCases, update_log, snapshots_repo, alice
+):
     from cyberarche.application.use_cases import realtime as realtime_module
 
     _, document = await setup_document(use_cases, alice)
@@ -143,3 +145,10 @@ async def test_compaction_preserves_content(use_cases: UseCases, update_log, ali
     count = await update_log.count(document.id)
     assert count < realtime_module.COMPACTION_THRESHOLD  # log was compacted
     assert "0," in text_of(state) and "204," in text_of(state)
+
+    # Compaction also recorded a server-initiated content snapshot
+    # (document-model spec: periodic snapshots).
+    auto_snapshot = await snapshots_repo.latest(document.id)
+    assert auto_snapshot is not None
+    assert "blocks" in auto_snapshot.content
+    assert auto_snapshot.state_vector  # reconstructable checkpoint

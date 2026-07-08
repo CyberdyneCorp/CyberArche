@@ -107,11 +107,11 @@
 ## 12. Architecture Quality (architecture-quality)
 
 - [ ] 12.1 Block-type registry: add a block type via registration only (render/serialize), no core-editor edits; back-compat load test
-- [ ] 12.2 Port/adapter seams verified for every provider (LLM, RAG, auth, storage, CRDT); config-driven selection
-- [ ] 12.3 Shared contract-test suites per port; run every real and fake adapter against them
-- [ ] 12.4 Make API and MCP stateless (no in-process shared state); horizontal-replica test with no sticky sessions
-- [ ] 12.5 Multi-instance realtime relay sharing CRDT state via update log + broker (e.g. Redis pub/sub); cross-instance convergence test
-- [ ] 12.6 Queue-backed workers for ingestion and large agent runs; assert requests/editor never block
+- [x] 12.2 Port/adapter seams verified for every provider (LLM, RAG, auth, storage, CRDT); config-driven selection
+- [x] 12.3 Shared contract-test suites per port; run every real and fake adapter against them
+- [x] 12.4 Make API and MCP stateless (no in-process shared state); horizontal-replica test with no sticky sessions
+- [x] 12.5 Multi-instance realtime relay sharing CRDT state via update log + broker (e.g. Redis pub/sub); cross-instance convergence test
+- [x] 12.6 Queue-backed workers for ingestion and large agent runs; assert requests/editor never block
 
 ## 13. Validation & CI
 

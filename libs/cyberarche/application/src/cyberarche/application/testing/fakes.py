@@ -6,11 +6,15 @@ These are the reference implementations for the port contract tests
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 from datetime import UTC, datetime, timedelta
 
 from cyberarche.application.ports.agent import AgentRun
+from cyberarche.application.ports.bus import MessageHandler, Unsubscribe
 from cyberarche.application.ports.crdt import LoggedUpdate
+from cyberarche.application.ports.queue import QueuedJob
+from cyberarche.application.ports.storage import Blob
 from cyberarche.application.ports.identity import Claims
 from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
 from cyberarche.application.ports.mcp import ExternalTool
@@ -460,6 +464,71 @@ class InMemoryCommentRepository:
 
     async def update(self, comment: Comment) -> None:
         self._items[comment.id] = comment
+
+
+class InMemoryBlobStorage:
+    def __init__(self) -> None:
+        self.blobs: dict[str, Blob] = {}
+
+    async def put(self, key: str, content: bytes, *, content_type: str) -> None:
+        self.blobs[key] = Blob(key=key, content=content, content_type=content_type)
+
+    async def get(self, key: str) -> Blob | None:
+        return self.blobs.get(key)
+
+    async def delete(self, key: str) -> None:
+        self.blobs.pop(key, None)
+
+
+class InMemoryTaskQueue:
+    """TaskQueuePort fake/single-process adapter over asyncio.Queue."""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[QueuedJob] = asyncio.Queue()
+        self._counter = itertools.count(1)
+
+    async def enqueue(self, job_type: str, payload: dict) -> str:
+        job = QueuedJob(id=f"job-{next(self._counter):04d}", type=job_type, payload=payload)
+        await self._queue.put(job)
+        return job.id
+
+    async def dequeue(self, *, timeout: float = 5.0) -> QueuedJob | None:
+        try:
+            return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+        except TimeoutError:
+            return None
+
+    def pending(self) -> int:
+        return self._queue.qsize()
+
+
+class InProcessPeerBus:
+    """PeerBusPort adapter for a single process (also the test fake).
+
+    Sharing one instance across several app replicas in a test simulates a
+    broker connecting them.
+    """
+
+    def __init__(self) -> None:
+        self._handlers: dict[str, list[MessageHandler]] = {}
+
+    async def publish(self, channel: str, message: bytes) -> None:
+        for handler in list(self._handlers.get(channel, [])):
+            await handler(message)
+
+    async def subscribe(
+        self, channel: str, handler: MessageHandler
+    ) -> Unsubscribe:
+        self._handlers.setdefault(channel, []).append(handler)
+
+        async def unsubscribe() -> None:
+            handlers = self._handlers.get(channel, [])
+            if handler in handlers:
+                handlers.remove(handler)
+            if not handlers:
+                self._handlers.pop(channel, None)
+
+        return unsubscribe
 
 
 class StaticTokenPort:

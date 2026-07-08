@@ -45,6 +45,11 @@ class QueryResponse(BaseModel):
     mode: RagQueryMode
 
 
+class QueuedIngestionResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
 @router.post("/files", status_code=202)
 async def ingest_file(
     workspace_id: str, file: UploadFile, cases: Cases, caller: Caller
@@ -57,6 +62,22 @@ async def ingest_file(
         content_type=file.content_type or "application/octet-stream",
     )
     return IngestionResponse.from_record(record)
+
+
+@router.post("/files/async", status_code=202)
+async def ingest_file_async(
+    workspace_id: str, file: UploadFile, cases: Cases, caller: Caller
+) -> QueuedIngestionResponse:
+    """Queue-backed ingestion: the RAG upload happens on a worker, the
+    request returns immediately (architecture-quality spec)."""
+    job_id = await cases.knowledge.enqueue_ingestion(
+        caller,
+        WorkspaceId(workspace_id),
+        filename=file.filename or "upload",
+        content=await file.read(),
+        content_type=file.content_type or "application/octet-stream",
+    )
+    return QueuedIngestionResponse(job_id=job_id)
 
 
 @router.get("/files")

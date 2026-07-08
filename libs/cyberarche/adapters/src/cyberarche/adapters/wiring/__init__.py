@@ -27,6 +27,7 @@ from cyberarche.application.ports.repositories import (
     WorkspaceRepository,
 )
 from cyberarche.application.ports.agent import AgentRunRepository
+from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
@@ -34,8 +35,10 @@ from cyberarche.application.ports.mcp import (
     McpClientPort,
     SecretBoxPort,
 )
+from cyberarche.application.ports.queue import TaskQueuePort
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRepository
+from cyberarche.application.ports.storage import BlobStoragePort
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
@@ -82,6 +85,11 @@ class WiringConfig:
     llm_api_key: str = ""
     llm_base_url: str = ""
     connector_secret_key: str = ""
+    # Shared infrastructure for multi-replica deployments (12.5/12.6):
+    # with redis_url set, live realtime fanout and the job queue go through
+    # Redis; unset falls back to single-process in-memory implementations.
+    redis_url: str = ""
+    blob_dir: str = ""  # filesystem blob storage root; empty = in-memory
 
 
 @dataclass(slots=True)
@@ -105,6 +113,9 @@ class Container:
     secret_box: SecretBoxPort
     share_links: ShareLinkRepository
     comments: CommentRepository
+    blobs: BlobStoragePort
+    queue: TaskQueuePort
+    peer_bus: PeerBusPort
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -129,13 +140,19 @@ def _build_use_cases(
     secret_box: SecretBoxPort,
     share_links: ShareLinkRepository,
     comments: CommentRepository,
+    blobs: BlobStoragePort,
+    queue: TaskQueuePort,
     model_name: str,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships)
-    realtime = RealtimeUseCases(documents, update_log, crdt_engine, access)
-    knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
+    realtime = RealtimeUseCases(
+        documents, update_log, crdt_engine, access, snapshots, clock, ids
+    )
+    knowledge = KnowledgeUseCases(
+        workspaces, ingestions, rag, access, clock, blobs=blobs, queue=queue
+    )
     connector_use_cases = ConnectorUseCases(
         connectors, mcp_client, secret_box, access, clock, ids
     )
@@ -254,6 +271,42 @@ def _memory_repositories() -> _Repositories:
     )
 
 
+def _build_shared_infra(
+    config: WiringConfig, closers: list
+) -> tuple[BlobStoragePort, TaskQueuePort, PeerBusPort]:
+    """Blob storage, task queue, and peer bus — Redis/filesystem when
+    configured, in-memory single-process fallbacks otherwise."""
+    from cyberarche.application.testing.fakes import (
+        InMemoryBlobStorage,
+        InMemoryTaskQueue,
+        InProcessPeerBus,
+    )
+
+    if config.blob_dir:
+        from cyberarche.adapters.outbound.objectstore.filesystem import (
+            FilesystemBlobStorage,
+        )
+
+        blobs: BlobStoragePort = FilesystemBlobStorage(config.blob_dir)
+    else:
+        blobs = InMemoryBlobStorage()
+
+    if config.redis_url:
+        import redis.asyncio as aioredis
+
+        from cyberarche.adapters.outbound.redis_infra.bus import RedisPeerBus
+        from cyberarche.adapters.outbound.redis_infra.queue import RedisTaskQueue
+
+        client = aioredis.from_url(config.redis_url)
+        closers.append(client.aclose)
+        queue: TaskQueuePort = RedisTaskQueue(client)
+        peer_bus: PeerBusPort = RedisPeerBus(client)
+    else:
+        queue = InMemoryTaskQueue()
+        peer_bus = InProcessPeerBus()
+    return blobs, queue, peer_bus
+
+
 def _build_secret_box(config: WiringConfig) -> SecretBoxPort:
     if config.connector_secret_key:
         from cyberarche.adapters.outbound.crypto import FernetSecretBox
@@ -305,9 +358,12 @@ async def build_container(
     rag: RagPort | None = None,
     llm: LLMPort | None = None,
     mcp_client: McpClientPort | None = None,
+    peer_bus: PeerBusPort | None = None,
+    queue: TaskQueuePort | None = None,
 ) -> Container:
-    """Build the container. `token_port`, `rag`, `llm`, and `mcp_client`
-    are injectable for tests and the dockerless sample runtime."""
+    """Build the container. `token_port`, `rag`, `llm`, `mcp_client`,
+    `peer_bus`, and `queue` are injectable for tests and the dockerless
+    sample runtime."""
     clock = SystemClock()
     ids = UuidIds()
     closers = []
@@ -352,6 +408,9 @@ async def build_container(
         mcp_client = FastMcpClientAdapter()
 
     secret_box = _build_secret_box(config)
+    blobs, built_queue, built_bus = _build_shared_infra(config, closers)
+    queue = queue or built_queue
+    peer_bus = peer_bus or built_bus
     (
         workspaces,
         documents,
@@ -396,6 +455,9 @@ async def build_container(
         secret_box=secret_box,
         share_links=share_links,
         comments=comments,
+        blobs=blobs,
+        queue=queue,
+        peer_bus=peer_bus,
         use_cases=_build_use_cases(
             workspaces,
             documents,
@@ -412,6 +474,8 @@ async def build_container(
             secret_box,
             share_links,
             comments,
+            blobs,
+            queue,
             config.llm_model,
             clock,
             ids,

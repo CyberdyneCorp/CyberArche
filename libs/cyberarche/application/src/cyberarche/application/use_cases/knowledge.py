@@ -19,16 +19,24 @@ from cyberarche.application.ports.rag import (
     RagTask,
     RagTaskStatus,
 )
+from cyberarche.application.ports.queue import TaskQueuePort
 from cyberarche.application.ports.repositories import WorkspaceRepository
+from cyberarche.application.ports.storage import BlobStoragePort
 from cyberarche.application.ports.telemetry import ClockPort
 from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import WorkspaceId
 from cyberarche.domain.memberships import Role
 from cyberarche.domain.workspaces import Workspace
 
+INGEST_JOB = "knowledge.ingest_file"
+
 
 def project_slug_for(workspace: Workspace) -> str:
     return f"ws-{workspace.id}"
+
+
+def blob_key_for(workspace_id: WorkspaceId, content_hash: str, filename: str) -> str:
+    return f"ingest/{workspace_id}/{content_hash}/{filename}"
 
 
 class KnowledgeUseCases:
@@ -39,12 +47,16 @@ class KnowledgeUseCases:
         rag: RagPort,
         access: AccessControl,
         clock: ClockPort,
+        blobs: BlobStoragePort | None = None,
+        queue: TaskQueuePort | None = None,
     ) -> None:
         self._workspaces = workspaces
         self._ingestions = ingestions
         self._rag = rag
         self._access = access
         self._clock = clock
+        self._blobs = blobs
+        self._queue = queue
 
     async def provision_project(
         self, caller: CallerContext, workspace_id: WorkspaceId
@@ -80,6 +92,7 @@ class KnowledgeUseCases:
             existing = await self._ingestions.by_hash(workspace_id, content_hash)
             if existing is not None and existing.status is not RagTaskStatus.FAILED:
                 return existing
+        await self._store_original(workspace_id, content_hash, filename, content, content_type)
         task = await self._rag.upload(
             workspace.rag_project_slug,
             filename=filename,
@@ -96,6 +109,52 @@ class KnowledgeUseCases:
         )
         await self._ingestions.add(record)
         return record
+
+    async def enqueue_ingestion(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+        force: bool = False,
+    ) -> str:
+        """Queue-backed ingestion (architecture-quality spec): store the
+        original, enqueue a job, return immediately. A worker performs the
+        RAG upload; the request never blocks on the provider."""
+        if self._queue is None:
+            raise NotFound("ingestion queue is not configured")
+        await self._workspace(caller, workspace_id, Role.EDITOR)
+        content_hash = hashlib.sha256(content).hexdigest()
+        blob_key = blob_key_for(workspace_id, content_hash, filename)
+        await self._store_original(workspace_id, content_hash, filename, content, content_type)
+        return await self._queue.enqueue(
+            INGEST_JOB,
+            {
+                "caller": {"user_id": caller.user_id, "tenant_id": caller.tenant_id},
+                "workspace_id": workspace_id,
+                "filename": filename,
+                "blob_key": blob_key,
+                "content_type": content_type,
+                "force": force,
+            },
+        )
+
+    async def _store_original(
+        self,
+        workspace_id: WorkspaceId,
+        content_hash: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        if self._blobs is not None:
+            await self._blobs.put(
+                blob_key_for(workspace_id, content_hash, filename),
+                content,
+                content_type=content_type,
+            )
 
     async def refresh_task(
         self, caller: CallerContext, workspace_id: WorkspaceId, task_id: str
@@ -139,10 +198,16 @@ class KnowledgeUseCases:
     async def delete_source(
         self, caller: CallerContext, workspace_id: WorkspaceId, *, filename: str
     ) -> None:
-        """Delete cascades to the RAG datasource (rag-knowledge spec)."""
+        """Delete cascades to the RAG datasource and the stored original."""
         workspace = await self._workspace(caller, workspace_id, Role.EDITOR)
         if workspace.rag_project_slug:
             await self._rag.delete_datasource(workspace.rag_project_slug, filename)
+        if self._blobs is not None:
+            for record in await self._ingestions.list_for_workspace(workspace_id):
+                if record.filename == filename:
+                    await self._blobs.delete(
+                        blob_key_for(workspace_id, record.content_hash, filename)
+                    )
         await self._ingestions.delete_by_filename(workspace_id, filename)
 
     async def _apply_status(

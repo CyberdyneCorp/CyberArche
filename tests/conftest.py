@@ -16,6 +16,7 @@ from cyberarche.application.testing.fakes import (
     FakeMcpClient,
     FixedClock,
     InMemoryAgentRunRepository,
+    InMemoryBlobStorage,
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
@@ -24,6 +25,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryRag,
     InMemoryShareLinkRepository,
     InMemorySnapshotRepository,
+    InMemoryTaskQueue,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
     NaiveSecretBox,
@@ -89,6 +91,21 @@ def connector_repo() -> InMemoryConnectorRepository:
 
 
 @pytest.fixture
+def blobs() -> InMemoryBlobStorage:
+    return InMemoryBlobStorage()
+
+
+@pytest.fixture
+def task_queue() -> InMemoryTaskQueue:
+    return InMemoryTaskQueue()
+
+
+@pytest.fixture
+def snapshots_repo() -> InMemorySnapshotRepository:
+    return InMemorySnapshotRepository()
+
+
+@pytest.fixture
 def use_cases(
     clock: FixedClock,
     update_log: InMemoryUpdateLog,
@@ -99,16 +116,29 @@ def use_cases(
     mcp_client: FakeMcpClient,
     secret_box: NaiveSecretBox,
     connector_repo: InMemoryConnectorRepository,
+    blobs: InMemoryBlobStorage,
+    task_queue: InMemoryTaskQueue,
+    snapshots_repo: InMemorySnapshotRepository,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
-    snapshots = InMemorySnapshotRepository()
+    snapshots = snapshots_repo
     ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
     access = AccessControl(memberships)
     engine = PycrdtEngine()
-    realtime = RealtimeUseCases(documents, update_log, engine, access)
-    knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
+    realtime = RealtimeUseCases(
+        documents, update_log, engine, access, snapshots, clock, ids
+    )
+    knowledge = KnowledgeUseCases(
+        workspaces,
+        ingestions,
+        rag,
+        access,
+        clock,
+        blobs=blobs,
+        queue=task_queue,
+    )
     connectors = ConnectorUseCases(
         connector_repo, mcp_client, secret_box, access, clock, ids
     )

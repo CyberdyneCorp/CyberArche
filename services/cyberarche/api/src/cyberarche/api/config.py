@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = ""
     connector_secret_key: str = ""
+    redis_url: str = ""  # shared queue + realtime fanout for multi-replica
+    blob_dir: str = ""  # filesystem blob storage; empty = in-memory
     cors_origins: list[str] = ["http://localhost:5173"]
 
     def wiring(self) -> WiringConfig:
@@ -44,4 +46,6 @@ class Settings(BaseSettings):
             llm_api_key=self.llm_api_key,
             llm_base_url=self.llm_base_url,
             connector_secret_key=self.connector_secret_key,
+            redis_url=self.redis_url,
+            blob_dir=self.blob_dir,
         )
