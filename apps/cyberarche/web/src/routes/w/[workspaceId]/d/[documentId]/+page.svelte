@@ -4,23 +4,31 @@
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
+	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import { createAgentPanel, type AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { colorFor, createEditor, type EditorVM } from '$lib/viewmodels/editor.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
+	import { createSharing, type SharingVM } from '$lib/viewmodels/sharing.svelte';
 
 	registerBuiltinBlocks();
 
 	const documentId = $derived(page.params.documentId!);
+	const workspaceId = $derived(page.params.workspaceId!);
 
 	let doc = $state<Document | null>(null);
 	let titleDraft = $state('');
 	let editor = $state<EditorVM | null>(null);
 	let agent = $state<AgentPanelVM | null>(null);
 	let agentOpen = $state(false);
+	let sharing = $state<SharingVM | null>(null);
+	let shareOpen = $state(false);
 
 	$effect(() => {
 		agent = createAgentPanel(documentId);
+		const instance = createSharing(workspaceId, documentId);
+		sharing = instance;
+		instance.load();
 	});
 
 	// Depends only on documentId — never on `editor`, which it writes
@@ -90,6 +98,11 @@
 					data-testid="sync-status">{statusLabel}</span
 				>
 				<button
+					class="btn btn-primary share"
+					data-testid="share-open"
+					onclick={() => (shareOpen = true)}>Share</button
+				>
+				<button
 					class="agent-toggle"
 					class:open={agentOpen}
 					title="Agent"
@@ -109,12 +122,15 @@
 				data-testid="doc-title"
 			/>
 			{#if editor}
-				<BlockEditor {editor} />
+				<BlockEditor {editor} {sharing} />
 			{/if}
 		</div>
 	</article>
 	{#if agentOpen && agent}
 		<AgentPanel {agent} onclose={() => (agentOpen = false)} />
+	{/if}
+	{#if shareOpen && sharing}
+		<ShareDialog {sharing} onclose={() => (shareOpen = false)} />
 	{/if}
 	</div>
 {:else}
@@ -133,6 +149,10 @@
 		min-height: 100%;
 		min-width: 0;
 		overflow-y: auto;
+	}
+	.share {
+		padding: 4px 12px;
+		font-size: 12px;
 	}
 	.agent-toggle {
 		padding: 3px 9px;

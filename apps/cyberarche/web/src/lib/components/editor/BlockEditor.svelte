@@ -1,9 +1,14 @@
 <script lang="ts">
+	import CommentThread from '$lib/components/CommentThread.svelte';
 	import { blockDefinition } from '$lib/editor/registry';
 	import { colorFor, type EditorVM } from '$lib/viewmodels/editor.svelte';
+	import type { SharingVM } from '$lib/viewmodels/sharing.svelte';
 	import SlashMenu from './SlashMenu.svelte';
 
-	let { editor }: { editor: EditorVM } = $props();
+	let { editor, sharing = null }: { editor: EditorVM; sharing?: SharingVM | null } =
+		$props();
+
+	let commentsFor = $state<string | null>(null);
 
 	function peerOn(blockId: string) {
 		return editor.peers.find((peer) => peer.block_id === blockId) ?? null;
@@ -50,6 +55,17 @@
 					aria-label="Move down"
 					onclick={() => editor.move(block.id, 1)}>↓</button
 				>
+				{#if sharing}
+					<button
+						class="gutter-btn"
+						class:has-comments={sharing.commentsFor(block.id).length > 0}
+						title="Comments"
+						aria-label="Comments"
+						data-testid="block-comments"
+						onclick={() => (commentsFor = commentsFor === block.id ? null : block.id)}
+						>💬</button
+					>
+				{/if}
 			</div>
 			<div class="body" class:peered={peer !== null}>
 				{#if peer}
@@ -62,6 +78,9 @@
 				{/if}
 				{#if editor.slashFor === block.id}
 					<SlashMenu {editor} />
+				{/if}
+				{#if sharing && commentsFor === block.id}
+					<CommentThread {sharing} blockId={block.id} onclose={() => (commentsFor = null)} />
 				{/if}
 			</div>
 		</div>
@@ -110,6 +129,10 @@
 	.gutter-btn:hover {
 		background: var(--bg2);
 		color: var(--tx);
+	}
+	.gutter-btn.has-comments {
+		visibility: visible;
+		color: var(--acc);
 	}
 	.body {
 		flex: 1;

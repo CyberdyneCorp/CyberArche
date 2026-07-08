@@ -101,7 +101,7 @@
 - [x] 11.4 `ShareGrant`/membership repositories + Postgres adapters
 - [x] 11.5 Comments on blocks (add/resolve), storage + fanout
 - [x] 11.6 Enforce checks uniformly in use cases (HTTP + realtime + MCP)
-- [ ] 11.7 Web: share dialog, invite UI, comment thread View/ViewModel
+- [x] 11.7 Web: share dialog, invite UI, comment thread View/ViewModel
 - [x] 11.8 BDD tests: inheritance + override, invite-as-commenter, view-link open/revoke, consistent denial across surfaces
 
 ## 12. Architecture Quality (architecture-quality)
