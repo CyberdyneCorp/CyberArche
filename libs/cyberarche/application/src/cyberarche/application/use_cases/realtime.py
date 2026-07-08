@@ -47,12 +47,23 @@ class RealtimeUseCases:
         return role is not None and role_at_least(role, Role.EDITOR)
 
     async def apply(
-        self, caller: CallerContext, document_id: DocumentId, update: bytes
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        update: bytes,
+        *,
+        origin: str | None = None,
     ) -> bytes:
         """Persist an editor's update (human or AI peer) and return it for
-        broadcast. Offline batches merge conflict-free by CRDT semantics."""
+        broadcast. Offline batches merge conflict-free by CRDT semantics.
+
+        `origin` attributes the update (e.g. "agent:<user>" for AI edits);
+        permission is always checked against the human caller.
+        """
         await self._require(caller, document_id, Role.EDITOR)
-        await self._update_log.append(document_id, update, origin=caller.user_id)
+        await self._update_log.append(
+            document_id, update, origin=origin or caller.user_id
+        )
         await self._maybe_compact(document_id)
         return update
 

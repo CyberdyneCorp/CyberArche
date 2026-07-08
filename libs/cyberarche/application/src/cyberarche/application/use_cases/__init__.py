@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -20,3 +21,4 @@ class UseCases:
     snapshots: SnapshotUseCases
     realtime: RealtimeUseCases
     knowledge: KnowledgeUseCases
+    agent: AgentUseCases

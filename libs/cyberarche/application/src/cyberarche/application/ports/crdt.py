@@ -27,6 +27,18 @@ class CrdtEnginePort(Protocol):
         """Update that brings a peer at `state_vector` up to `state`."""
         ...
 
+    def read_blocks(self, state: bytes) -> list[dict]:
+        """Materialize the shared "blocks" array (the document body)."""
+        ...
+
+    def append_blocks(self, state: bytes, blocks: list[dict]) -> bytes:
+        """Incremental update that appends blocks to the document body.
+
+        This is how the AI agent edits as a CRDT peer: the returned update
+        goes through the same apply/broadcast path as human edits.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class LoggedUpdate:

@@ -67,14 +67,14 @@
 
 ## 8. AI Agent (ai-agent)
 
-- [ ] 8.1 `LLMPort` + adapters (Anthropic/OpenAI/local via LiteLLM), config-selected; normalized tool-calling
-- [ ] 8.2 Domain/use cases: document-scoped agent context (blocks + RAG), summarize, draft/rewrite selection
-- [ ] 8.3 Agent applies edits through `CrdtEnginePort` as a peer (attributed, live)
-- [ ] 8.4 File ingestion into blocks: PDF→blocks, CSV/Excel→`table` blocks; submit to RAG (worker job)
+- [x] 8.1 `LLMPort` + adapters (Anthropic/OpenAI/local via LiteLLM), config-selected; normalized tool-calling
+- [x] 8.2 Domain/use cases: document-scoped agent context (blocks + RAG), summarize, draft/rewrite selection
+- [x] 8.3 Agent applies edits through `CrdtEnginePort` as a peer (attributed, live)
+- [x] 8.4 File ingestion into blocks: PDF→blocks, CSV/Excel→`table` blocks; submit to RAG (worker job)
 - [ ] 8.5 Agent tool-use loop calling CyberArche MCP + external MCP tools, permission-scoped
-- [ ] 8.6 `AgentRun` recording (prompt, tools, docs touched, model, outcome)
+- [x] 8.6 `AgentRun` recording (prompt, tools, docs touched, model, outcome)
 - [ ] 8.7 Web: agent panel View/ViewModel, insert-as-blocks, run history
-- [ ] 8.8 BDD tests: grounded answer with citations, live agent edit merges, PDF ingest, spreadsheet→table, run auditing
+- [x] 8.8 BDD tests: grounded answer with citations, live agent edit merges, PDF ingest, spreadsheet→table, run auditing
 
 ## 9. MCP Server (mcp-server)
 

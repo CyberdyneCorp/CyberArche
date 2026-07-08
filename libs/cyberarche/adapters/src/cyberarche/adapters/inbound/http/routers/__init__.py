@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cyberarche.adapters.inbound.http.routers.agent import router as agent_router
 from cyberarche.adapters.inbound.http.routers.documents import router as documents_router
 from cyberarche.adapters.inbound.http.routers.health import router as health_router
 from cyberarche.adapters.inbound.http.routers.knowledge import (
@@ -16,4 +17,5 @@ all_routers = [
     documents_router,
     knowledge_router,
     webhook_router,
+    agent_router,
 ]

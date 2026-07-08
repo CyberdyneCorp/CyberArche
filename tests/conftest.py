@@ -11,8 +11,10 @@ from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.identity import Claims
 from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
+from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.application.testing.fakes import (
     FixedClock,
+    InMemoryAgentRunRepository,
     InMemoryDocumentRepository,
     InMemoryIngestionRepository,
     InMemoryMembershipRepository,
@@ -20,10 +22,12 @@ from cyberarche.application.testing.fakes import (
     InMemorySnapshotRepository,
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
+    ScriptedLLM,
     SequentialIds,
     StaticTokenPort,
 )
 from cyberarche.application.use_cases import UseCases
+from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -53,11 +57,23 @@ def rag() -> InMemoryRag:
 
 
 @pytest.fixture
+def llm() -> ScriptedLLM:
+    return ScriptedLLM([])
+
+
+@pytest.fixture
+def agent_runs() -> InMemoryAgentRunRepository:
+    return InMemoryAgentRunRepository()
+
+
+@pytest.fixture
 def use_cases(
     clock: FixedClock,
     update_log: InMemoryUpdateLog,
     memberships: InMemoryMembershipRepository,
     rag: InMemoryRag,
+    llm: ScriptedLLM,
+    agent_runs: InMemoryAgentRunRepository,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
@@ -65,12 +81,28 @@ def use_cases(
     ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
     access = AccessControl(memberships)
+    engine = PycrdtEngine()
+    realtime = RealtimeUseCases(documents, update_log, engine, access)
+    knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
-        realtime=RealtimeUseCases(documents, update_log, PycrdtEngine(), access),
-        knowledge=KnowledgeUseCases(workspaces, ingestions, rag, access, clock),
+        realtime=realtime,
+        knowledge=knowledge,
+        agent=AgentUseCases(
+            llm,
+            documents,
+            realtime,
+            knowledge,
+            agent_runs,
+            FileExtractor(),
+            engine,
+            access,
+            clock,
+            ids,
+            model_name="scripted-test-model",
+        ),
     )
 
 

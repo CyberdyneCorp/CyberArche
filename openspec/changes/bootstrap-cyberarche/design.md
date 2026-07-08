@@ -55,10 +55,15 @@ ingestion don't need a live CRDT session. **Trade-off:** snapshots lag the live
 doc slightly; acceptable for read/index paths.
 
 ### D-3 — Provider-agnostic LLM behind `LLMPort`
-The agent depends on `LLMPort` (chat/completions + tool-calling). Adapters wrap
-Anthropic/OpenAI/local, selected by config (LiteLLM as the default multiplexer).
-**Rationale:** the product decision was provider-agnostic; keeps domain/use cases
-free of vendor SDKs. Default target: latest Claude models.
+The agent depends on `LLMPort` (chat/completions + normalized tool-calling).
+Two thin httpx adapters cover all providers: `AnthropicLLM` (Messages API) and
+`OpenAICompatibleLLM` (OpenAI itself plus any compatible local runtime — Ollama,
+vLLM — via `base_url`), selected by config. **Rationale:** the product decision
+was provider-agnostic; keeps domain/use cases free of vendor SDKs. Direct
+adapters were chosen over a LiteLLM dependency during implementation: two small
+adapters cover the same provider matrix without a heavyweight dependency, and
+the port keeps LiteLLM pluggable later if needed. Default target: latest Claude
+models.
 
 ### D-4 — FastMCP shares the composition root with the HTTP API
 `services/cyberarche/mcp` builds the same `Container` as `services/cyberarche/api`

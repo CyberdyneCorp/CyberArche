@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
     rag_api_token: str = ""
     rag_webhook_secret: str = ""
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-sonnet-5"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]
 
     def wiring(self) -> WiringConfig:
@@ -34,4 +38,8 @@ class Settings(BaseSettings):
             rag_base_url=self.rag_base_url,
             rag_api_token=self.rag_api_token,
             rag_webhook_secret=self.rag_webhook_secret,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            llm_api_key=self.llm_api_key,
+            llm_base_url=self.llm_base_url,
         )

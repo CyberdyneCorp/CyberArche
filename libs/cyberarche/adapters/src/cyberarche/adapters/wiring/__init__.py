@@ -26,15 +26,19 @@ from cyberarche.application.ports.repositories import (
     SnapshotRepository,
     WorkspaceRepository,
 )
+from cyberarche.application.ports.agent import AgentRunRepository
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
+from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.use_cases import UseCases
+from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 from cyberarche.adapters.outbound.crdt.pycrdt_engine import PycrdtEngine
+from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.adapters.outbound.auth.cyberdyne import (
     ClientCredentialsTokenSource,
     CyberdyneAuthConfig,
@@ -65,6 +69,10 @@ class WiringConfig:
     rag_base_url: str = ""
     rag_api_token: str = ""
     rag_webhook_secret: str = ""
+    llm_provider: str = "anthropic"  # "anthropic" | "openai" | "local"
+    llm_model: str = "claude-sonnet-5"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
 
 
 @dataclass(slots=True)
@@ -81,6 +89,8 @@ class Container:
     crdt_engine: CrdtEnginePort
     ingestions: IngestionRepository
     rag: RagPort
+    llm: LLMPort
+    agent_runs: AgentRunRepository
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -98,17 +108,52 @@ def _build_use_cases(
     crdt_engine: CrdtEnginePort,
     ingestions: IngestionRepository,
     rag: RagPort,
+    llm: LLMPort,
+    agent_runs: AgentRunRepository,
+    model_name: str,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships)
+    realtime = RealtimeUseCases(documents, update_log, crdt_engine, access)
+    knowledge = KnowledgeUseCases(workspaces, ingestions, rag, access, clock)
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=DocumentUseCases(documents, access, clock, ids),
         snapshots=SnapshotUseCases(snapshots, documents, access, clock, ids),
-        realtime=RealtimeUseCases(documents, update_log, crdt_engine, access),
-        knowledge=KnowledgeUseCases(workspaces, ingestions, rag, access, clock),
+        realtime=realtime,
+        knowledge=knowledge,
+        agent=AgentUseCases(
+            llm,
+            documents,
+            realtime,
+            knowledge,
+            agent_runs,
+            FileExtractor(),
+            crdt_engine,
+            access,
+            clock,
+            ids,
+            model_name=model_name,
+        ),
     )
+
+
+def _build_llm(config: WiringConfig, http: httpx.AsyncClient) -> LLMPort:
+    llm_config = LLMConfig(
+        provider=config.llm_provider,
+        model=config.llm_model,
+        api_key=config.llm_api_key,
+        base_url=config.llm_base_url,
+    )
+    if config.llm_provider == "anthropic":
+        from cyberarche.adapters.outbound.llm.anthropic import AnthropicLLM
+
+        return AnthropicLLM(llm_config, http)
+    # "openai" and "local" both speak the OpenAI-compatible protocol.
+    from cyberarche.adapters.outbound.llm.openai_compatible import OpenAICompatibleLLM
+
+    return OpenAICompatibleLLM(llm_config, http)
 
 
 async def build_container(
@@ -116,9 +161,10 @@ async def build_container(
     *,
     token_port: TokenPort | None = None,
     rag: RagPort | None = None,
+    llm: LLMPort | None = None,
 ) -> Container:
-    """Build the container. `token_port` and `rag` are injectable for tests
-    and the dockerless sample runtime."""
+    """Build the container. `token_port`, `rag`, and `llm` are injectable
+    for tests and the dockerless sample runtime."""
     clock = SystemClock()
     ids = UuidIds()
     closers = []
@@ -161,6 +207,17 @@ async def build_container(
         memberships = InMemoryMembershipRepository()
         update_log = InMemoryUpdateLog()
         ingestions = InMemoryIngestionRepository()
+
+    if config.backend == "postgres":
+        from cyberarche.adapters.outbound.postgres.agent_runs import (
+            PostgresAgentRunRepository,
+        )
+
+        agent_runs = PostgresAgentRunRepository(pool)
+    else:
+        from cyberarche.application.testing.fakes import InMemoryAgentRunRepository
+
+        agent_runs = InMemoryAgentRunRepository()
 
     http: httpx.AsyncClient | None = None
 
@@ -209,6 +266,14 @@ async def build_container(
 
             rag = InMemoryRag()
 
+    if llm is None:
+        if config.llm_api_key or config.llm_base_url:
+            llm = _build_llm(config, shared_http())
+        else:
+            from cyberarche.application.testing.fakes import ScriptedLLM
+
+            llm = ScriptedLLM([])  # no provider configured (tests/sample)
+
     crdt_engine = PycrdtEngine()
     return Container(
         config=config,
@@ -223,6 +288,8 @@ async def build_container(
         crdt_engine=crdt_engine,
         ingestions=ingestions,
         rag=rag,
+        llm=llm,
+        agent_runs=agent_runs,
         use_cases=_build_use_cases(
             workspaces,
             documents,
@@ -232,6 +299,9 @@ async def build_container(
             crdt_engine,
             ingestions,
             rag,
+            llm,
+            agent_runs,
+            config.llm_model,
             clock,
             ids,
         ),

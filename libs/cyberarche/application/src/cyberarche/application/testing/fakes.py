@@ -9,8 +9,10 @@ from __future__ import annotations
 import itertools
 from datetime import UTC, datetime, timedelta
 
+from cyberarche.application.ports.agent import AgentRun
 from cyberarche.application.ports.crdt import LoggedUpdate
 from cyberarche.application.ports.identity import Claims
+from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
 from cyberarche.application.ports.rag import (
     IngestionRecord,
     RagQueryMode,
@@ -283,6 +285,39 @@ class InMemoryIngestionRepository:
             for task_id, record in self._items.items()
             if not (record.workspace_id == workspace_id and record.filename == filename)
         }
+
+
+class ScriptedLLM:
+    """LLMPort fake: replays scripted responses and records requests."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self._responses = list(responses)
+        self.requests: list[list[LLMMessage]] = []
+
+    async def complete(
+        self, messages: list[LLMMessage], *, tools: list[ToolSpec] | None = None
+    ) -> LLMResponse:
+        self.requests.append(list(messages))
+        if not self._responses:
+            return LLMResponse(text="(exhausted)")
+        return self._responses.pop(0)
+
+
+class InMemoryAgentRunRepository:
+    def __init__(self) -> None:
+        self._items: list[AgentRun] = []
+
+    async def add(self, run: AgentRun) -> None:
+        self._items.append(run)
+
+    async def list_for_document(
+        self, tenant_id: TenantId, document_id: DocumentId
+    ) -> list[AgentRun]:
+        return [
+            r
+            for r in self._items
+            if r.tenant_id == tenant_id and r.document_id == document_id
+        ]
 
 
 class StaticTokenPort:
