@@ -46,11 +46,33 @@ What it verifies:
 - Workspace → document → snapshot → trash/restore over real Postgres
 - Two WebSocket clients converge through the Postgres-persisted update log
 
+## 3. Live CyberdyneRAG pass
+
+`tests/test_integration_rag_live.py` drives the real `CyberdyneRagAdapter`
+against the live RAG service. It authenticates with a CyberdyneAuth user
+token (the RAG API accepts them as bearer tokens), works only inside a
+disposable `cyberarche-it-<random>` project, and hard-deletes it on the
+way out — existing projects are never touched.
+
+```bash
+CYBERARCHE_IT_AUTH_URL="https://auth.backend.coolify.cyberdynecorp.ai" \
+CYBERARCHE_IT_EMAIL="<test-user-email>" \
+CYBERARCHE_IT_PASSWORD="<test-user-password>" \
+CYBERARCHE_IT_RAG_URL="https://cyberrag.coolify.cyberdynecorp.ai" \
+  uv run pytest tests/test_integration_rag_live.py -v
+```
+
+What it verifies:
+
+- `ensure_project` creates when missing and is idempotent
+- Upload → task polling → `completed`; retrieval answers are grounded in
+  the ingested content (hybrid mode)
+- `delete_datasource` cascade
+- The full `KnowledgeUseCases` flow (provision → ingest → track → query →
+  delete) over the live service, exactly as the API runs it
+
 ## Known limitations
 
-- CyberdyneRAG is not exercised live yet (the adapter is contract-tested
-  against its published OpenAPI shapes); a live RAG pass needs a service
-  token for the RAG API.
 - RLS policies exist in the schema but the app connects as the table
   owner, so they are defense-in-depth only once a dedicated non-owner app
   role (with `SET app.tenant_id`) is provisioned.
