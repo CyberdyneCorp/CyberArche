@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
@@ -26,3 +27,4 @@ class UseCases:
     connectors: ConnectorUseCases
     agent: AgentUseCases
     sharing: SharingUseCases
+    api_keys: ApiKeyUseCases

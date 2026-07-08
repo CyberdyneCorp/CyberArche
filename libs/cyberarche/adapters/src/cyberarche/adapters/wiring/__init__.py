@@ -28,6 +28,7 @@ from cyberarche.application.ports.repositories import (
     WorkspaceRepository,
 )
 from cyberarche.application.ports.agent import AgentRunRepository
+from cyberarche.application.ports.api_keys import ApiKeyRepository
 from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
@@ -42,6 +43,10 @@ from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRep
 from cyberarche.application.ports.storage import BlobStoragePort
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.api_keys import (
+    ApiKeyUseCases,
+    CompositeTokenVerifier,
+)
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
@@ -146,6 +151,7 @@ def _build_use_cases(
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
     peer_bus: PeerBusPort,
+    api_keys: ApiKeyRepository,
     model_name: str,
     clock,
     ids,
@@ -184,6 +190,7 @@ def _build_use_cases(
         sharing=SharingUseCases(
             documents, memberships, share_links, comments, access, clock, ids
         ),
+        api_keys=ApiKeyUseCases(api_keys, clock, ids),
     )
 
 
@@ -216,11 +223,15 @@ class _Repositories:
     connectors: ConnectorRepository
     share_links: ShareLinkRepository
     comments: CommentRepository
+    api_keys: ApiKeyRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
     import asyncpg
 
+    from cyberarche.adapters.outbound.postgres.api_keys import (
+        PostgresApiKeyRepository,
+    )
     from cyberarche.adapters.outbound.postgres.agent_runs import (
         PostgresAgentRunRepository,
     )
@@ -255,6 +266,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         connectors=PostgresConnectorRepository(pool),
         share_links=PostgresShareLinkRepository(pool),
         comments=PostgresCommentRepository(pool),
+        api_keys=PostgresApiKeyRepository(pool),
     )
 
 
@@ -272,6 +284,7 @@ def _memory_repositories() -> _Repositories:
         connectors=fakes.InMemoryConnectorRepository(),
         share_links=fakes.InMemoryShareLinkRepository(),
         comments=fakes.InMemoryCommentRepository(),
+        api_keys=fakes.InMemoryApiKeyRepository(),
     )
 
 
@@ -400,6 +413,10 @@ async def build_container(
     if config.auth_base_url:
         auth_gateway = CyberdyneAuthGateway(_auth_config(config), shared_http())
 
+    # API keys ride the same TokenPort seam (design D-1): cak_ secrets
+    # resolve locally, everything else delegates to the verifier above.
+    token_port = CompositeTokenVerifier(repos.api_keys, token_port, clock)
+
     if rag is None:
         rag = _build_rag(config, service_tokens, shared_http)
 
@@ -489,6 +506,7 @@ async def build_container(
             blobs,
             queue,
             peer_bus,
+            repos.api_keys,
             config.llm_model,
             clock,
             ids,

@@ -16,6 +16,7 @@ from cyberarche.application.testing.fakes import (
     FakeMcpClient,
     FixedClock,
     InMemoryAgentRunRepository,
+    InMemoryApiKeyRepository,
     InMemoryBlobStorage,
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
@@ -35,6 +36,7 @@ from cyberarche.application.testing.fakes import (
 )
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
@@ -173,6 +175,7 @@ def use_cases(
             connectors=connectors,
         ),
         sharing=sharing,
+        api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
     )
 
 

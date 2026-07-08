@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from cyberarche.adapters.inbound.http.routers.agent import router as agent_router
+from cyberarche.adapters.inbound.http.routers.api_keys import router as api_keys_router
 from cyberarche.adapters.inbound.http.routers.auth import router as auth_router
 from cyberarche.adapters.inbound.http.routers.connectors import (
     router as connectors_router,
@@ -19,6 +20,7 @@ from cyberarche.adapters.inbound.http.routers.workspaces import router as worksp
 all_routers = [
     health_router,
     auth_router,
+    api_keys_router,
     workspaces_router,
     documents_router,
     knowledge_router,

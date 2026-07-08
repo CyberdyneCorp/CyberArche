@@ -18,6 +18,7 @@ from cyberarche.application.ports.storage import Blob
 from cyberarche.application.ports.identity import Claims
 from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
 from cyberarche.application.ports.mcp import ExternalTool
+from cyberarche.domain.api_keys import ApiKey
 from cyberarche.domain.connectors import Connector
 from cyberarche.domain.ids import ConnectorId, ShareLinkId
 from cyberarche.domain.sharing import Comment, ShareLink
@@ -529,6 +530,38 @@ class InProcessPeerBus:
                 self._handlers.pop(channel, None)
 
         return unsubscribe
+
+
+class InMemoryApiKeyRepository:
+    def __init__(self) -> None:
+        self._items: dict[str, ApiKey] = {}
+
+    async def add(self, key: ApiKey) -> None:
+        self._items[key.id] = key
+
+    async def by_hash(self, secret_hash: str) -> ApiKey | None:
+        for key in self._items.values():
+            if key.secret_hash == secret_hash:
+                return key
+        return None
+
+    async def get(self, user_id: UserId, key_id: str) -> ApiKey | None:
+        key = self._items.get(key_id)
+        if key is None or key.user_id != user_id:
+            return None
+        return key
+
+    async def list_for_user(
+        self, tenant_id: TenantId, user_id: UserId
+    ) -> list[ApiKey]:
+        return [
+            k
+            for k in self._items.values()
+            if k.tenant_id == tenant_id and k.user_id == user_id
+        ]
+
+    async def update(self, key: ApiKey) -> None:
+        self._items[key.id] = key
 
 
 class StaticTokenPort:

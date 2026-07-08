@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { createApiKeys, type ApiKeysVM } from '$lib/viewmodels/api-keys.svelte';
 	import { createConnectors, type ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
 
 	const workspaceId = $derived(page.params.workspaceId!);
@@ -9,11 +10,34 @@
 	let endpoint = $state('');
 	let credentials = $state('');
 
+	let apiKeys = $state<ApiKeysVM | null>(null);
+	let keyName = $state('');
+	let copiedSecret = $state(false);
+
+	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
+
 	$effect(() => {
 		const vm = createConnectors(workspaceId);
 		connectors = vm;
 		vm.load();
+		const keysVm = createApiKeys();
+		apiKeys = keysVm;
+		keysVm.load();
 	});
+
+	async function createKey(event: SubmitEvent) {
+		event.preventDefault();
+		if (!apiKeys || !keyName.trim()) return;
+		copiedSecret = false;
+		await apiKeys.create(keyName.trim());
+		keyName = '';
+	}
+
+	async function copySecret() {
+		if (!apiKeys?.justCreated) return;
+		await navigator.clipboard.writeText(apiKeys.justCreated.secret);
+		copiedSecret = true;
+	}
 
 	async function register(event: SubmitEvent) {
 		event.preventDefault();
@@ -34,6 +58,73 @@
 			connector; credentials are encrypted at rest and never shown again.
 		</p>
 	</header>
+
+	{#if apiKeys}
+		<section class="card">
+			<h2>API keys — connect Claude / ChatGPT to CyberArche</h2>
+			<p class="hint">
+				Personal keys let external MCP clients act as you. Point the client at
+				<code>{mcpUrl}</code> with header
+				<code>Authorization: Bearer &lt;key&gt;</code>. Keys are hashed at rest and shown
+				only once.
+			</p>
+			<form class="add" onsubmit={createKey}>
+				<input
+					class="input grow"
+					placeholder="Key name (e.g. Claude Desktop)"
+					bind:value={keyName}
+					data-testid="apikey-name"
+				/>
+				<button class="btn btn-primary" type="submit" data-testid="apikey-create"
+					>Create key</button
+				>
+			</form>
+
+			{#if apiKeys.justCreated}
+				<div class="secret-once" data-testid="apikey-secret-box">
+					<p class="secret-title">
+						Copy this key now — it will not be shown again.
+					</p>
+					<div class="secret-row">
+						<code class="secret" data-testid="apikey-secret">{apiKeys.justCreated.secret}</code>
+						<button class="btn btn-secondary" data-testid="apikey-copy" onclick={copySecret}>
+							{copiedSecret ? 'Copied ✓' : 'Copy'}
+						</button>
+						<button class="mini" data-testid="apikey-dismiss" onclick={() => apiKeys!.dismissSecret()}
+							>Done</button
+						>
+					</div>
+				</div>
+			{/if}
+
+			{#each apiKeys.items as key (key.id)}
+				<div class="key-row" class:revoked={key.revoked} data-testid="apikey-row">
+					<div class="info">
+						<strong>{key.name}</strong>
+						<code class="key-prefix">{key.prefix}</code>
+						<span class="chip">{key.revoked ? 'revoked' : 'active'}</span>
+						{#if key.last_used_at}
+							<span class="muted">last used {new Date(key.last_used_at).toLocaleString()}</span>
+						{:else if !key.revoked}
+							<span class="muted">never used</span>
+						{/if}
+					</div>
+					{#if !key.revoked}
+						<button
+							class="remove"
+							data-testid="apikey-revoke"
+							onclick={() => apiKeys!.revoke(key.id)}>Revoke</button
+						>
+					{/if}
+				</div>
+			{:else}
+				<p class="none">No API keys yet.</p>
+			{/each}
+			{#if apiKeys.error}
+				<p class="error" role="alert">{apiKeys.error}</p>
+			{/if}
+		</section>
+	{/if}
 
 	{#if connectors}
 		<section class="card">
@@ -218,5 +309,56 @@
 	.remove {
 		font-size: 11.5px;
 		color: var(--rose);
+	}
+	.secret-once {
+		margin-top: 12px;
+		background: var(--accbg);
+		border: 1px solid var(--accbg2);
+		border-radius: var(--r-block);
+		padding: 10px 12px;
+	}
+	.secret-title {
+		margin: 0 0 6px;
+		font-weight: 600;
+		color: var(--acc-strong);
+	}
+	.secret-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.secret {
+		flex: 1;
+		font-size: 11px;
+		word-break: break-all;
+	}
+	.key-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
+		padding: 9px 0;
+		border-top: 1px solid var(--line);
+	}
+	.key-row.revoked {
+		opacity: 0.55;
+	}
+	.key-row .info {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.key-prefix {
+		font-size: 11px;
+		color: var(--tx2);
+	}
+	.muted {
+		color: var(--tx3);
+		font-size: 11px;
+	}
+	.mini {
+		font-size: 11px;
+		color: var(--acc-strong);
 	}
 </style>

@@ -34,6 +34,7 @@ async def adapters(request):
             "update_log": fakes.InMemoryUpdateLog(),
             "blobs": fakes.InMemoryBlobStorage(),
             "queue": fakes.InMemoryTaskQueue(),
+            "api_keys": fakes.InMemoryApiKeyRepository(),
         }
         return
     # postgres: real adapters over TEST_DATABASE_URL (integration runs)
@@ -43,6 +44,7 @@ async def adapters(request):
         PostgresDocumentRepository,
         PostgresWorkspaceRepository,
     )
+    from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
     from cyberarche.application.testing import fakes
 
@@ -52,7 +54,7 @@ async def adapters(request):
         await pool.execute(
             "TRUNCATE workspaces, documents, snapshots, crdt_updates, "
             "workspace_memberships, document_grants, share_links, agent_runs, "
-            "mcp_connectors, ingestion_tasks, comments CASCADE"
+            "mcp_connectors, ingestion_tasks, comments, api_keys CASCADE"
         )
         yield {
             "workspaces": PostgresWorkspaceRepository(pool),
@@ -60,6 +62,7 @@ async def adapters(request):
             "update_log": PostgresUpdateLog(pool),
             "blobs": fakes.InMemoryBlobStorage(),
             "queue": fakes.InMemoryTaskQueue(),
+            "api_keys": PostgresApiKeyRepository(pool),
         }
     finally:
         await pool.close()
@@ -180,3 +183,29 @@ async def test_filesystem_blob_adapter_passes_the_same_contract(tmp_path):
     assert await blobs.get("nope") is None
     await blobs.delete("ingest/ws/hash/report final.pdf")
     assert await blobs.get("ingest/ws/hash/report final.pdf") is None
+
+
+async def test_api_key_repository_contract(adapters):
+    from cyberarche.domain.api_keys import ApiKey
+
+    repo = adapters["api_keys"]
+    key = ApiKey(
+        id="k-1",
+        tenant_id=TenantId("acme"),
+        user_id=UserId("alice"),
+        name="Claude",
+        secret_hash="hash-1",
+        prefix="cak_abcd1234…",
+        created_at=NOW,
+    )
+    await repo.add(key)
+
+    assert (await repo.by_hash("hash-1")).id == "k-1"
+    assert await repo.by_hash("nope") is None
+    assert (await repo.get(UserId("alice"), "k-1")) is not None
+    assert await repo.get(UserId("mallory"), "k-1") is None
+    assert [k.id for k in await repo.list_for_user(TenantId("acme"), UserId("alice"))] == ["k-1"]
+
+    await repo.update(key.revoke(NOW).touched(NOW))
+    stored = await repo.by_hash("hash-1")
+    assert stored.revoked_at == NOW and stored.last_used_at == NOW

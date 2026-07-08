@@ -70,7 +70,9 @@ def test_update_is_broadcast_to_other_peer(api):
 
 def test_viewer_update_rejected_and_not_broadcast(api):
     workspace_id, document_id = make_document(api)
-    api.app.state.container.token_port.register(
+    # token_port is the CompositeTokenVerifier (API keys wrap the inner
+    # verifier); register the test token on the inner StaticTokenPort.
+    api.app.state.container.token_port._inner.register(
         "carol-token", Claims(subject="carol", tenant_id="acme")
     )
     grant(api, workspace_id, "carol", Role.VIEWER)
