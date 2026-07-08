@@ -181,6 +181,22 @@ class PostgresDocumentRepository:
             *_document_params(document),
         )
 
+    async def search_by_title(
+        self, tenant_id: TenantId, query: str, *, limit: int = 20
+    ) -> list[Document]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM documents
+            WHERE tenant_id = $1 AND trashed = FALSE AND title ILIKE '%' || $2 || '%'
+            ORDER BY title
+            LIMIT $3
+            """,
+            tenant_id,
+            query,
+            limit,
+        )
+        return [_document_from_row(r) for r in rows]
+
     async def update_many(self, documents: list[Document]) -> None:
         async with self._pool.acquire() as connection:
             async with connection.transaction():

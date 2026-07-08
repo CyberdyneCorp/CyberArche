@@ -1,11 +1,68 @@
-"""CyberArche MCP server deployable (FastMCP).
+"""CyberArche MCP server deployable (FastMCP over HTTP).
 
-Skeleton for now: the tool surface is implemented in change group 9
-(mcp-server capability) on top of the same composition root as the API.
+Same composition root as the API service; stateless, horizontally scalable.
 """
 
 from __future__ import annotations
 
+import asyncio
 
-def run() -> None:  # pragma: no cover - wired up in group 9
-    raise SystemExit("cyberarche-mcp: tool surface lands with the mcp-server tasks")
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cyberarche.adapters.inbound.mcp.server import build_mcp_server
+from cyberarche.adapters.wiring import WiringConfig, build_container
+
+
+class McpSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CYBERARCHE_", env_file=".env")
+
+    backend: str = "memory"
+    database_url: str = ""
+    auth_base_url: str = "https://auth.backend.coolify.cyberdynecorp.ai"
+    auth_client_id: str = ""
+    auth_client_secret: str = ""
+    auth_audience: str | None = None
+    auth_tenant_claim: str = "org_id"
+    rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
+    rag_api_token: str = ""
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-sonnet-5"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8100
+
+    def wiring(self) -> WiringConfig:
+        return WiringConfig(
+            backend="postgres" if self.backend == "postgres" else "memory",
+            database_url=self.database_url,
+            auth_base_url=self.auth_base_url,
+            auth_client_id=self.auth_client_id,
+            auth_client_secret=self.auth_client_secret,
+            auth_audience=self.auth_audience,
+            auth_tenant_claim=self.auth_tenant_claim,
+            rag_base_url=self.rag_base_url,
+            rag_api_token=self.rag_api_token,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            llm_api_key=self.llm_api_key,
+            llm_base_url=self.llm_base_url,
+        )
+
+
+async def serve(settings: McpSettings | None = None) -> None:
+    settings = settings or McpSettings()
+    container = await build_container(settings.wiring())
+    try:
+        server = build_mcp_server(container)
+        await server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
+    finally:
+        await container.aclose()
+
+
+def run() -> None:
+    asyncio.run(serve())
+
+
+if __name__ == "__main__":
+    run()

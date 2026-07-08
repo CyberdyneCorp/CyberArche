@@ -114,6 +114,17 @@ class InMemoryDocumentRepository:
         for document in documents:
             self._items[document.id] = document
 
+    async def search_by_title(
+        self, tenant_id: TenantId, query: str, *, limit: int = 20
+    ) -> list[Document]:
+        needle = query.lower()
+        matches = [
+            d
+            for d in self._items.values()
+            if d.tenant_id == tenant_id and not d.trashed and needle in d.title.lower()
+        ]
+        return sorted(matches, key=lambda d: d.title)[:limit]
+
 
 class InMemorySnapshotRepository:
     def __init__(self) -> None:

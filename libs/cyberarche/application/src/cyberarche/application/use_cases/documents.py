@@ -127,6 +127,23 @@ class DocumentUseCases:
         await self._access.require_workspace(caller, workspace_id, Role.VIEWER)
         return await self._documents.list_trashed(caller.tenant_id, workspace_id)
 
+    async def search(
+        self, caller: CallerContext, *, query: str, limit: int = 20
+    ) -> list[Document]:
+        """Title search within the caller's tenant, filtered to documents the
+        caller may at least view (mcp-server spec: no unauthorized results)."""
+        candidates = await self._documents.search_by_title(
+            caller.tenant_id, query, limit=limit * 2
+        )
+        visible: list[Document] = []
+        for document in candidates:
+            role = await self._access.document_role(caller, document)
+            if role is not None:
+                visible.append(document)
+            if len(visible) >= limit:
+                break
+        return visible
+
     async def _get_or_raise(
         self,
         caller: CallerContext,

@@ -78,11 +78,11 @@
 
 ## 9. MCP Server (mcp-server)
 
-- [ ] 9.1 `services/cyberarche/mcp` FastMCP deployable on the shared composition root
-- [ ] 9.2 Token-auth on tool calls; resolve `CallerContext`; enforce permissions/tenant in use cases
-- [ ] 9.3 Document tools: search, read, create, edit (via CRDT)
-- [ ] 9.4 Knowledge tools: ingest file, RAG query
-- [ ] 9.5 Contract-parity tests: HTTP, realtime, and MCP deny identically; unauthorized read denied; tenant scoping
+- [x] 9.1 `services/cyberarche/mcp` FastMCP deployable on the shared composition root
+- [x] 9.2 Token-auth on tool calls; resolve `CallerContext`; enforce permissions/tenant in use cases
+- [x] 9.3 Document tools: search, read, create, edit (via CRDT)
+- [x] 9.4 Knowledge tools: ingest file, RAG query
+- [x] 9.5 Contract-parity tests: HTTP, realtime, and MCP deny identically; unauthorized read denied; tenant scoping
 
 ## 10. External MCP Connectors (external-mcp-connectors)
 

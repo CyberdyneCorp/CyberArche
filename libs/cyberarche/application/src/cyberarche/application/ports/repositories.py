@@ -45,6 +45,12 @@ class DocumentRepository(Protocol):
 
     async def update_many(self, documents: list[Document]) -> None: ...
 
+    async def search_by_title(
+        self, tenant_id: TenantId, query: str, *, limit: int = 20
+    ) -> list[Document]:
+        """Case-insensitive title match within a tenant (no trashed docs)."""
+        ...
+
 
 class SnapshotRepository(Protocol):
     async def add(self, snapshot: Snapshot) -> None: ...
