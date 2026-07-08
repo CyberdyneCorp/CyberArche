@@ -31,6 +31,10 @@ class McpSettings(BaseSettings):
     llm_base_url: str = ""
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8100
+    # Behind a reverse proxy (Traefik/Coolify) the Host header is the public
+    # FQDN. FastMCP's DNS-rebinding protection rejects unknown hosts with 421,
+    # so the deployment must allow-list its domain (comma-separated).
+    mcp_allowed_hosts: str = ""
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -49,13 +53,25 @@ class McpSettings(BaseSettings):
             llm_base_url=self.llm_base_url,
         )
 
+    def allowed_hosts(self) -> list[str] | None:
+        hosts = [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
+        return hosts or None
+
 
 async def serve(settings: McpSettings | None = None) -> None:
     settings = settings or McpSettings()
     container = await build_container(settings.wiring())
     try:
         server = build_mcp_server(container)
-        await server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
+        hosts = settings.allowed_hosts()
+        await server.run_http_async(
+            host=settings.mcp_host,
+            port=settings.mcp_port,
+            # No allow-list configured -> disable host protection (the service
+            # is only reachable through the proxy in that deployment).
+            host_origin_protection=hosts is not None,
+            allowed_hosts=hosts,
+        )
     finally:
         await container.aclose()
 

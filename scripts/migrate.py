@@ -46,7 +46,7 @@ async def migrate(database_url: str) -> None:
 
 
 if __name__ == "__main__":
-    url = os.environ.get("DATABASE_URL")
+    url = os.environ.get("DATABASE_URL") or os.environ.get("CYBERARCHE_DATABASE_URL")
     if not url:
-        sys.exit("DATABASE_URL is required")
+        sys.exit("DATABASE_URL (or CYBERARCHE_DATABASE_URL) is required")
     asyncio.run(migrate(url))

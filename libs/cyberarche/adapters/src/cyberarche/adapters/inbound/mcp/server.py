@@ -61,6 +61,12 @@ def build_mcp_server(
     cases = container.use_cases
     mcp = FastMCP(name="cyberarche", instructions=_INSTRUCTIONS)
 
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(request):  # noqa: ANN001 - starlette signature
+        from starlette.responses import PlainTextResponse
+
+        return PlainTextResponse("ok")
+
     # ---- document tools ----------------------------------------------------
 
     @mcp.tool

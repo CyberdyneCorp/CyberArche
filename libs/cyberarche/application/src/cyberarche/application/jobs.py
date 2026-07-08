@@ -7,6 +7,7 @@ the reconstructed caller — a queued job grants nothing by itself.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -18,6 +19,8 @@ from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import TenantId, UserId, WorkspaceId
 
 logger = logging.getLogger(__name__)
+
+_RETRY_BACKOFF_SECONDS = 2.0
 
 JobHandler = Callable[[dict], Awaitable[None]]
 
@@ -38,9 +41,17 @@ class JobRunner:
         await self._dispatch(job)
         return True
 
-    async def run_forever(self) -> None:  # pragma: no cover - service loop
+    async def run_forever(self, *, timeout: float = 5.0) -> None:
+        """Service loop: a transient queue/broker failure must never kill the
+        worker — log, back off briefly, and keep consuming."""
         while True:
-            await self.run_once(timeout=5.0)
+            try:
+                await self.run_once(timeout=timeout)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("worker loop error; retrying")
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
 
     async def _dispatch(self, job: QueuedJob) -> None:
         handler = self._handlers.get(job.type)

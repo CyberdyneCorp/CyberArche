@@ -6,6 +6,7 @@ import json
 import uuid
 
 import redis.asyncio as aioredis
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from cyberarche.application.ports.queue import QueuedJob
 
@@ -25,7 +26,14 @@ class RedisTaskQueue:
         return job_id
 
     async def dequeue(self, *, timeout: float = 5.0) -> QueuedJob | None:
-        entry = await self._redis.brpop([self._key], timeout=timeout)
+        """An idle poll returns None — never raises. redis-py surfaces the
+        blocking read as a TimeoutError when its socket deadline coincides
+        with BRPOP's timeout; that is 'no job', not a failure (a worker loop
+        must not die on an idle queue)."""
+        try:
+            entry = await self._redis.brpop([self._key], timeout=timeout)
+        except RedisTimeoutError:
+            return None
         if entry is None:
             return None
         _, raw = entry

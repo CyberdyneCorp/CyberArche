@@ -1,0 +1,128 @@
+# CyberArche production stack (Coolify dockercompose build pack).
+# No Traefik labels — Coolify maps domains per service (Domains UI /
+# docker_compose_domains). Secrets come from Coolify Environment Variables.
+
+services:
+  # ---- Infrastructure ----
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cyberarche}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberarche}
+      POSTGRES_DB: ${POSTGRES_DB:-cyberarche}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cyberarche}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Application ----
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: production
+    restart: unless-stopped
+    environment: &backend-env
+      CYBERARCHE_BACKEND: postgres
+      CYBERARCHE_DATABASE_URL: postgresql://${POSTGRES_USER:-cyberarche}:${POSTGRES_PASSWORD:-cyberarche}@postgres:5432/${POSTGRES_DB:-cyberarche}
+      CYBERARCHE_REDIS_URL: redis://redis:6379/0
+      CYBERARCHE_BLOB_DIR: /data/blobs
+      CYBERARCHE_AUTH_BASE_URL: ${CYBERARCHE_AUTH_BASE_URL:-https://auth.backend.coolify.cyberdynecorp.ai}
+      CYBERARCHE_AUTH_CLIENT_ID: ${CYBERARCHE_AUTH_CLIENT_ID}
+      CYBERARCHE_AUTH_CLIENT_SECRET: ${CYBERARCHE_AUTH_CLIENT_SECRET}
+      CYBERARCHE_RAG_BASE_URL: ${CYBERARCHE_RAG_BASE_URL:-https://cyberrag.coolify.cyberdynecorp.ai}
+      CYBERARCHE_RAG_API_TOKEN: ${CYBERARCHE_RAG_API_TOKEN:-}
+      CYBERARCHE_RAG_WEBHOOK_SECRET: ${CYBERARCHE_RAG_WEBHOOK_SECRET}
+      CYBERARCHE_LLM_PROVIDER: ${CYBERARCHE_LLM_PROVIDER:-openai}
+      CYBERARCHE_LLM_MODEL: ${CYBERARCHE_LLM_MODEL:-gpt-4o-mini}
+      CYBERARCHE_LLM_API_KEY: ${CYBERARCHE_LLM_API_KEY}
+      CYBERARCHE_LLM_BASE_URL: ${CYBERARCHE_LLM_BASE_URL:-}
+      CYBERARCHE_CONNECTOR_SECRET_KEY: ${CYBERARCHE_CONNECTOR_SECRET_KEY}
+      CYBERARCHE_CORS_ORIGINS: ${CYBERARCHE_CORS_ORIGINS:-["https://cyberarche.coolify.cyberdynecorp.ai"]}
+    volumes:
+      - blob_data:/data/blobs
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  mcp:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: production
+    restart: unless-stopped
+    command: ["cyberarche-mcp"]
+    environment:
+      <<: *backend-env
+      CYBERARCHE_MCP_PORT: "8100"
+      # Allow-list the public FQDN: FastMCP rejects unknown Host headers
+      # (DNS-rebinding protection) with 421 behind Traefik.
+      CYBERARCHE_MCP_ALLOWED_HOSTS: ${CYBERARCHE_MCP_ALLOWED_HOSTS:-}
+    volumes:
+      - blob_data:/data/blobs
+    expose:
+      - "8100"
+    depends_on:
+      api:
+        condition: service_healthy # migrations applied by the api entrypoint
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  workers:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: production
+    restart: unless-stopped
+    command: ["cyberarche-workers"]
+    environment: *backend-env
+    volumes:
+      - blob_data:/data/blobs
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/cyberarche/web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://cyberarche.backend.coolify.cyberdynecorp.ai}
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  blob_data:

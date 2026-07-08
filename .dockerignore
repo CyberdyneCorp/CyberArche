@@ -1,0 +1,16 @@
+.git
+.venv
+**/node_modules
+**/.svelte-kit
+**/build
+**/test-results
+**/playwright-report
+data/
+.env
+.env.*
+!.env.example
+tests/
+apps/cyberarche/web/e2e
+openspec/
+docs/
+*.md
