@@ -7,7 +7,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from cyberarche.domain.errors import ValidationFailed
-from cyberarche.domain.ids import ConnectorId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    ConnectorId,
+    DocumentId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 
 # Separator between connector namespace and tool name; both sides must be
 # valid MCP/LLM tool-name characters ([a-zA-Z0-9_-]).
@@ -34,6 +40,12 @@ class Connector:
     enabled: bool
     created_by: UserId
     created_at: datetime
+    # None = workspace-scoped (active on every document); otherwise active only
+    # when the agent is working on this document.
+    document_id: DocumentId | None = None
+
+    def active_for(self, document_id: DocumentId) -> bool:
+        return self.document_id is None or self.document_id == document_id
 
     def qualified(self, tool_name: str) -> str:
         return f"{self.slug}{NAMESPACE_SEPARATOR}{tool_name}"

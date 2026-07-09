@@ -6,7 +6,13 @@ import asyncpg
 
 from cyberarche.domain.connectors import Connector
 from cyberarche.domain.errors import NotFound
-from cyberarche.domain.ids import ConnectorId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    ConnectorId,
+    DocumentId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 
 
 def _from_row(row: asyncpg.Record) -> Connector:
@@ -20,6 +26,7 @@ def _from_row(row: asyncpg.Record) -> Connector:
         enabled=row["enabled"],
         created_by=UserId(row["created_by"]),
         created_at=row["created_at"],
+        document_id=DocumentId(row["document_id"]) if row["document_id"] else None,
     )
 
 
@@ -32,8 +39,8 @@ class PostgresConnectorRepository:
             """
             INSERT INTO mcp_connectors
                 (id, tenant_id, workspace_id, name, slug, endpoint,
-                 credentials_encrypted, enabled, created_by, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 credentials_encrypted, enabled, created_by, created_at, document_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             """,
             connector.id,
             connector.tenant_id,
@@ -45,6 +52,7 @@ class PostgresConnectorRepository:
             connector.enabled,
             connector.created_by,
             connector.created_at,
+            connector.document_id,
         )
 
     async def get(

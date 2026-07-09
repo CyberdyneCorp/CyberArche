@@ -38,6 +38,7 @@ async def adapters(request):
             "teamspaces": fakes.InMemoryTeamspaceRepository(),
             "favorites": fakes.InMemoryFavoriteRepository(),
             "memberships": fakes.InMemoryMembershipRepository(),
+            "connectors": fakes.InMemoryConnectorRepository(),
         }
         return
     # postgres: real adapters over TEST_DATABASE_URL (integration runs)
@@ -49,6 +50,9 @@ async def adapters(request):
         PostgresWorkspaceRepository,
     )
     from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
+    from cyberarche.adapters.outbound.postgres.connectors import (
+        PostgresConnectorRepository,
+    )
     from cyberarche.adapters.outbound.postgres.teamspaces import (
         PostgresFavoriteRepository,
         PostgresTeamspaceRepository,
@@ -75,6 +79,7 @@ async def adapters(request):
             "teamspaces": PostgresTeamspaceRepository(pool),
             "favorites": PostgresFavoriteRepository(pool),
             "memberships": PostgresMembershipRepository(pool),
+            "connectors": PostgresConnectorRepository(pool),
         }
     finally:
         await pool.close()
@@ -377,14 +382,59 @@ async def test_document_purge_cascades_owned_rows_postgres(adapters, request):
     await ws_repo.add(workspace())
     await repo.add(document("d-1"))
 
+    from cyberarche.domain.connectors import Connector
+    from cyberarche.domain.ids import ConnectorId
+
+    connectors = adapters["connectors"]
     await favorites.add(UserId("alice"), DocumentId("d-1"))
     await memberships.add_document_grant(
         DocumentGrant(DocumentId("d-1"), UserId("bob"), Role.VIEWER, NOW)
     )
     await updates.append(DocumentId("d-1"), b"\x01\x02", origin="alice")
+    await connectors.add(
+        Connector(
+            id=ConnectorId("c-1"), tenant_id=TenantId("acme"),
+            workspace_id=WorkspaceId("ws-1"), name="Scoped", slug="scoped",
+            endpoint="https://x.example/mcp", enabled=True,
+            created_by=UserId("alice"), created_at=NOW, document_id=DocumentId("d-1"),
+        ),
+        b"enc",
+    )
 
     await repo.purge(TenantId("acme"), DocumentId("d-1"))
 
     assert await favorites.list_for_user(UserId("alice")) == []
     assert await memberships.document_grant(DocumentId("d-1"), UserId("bob")) is None
     assert await updates.list_for_document(DocumentId("d-1")) == []
+    # The document-scoped connector cascades away too (migration 0007).
+    assert await connectors.get(TenantId("acme"), ConnectorId("c-1")) is None
+
+
+async def test_connector_repository_contract(adapters):
+    from cyberarche.domain.connectors import Connector
+    from cyberarche.domain.ids import ConnectorId
+
+    ws_repo, doc_repo = adapters["workspaces"], adapters["documents"]
+    repo = adapters["connectors"]
+    await ws_repo.add(workspace())
+    await doc_repo.add(document("d-1"))
+
+    def conn(cid, slug, document_id=None):
+        return Connector(
+            id=ConnectorId(cid), tenant_id=TenantId("acme"),
+            workspace_id=WorkspaceId("ws-1"), name=slug.title(), slug=slug,
+            endpoint=f"https://{slug}.example/mcp", enabled=True,
+            created_by=UserId("alice"), created_at=NOW, document_id=document_id,
+        )
+
+    await repo.add(conn("c-ws", "wide"), b"enc-ws")
+    await repo.add(conn("c-doc", "scoped", DocumentId("d-1")), b"enc-doc")
+
+    # document_id round-trips (workspace-wide is None; scoped keeps its id).
+    assert (await repo.get(TenantId("acme"), ConnectorId("c-ws"))).document_id is None
+    scoped = await repo.get(TenantId("acme"), ConnectorId("c-doc"))
+    assert scoped.document_id == "d-1"
+
+    both = await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1"))
+    assert {c.id for c in both} == {"c-ws", "c-doc"}
+    assert await repo.credentials(ConnectorId("c-doc")) == b"enc-doc"

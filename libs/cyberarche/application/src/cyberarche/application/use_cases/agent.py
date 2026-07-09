@@ -34,7 +34,7 @@ from cyberarche.domain.blocks import validate_block_type
 from cyberarche.domain.connectors import split_qualified
 from cyberarche.domain.ids import WorkspaceId
 from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
-from cyberarche.domain.ids import AgentRunId, DocumentId
+from cyberarche.domain.ids import AgentRunId, ConnectorId, DocumentId
 from cyberarche.domain.memberships import Role
 
 MAX_TOOL_ROUNDS = 8
@@ -127,12 +127,18 @@ class AgentUseCases:
     # ---- public capabilities ----------------------------------------------
 
     async def ask(
-        self, caller: CallerContext, document_id: DocumentId, *, instruction: str
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        *,
+        instruction: str,
+        session_connectors: set[str] | None = None,
     ) -> AgentAnswer:
         """Answer/act grounded in the document, with tool use.
 
         The reply always carries insertable blocks so the UI can offer
-        'Insert as block' on any answer (ai-agent spec).
+        'Insert as block' on any answer (ai-agent spec). `session_connectors`,
+        if given, restricts external MCP tools to that opt-in set for this run.
         """
         document, context = await self._document_context(caller, document_id)
         messages = [
@@ -146,7 +152,12 @@ class AgentUseCases:
             ),
         ]
         text = await self._run_loop(
-            caller, document_id, document.workspace_id, instruction, messages
+            caller,
+            document_id,
+            document.workspace_id,
+            instruction,
+            messages,
+            session_connectors,
         )
         return AgentAnswer(text=text, blocks=_paragraph_blocks(self._ids, text))
 
@@ -298,9 +309,12 @@ class AgentUseCases:
         workspace_id: WorkspaceId,
         prompt: str,
         messages: list[LLMMessage],
+        session_connectors: set[str] | None = None,
     ) -> str:
         tools_used: list[str] = []
-        tools = await self._available_tools(caller, workspace_id, document_id)
+        tools = await self._available_tools(
+            caller, workspace_id, document_id, session_connectors
+        )
         response = await self._llm.complete(messages, tools=tools)
         for _ in range(MAX_TOOL_ROUNDS):
             if not response.wants_tools:
@@ -315,7 +329,7 @@ class AgentUseCases:
             for call in response.tool_calls:
                 tools_used.append(call.name)
                 result = await self._dispatch(
-                    caller, workspace_id, document_id, call
+                    caller, workspace_id, document_id, call, session_connectors
                 )
                 messages.append(
                     LLMMessage(
@@ -339,12 +353,18 @@ class AgentUseCases:
         caller: CallerContext,
         workspace_id: WorkspaceId,
         document_id: DocumentId,
+        session_connectors: set[str] | None,
     ) -> list[ToolSpec]:
-        """Document-bound editing tools, the built-in tools, and the
-        workspace's enabled external MCP tools (namespaced by connector)."""
+        """Document-bound editing tools, the built-in tools, and the external
+        MCP tools active for this document + session (namespaced by connector)."""
         tools = [spec for spec, _ in _editing_tools()] + self._tools.specs()
         if self._connectors is not None:
-            tools = tools + await self._connectors.tools(caller, workspace_id)
+            tools = tools + await self._connectors.tools(
+                caller,
+                workspace_id,
+                document_id=document_id,
+                session_connectors=_connector_ids(session_connectors),
+            )
         return tools
 
     async def _dispatch(
@@ -353,6 +373,7 @@ class AgentUseCases:
         workspace_id: WorkspaceId,
         document_id: DocumentId,
         call: ToolCall,
+        session_connectors: set[str] | None = None,
     ) -> str:
         """Editing tools bind to the OPEN document (design D-2), so a
         hallucinated id can never reach another document."""
@@ -368,6 +389,8 @@ class AgentUseCases:
                     workspace_id,
                     qualified_name=call.name,
                     arguments=call.arguments,
+                    document_id=document_id,
+                    session_connectors=_connector_ids(session_connectors),
                 )
             except Exception as error:  # external failures go back to the model
                 return f"error: {error}"
@@ -563,6 +586,13 @@ def _render_block(block: dict) -> str:
     data = block.get("data", {})
     text = data.get("text", "") if isinstance(data, dict) else ""
     return f"[block:{block.get('id', '?')}] ({block.get('type', '?')}) {text}"
+
+
+def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | None:
+    """The session opt-in set as ConnectorIds (None = no restriction)."""
+    if session_connectors is None:
+        return None
+    return {ConnectorId(cid) for cid in session_connectors}
 
 
 def _paragraph_blocks(ids: IdPort, text: str) -> list[dict]:

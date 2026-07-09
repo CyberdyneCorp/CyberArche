@@ -177,3 +177,96 @@ async def test_non_owner_cannot_register_connector(
         await use_cases.connectors.register(
             editor, workspace.id, name="Alpha", endpoint="https://a.example/mcp"
         )
+
+# ---- document scope + per-session opt-in (extend-connector-scope-sessions) --
+
+
+async def test_document_scoped_connector_is_active_only_on_its_document(
+    use_cases, mcp_client, alice
+):
+    workspace = await make_workspace(use_cases, alice)
+    doc_a = await use_cases.documents.create(alice, workspace_id=workspace.id, title="A")
+    doc_b = await use_cases.documents.create(alice, workspace_id=workspace.id, title="B")
+    mcp_client.servers["https://scoped.example/mcp"] = [SEARCH_TOOL]
+
+    await use_cases.connectors.register(
+        alice, workspace.id, name="Scoped", endpoint="https://scoped.example/mcp",
+        document_id=doc_a.id,
+    )
+
+    on_a = await use_cases.connectors.tools(alice, workspace.id, document_id=doc_a.id)
+    on_b = await use_cases.connectors.tools(alice, workspace.id, document_id=doc_b.id)
+    assert [t.name for t in on_a] == ["scoped__search"]
+    assert on_b == []  # not active on another document
+    # And with no document context, a document-scoped connector is inactive.
+    assert await use_cases.connectors.tools(alice, workspace.id) == []
+
+
+async def test_workspace_scoped_connector_is_active_on_every_document(
+    use_cases, mcp_client, alice
+):
+    workspace = await make_workspace(use_cases, alice)
+    doc = await use_cases.documents.create(alice, workspace_id=workspace.id, title="A")
+    mcp_client.servers["https://ws.example/mcp"] = [SEARCH_TOOL]
+    await use_cases.connectors.register(
+        alice, workspace.id, name="WideOpen", endpoint="https://ws.example/mcp"
+    )
+
+    on_doc = await use_cases.connectors.tools(alice, workspace.id, document_id=doc.id)
+    assert [t.name for t in on_doc] == ["wideopen__search"]
+
+
+async def test_session_opt_in_restricts_to_chosen_connectors(
+    use_cases, mcp_client, alice
+):
+    workspace = await make_workspace(use_cases, alice)
+    mcp_client.servers["https://a.example/mcp"] = [SEARCH_TOOL]
+    mcp_client.servers["https://b.example/mcp"] = [SEARCH_TOOL]
+    a = await use_cases.connectors.register(
+        alice, workspace.id, name="Alpha", endpoint="https://a.example/mcp"
+    )
+    await use_cases.connectors.register(
+        alice, workspace.id, name="Bravo", endpoint="https://b.example/mcp"
+    )
+
+    # No restriction: both connectors' tools are offered.
+    everything = await use_cases.connectors.tools(alice, workspace.id)
+    assert {t.name for t in everything} == {"alpha__search", "bravo__search"}
+
+    # Session opts in to only Alpha.
+    only_a = await use_cases.connectors.tools(
+        alice, workspace.id, session_connectors={a.id}
+    )
+    assert [t.name for t in only_a] == ["alpha__search"]
+
+    # And a call to the opted-out connector is refused.
+    with pytest.raises(NotFound):
+        await use_cases.connectors.call(
+            alice, workspace.id, qualified_name="bravo__search", arguments={},
+            session_connectors={a.id},
+        )
+
+
+async def test_agent_session_restricts_external_tools(use_cases, mcp_client, llm, alice):
+    workspace = await make_workspace(use_cases, alice)
+    document = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Doc"
+    )
+    mcp_client.servers["https://a.example/mcp"] = [SEARCH_TOOL]
+    mcp_client.servers["https://b.example/mcp"] = [SEARCH_TOOL]
+    a = await use_cases.connectors.register(
+        alice, workspace.id, name="Alpha", endpoint="https://a.example/mcp"
+    )
+    await use_cases.connectors.register(
+        alice, workspace.id, name="Bravo", endpoint="https://b.example/mcp"
+    )
+    llm._responses = [LLMResponse(text="done", model="m")]
+
+    await use_cases.agent.ask(
+        alice, document.id, instruction="?", session_connectors={a.id}
+    )
+
+    # Only Alpha's tool was offered to the model this session.
+    offered = {t.name for t in llm.tools_seen[0]}
+    assert "alpha__search" in offered
+    assert "bravo__search" not in offered

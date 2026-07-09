@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from cyberarche.adapters.inbound.http.dependencies import Caller, Cases
 from cyberarche.domain.connectors import Connector
-from cyberarche.domain.ids import ConnectorId, WorkspaceId
+from cyberarche.domain.ids import ConnectorId, DocumentId, WorkspaceId
 
 router = APIRouter(
     prefix="/api/v1/workspaces/{workspace_id}/connectors", tags=["connectors"]
@@ -23,6 +23,8 @@ class RegisterConnectorRequest(BaseModel):
     name: str
     endpoint: str
     credentials: str = ""
+    # Optional: scope this connector to one document (None = workspace-wide).
+    document_id: str | None = None
 
 
 class ConnectorResponse(BaseModel):
@@ -66,6 +68,7 @@ async def register_connector(
         name=body.name,
         endpoint=body.endpoint,
         credentials=body.credentials,
+        document_id=DocumentId(body.document_id) if body.document_id else None,
     )
     return ConnectorResponse.from_domain(connector)
 

@@ -13,7 +13,7 @@ from cyberarche.application.ports.mcp import (
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.connectors import Connector, slugify, split_qualified
 from cyberarche.domain.errors import Conflict, NotFound, ValidationFailed
-from cyberarche.domain.ids import ConnectorId, WorkspaceId
+from cyberarche.domain.ids import ConnectorId, DocumentId, WorkspaceId
 from cyberarche.domain.memberships import Role
 
 
@@ -42,11 +42,13 @@ class ConnectorUseCases:
         name: str,
         endpoint: str,
         credentials: str = "",
+        document_id: DocumentId | None = None,
     ) -> Connector:
-        """Register an external MCP server for a workspace.
+        """Register an external MCP server for a workspace, or for one document.
 
         The endpoint must complete an MCP handshake now (reject unreachable);
-        credentials are envelope-encrypted at rest and never returned.
+        credentials are envelope-encrypted at rest and never returned. A
+        document-scoped connector is active only on that document.
         """
         await self._access.require_workspace(caller, workspace_id, Role.OWNER)
         slug = slugify(name)
@@ -69,6 +71,7 @@ class ConnectorUseCases:
             enabled=True,
             created_by=caller.user_id,
             created_at=self._clock.now(),
+            document_id=document_id,
         )
         await self._connectors.add(connector, self._secrets.encrypt(credentials))
         return connector
@@ -95,16 +98,26 @@ class ConnectorUseCases:
         await self._connectors.delete(caller.tenant_id, connector_id)
 
     async def tools(
-        self, caller: CallerContext, workspace_id: WorkspaceId
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        *,
+        document_id: DocumentId | None = None,
+        session_connectors: set[ConnectorId] | None = None,
     ) -> list[ToolSpec]:
-        """Namespaced tools of the workspace's ENABLED connectors, with the
-        connector origin visible in the description."""
+        """Namespaced tools of the connectors active for this session.
+
+        A connector is active when it is globally enabled, in scope for the
+        document (workspace-scoped, or scoped to this document), and — if the
+        session gave an opt-in allow-set — in that set. `session_connectors` of
+        None means no per-session restriction (all enabled, in-scope ones).
+        """
         await self._access.require_workspace(caller, workspace_id, Role.VIEWER)
         specs: list[ToolSpec] = []
         for connector in await self._connectors.list_for_workspace(
             caller.tenant_id, workspace_id
         ):
-            if not connector.enabled:
+            if not self._active(connector, document_id, session_connectors):
                 continue
             credentials = self._secrets.decrypt(
                 await self._connectors.credentials(connector.id)
@@ -126,16 +139,21 @@ class ConnectorUseCases:
         *,
         qualified_name: str,
         arguments: dict,
+        document_id: DocumentId | None = None,
+        session_connectors: set[ConnectorId] | None = None,
     ) -> str:
-        """Dispatch a namespaced tool call to its connector (enabled only)."""
+        """Dispatch a namespaced tool call to its connector — only if that
+        connector is active for this session (same rule as tools())."""
         await self._access.require_workspace(caller, workspace_id, Role.VIEWER)
         parts = split_qualified(qualified_name)
         if parts is None:
             raise ValidationFailed(f"not a connector-qualified tool: {qualified_name}")
         slug, tool_name = parts
         connector = await self._connectors.by_slug(caller.tenant_id, workspace_id, slug)
-        if connector is None or not connector.enabled:
-            raise NotFound(f"no enabled connector {slug!r} in this workspace")
+        if connector is None or not self._active(
+            connector, document_id, session_connectors
+        ):
+            raise NotFound(f"no active connector {slug!r} for this session")
         credentials = self._secrets.decrypt(
             await self._connectors.credentials(connector.id)
         )
@@ -150,3 +168,19 @@ class ConnectorUseCases:
         if connector is None:
             raise NotFound("connector not found")
         return connector
+
+    @staticmethod
+    def _active(
+        connector: Connector,
+        document_id: DocumentId | None,
+        session_connectors: set[ConnectorId] | None,
+    ) -> bool:
+        if not connector.enabled:
+            return False  # owner's global off wins over any session opt-in
+        if document_id is not None and not connector.active_for(document_id):
+            return False  # out of scope for this document
+        if connector.document_id is not None and document_id is None:
+            return False  # a document-scoped connector needs a document context
+        if session_connectors is not None and connector.id not in session_connectors:
+            return False  # session opted out of this connector
+        return True

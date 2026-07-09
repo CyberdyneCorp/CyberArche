@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/v1/documents/{document_id}/agent", tags=["agent"
 
 class AskRequest(BaseModel):
     instruction: str
+    # Optional per-session opt-in: restrict external MCP tools to these
+    # connector ids. Omit for no restriction (all enabled connectors).
+    enabled_connectors: list[str] | None = None
 
 
 class AskResponse(BaseModel):
@@ -66,7 +69,12 @@ async def ask(
     document_id: str, body: AskRequest, cases: Cases, caller: Caller
 ) -> AskResponse:
     answer = await cases.agent.ask(
-        caller, DocumentId(document_id), instruction=body.instruction
+        caller,
+        DocumentId(document_id),
+        instruction=body.instruction,
+        session_connectors=set(body.enabled_connectors)
+        if body.enabled_connectors is not None
+        else None,
     )
     return AskResponse(answer=answer.text, blocks=answer.blocks)
 
