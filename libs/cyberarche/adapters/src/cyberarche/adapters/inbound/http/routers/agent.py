@@ -30,6 +30,11 @@ class BlocksResponse(BaseModel):
     inserted: bool = False
 
 
+class SummarizeRequest(BaseModel):
+    # Optional: summarize only these blocks. Omit for the whole document.
+    block_ids: list[str] | None = None
+
+
 class InsertBlocksRequest(BaseModel):
     blocks: list[dict]
 
@@ -67,8 +72,17 @@ async def ask(
 
 
 @router.post("/summarize")
-async def summarize(document_id: str, cases: Cases, caller: Caller) -> BlocksResponse:
-    blocks = await cases.agent.summarize(caller, DocumentId(document_id))
+async def summarize(
+    document_id: str,
+    cases: Cases,
+    caller: Caller,
+    body: SummarizeRequest | None = None,
+) -> BlocksResponse:
+    blocks = await cases.agent.summarize(
+        caller,
+        DocumentId(document_id),
+        block_ids=body.block_ids if body else None,
+    )
     return BlocksResponse(blocks=blocks)
 
 

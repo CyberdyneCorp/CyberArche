@@ -84,8 +84,12 @@
 	</header>
 
 	<div class="quick">
-		<button class="chip-btn" data-testid="agent-summarize" onclick={() => agent.summarize()}
-			>Summarize</button
+		<button
+			class="chip-btn"
+			data-testid="agent-summarize"
+			title={focusedBlockId ? 'Summarize the focused block' : 'Summarize the document'}
+			onclick={() => agent.summarize(focusedBlockId ? [focusedBlockId] : undefined)}
+			>{focusedBlockId ? 'Summarize selection' : 'Summarize'}</button
 		>
 		<button
 			class="chip-btn"

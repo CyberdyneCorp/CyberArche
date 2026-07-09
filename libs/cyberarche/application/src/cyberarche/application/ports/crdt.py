@@ -47,6 +47,25 @@ class CrdtEnginePort(Protocol):
         """
         ...
 
+    def insert_blocks_after(
+        self, state: bytes, after_id: str | None, blocks: list[dict]
+    ) -> bytes:
+        """Insert blocks immediately after `after_id` (append when None).
+
+        Raises NotFound if `after_id` is given but absent, so a caller never
+        silently appends when it meant to insert at a position.
+        """
+        ...
+
+    def replace_block(self, state: bytes, block_id: str, block: dict) -> bytes:
+        """Replace the identified block's type and data wholesale.
+
+        Unlike update_block (which merges data), this swaps the block — used
+        when the replacement may change the block's type. Raises NotFound if
+        the block is absent.
+        """
+        ...
+
     def delete_block(self, state: bytes, block_id: str) -> bytes:
         """Incremental update removing the block from the document body."""
         ...

@@ -151,14 +151,25 @@ class AgentUseCases:
         return AgentAnswer(text=text, blocks=_paragraph_blocks(self._ids, text))
 
     async def summarize(
-        self, caller: CallerContext, document_id: DocumentId
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        *,
+        block_ids: list[str] | None = None,
     ) -> list[dict]:
-        answer = await self.ask(
-            caller,
-            document_id,
-            instruction="Summarize this document concisely for a reader who has "
-            "not seen it. Cite the block ids you drew from.",
-        )
+        if block_ids:
+            selection = ", ".join(block_ids)
+            instruction = (
+                "Summarize only these blocks, ignoring the rest of the "
+                f"document: {selection}. Write for a reader who has not seen "
+                "them, and cite the block ids you drew from."
+            )
+        else:
+            instruction = (
+                "Summarize this document concisely for a reader who has not "
+                "seen it. Cite the block ids you drew from."
+            )
+        answer = await self.ask(caller, document_id, instruction=instruction)
         return answer.blocks
 
     async def draft(
@@ -204,6 +215,38 @@ class AgentUseCases:
             validate_block_type(block.get("type", ""))
         state = await self._realtime.current_state(caller, document_id)
         update = self._engine.append_blocks(state, blocks)
+        return await self._realtime.apply(
+            caller, document_id, update, origin=f"agent:{caller.user_id}"
+        )
+
+    async def insert_blocks(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        blocks: list[dict],
+        *,
+        after_id: str | None = None,
+    ) -> bytes:
+        """Insert blocks after `after_id` (append when None), as a CRDT peer."""
+        for block in blocks:
+            validate_block_type(block.get("type", ""))
+        state = await self._realtime.current_state(caller, document_id)
+        update = self._engine.insert_blocks_after(state, after_id, blocks)
+        return await self._realtime.apply(
+            caller, document_id, update, origin=f"agent:{caller.user_id}"
+        )
+
+    async def replace_block(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        block_id: str,
+        block: dict,
+    ) -> bytes:
+        """Replace a block's type and data wholesale, as a CRDT peer."""
+        validate_block_type(block.get("type", ""))
+        state = await self._realtime.current_state(caller, document_id)
+        update = self._engine.replace_block(state, block_id, block)
         return await self._realtime.apply(
             caller, document_id, update, origin=f"agent:{caller.user_id}"
         )

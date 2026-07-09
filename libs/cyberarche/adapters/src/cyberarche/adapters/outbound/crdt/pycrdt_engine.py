@@ -76,6 +76,40 @@ class PycrdtEngine:
         del array[index]
         return doc.get_update(before)
 
+    def insert_blocks_after(
+        self, state: bytes, after_id: str | None, blocks: list[dict[str, Any]]
+    ) -> bytes:
+        doc = _load(state)
+        before = doc.get_state()
+        array = doc.get("blocks", type=Array)
+        if after_id is None:
+            at = len(array)
+        else:
+            index = _index_of(array, after_id)
+            if index is None:
+                raise NotFound(f"block not found: {after_id}")
+            at = index + 1
+        with doc.transaction():
+            for offset, block in enumerate(blocks):
+                array.insert(at + offset, Map(block))
+        return doc.get_update(before)
+
+    def replace_block(
+        self, state: bytes, block_id: str, block: dict[str, Any]
+    ) -> bytes:
+        doc = _load(state)
+        before = doc.get_state()
+        array = doc.get("blocks", type=Array)
+        index = _index_of(array, block_id)
+        if index is None:
+            raise NotFound(f"block not found: {block_id}")
+        # Keep the block's id stable so comments stay anchored; swap the rest.
+        replacement = {**block, "id": block_id}
+        with doc.transaction():
+            del array[index]
+            array.insert(index, Map(replacement))
+        return doc.get_update(before)
+
     def is_empty(self, update: bytes) -> bool:
         # Yjs encodes "no structs, no delete-set" as two zero varints.
         return update == _EMPTY_UPDATE

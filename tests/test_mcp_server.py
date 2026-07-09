@@ -194,6 +194,80 @@ async def test_parity_all_surfaces_deny_the_same_edit(mcp_setup):
     assert read["title"] == "Locked"
 
 
+
+async def test_insert_blocks_at_a_position_over_mcp(mcp_setup):
+    client, holder, container = mcp_setup
+    workspace = await container.use_cases.workspaces.create(CALLERS["alice-token"], name="WS")
+    holder.use("alice-token")
+    doc = data(await client.call_tool("create_document", {"workspace_id": workspace.id, "title": "D"}))
+    await client.call_tool("insert_blocks", {
+        "document_id": doc["id"],
+        "blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "first"}},
+                   {"id": "b2", "type": "paragraph", "data": {"text": "third"}}],
+    })
+
+    # Insert after b1 -> lands between b1 and b2.
+    result = data(await client.call_tool("insert_blocks", {
+        "document_id": doc["id"],
+        "blocks": [{"id": "mid", "type": "paragraph", "data": {"text": "second"}}],
+        "after_block_id": "b1",
+    }))
+    assert result == {"inserted": 1}
+
+    read = data(await client.call_tool("read_document", {"document_id": doc["id"]}))
+    assert [b["id"] for b in read["blocks"]] == ["b1", "mid", "b2"]
+
+
+async def test_replace_block_over_mcp(mcp_setup):
+    client, holder, container = mcp_setup
+    workspace = await container.use_cases.workspaces.create(CALLERS["alice-token"], name="WS")
+    holder.use("alice-token")
+    doc = data(await client.call_tool("create_document", {"workspace_id": workspace.id, "title": "D"}))
+    await client.call_tool("insert_blocks", {
+        "document_id": doc["id"],
+        "blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "plain"}}],
+    })
+
+    result = data(await client.call_tool("replace_block", {
+        "document_id": doc["id"],
+        "block_id": "b1",
+        "block": {"type": "heading", "data": {"text": "Title", "level": 2}},
+    }))
+    assert result == {"replaced": "b1"}
+
+    read = data(await client.call_tool("read_document", {"document_id": doc["id"]}))
+    assert read["blocks"][0]["id"] == "b1"
+    assert read["blocks"][0]["type"] == "heading"
+
+
+async def test_view_only_caller_cannot_replace_over_mcp(mcp_setup):
+    from datetime import UTC, datetime
+
+    from cyberarche.domain.memberships import Role, WorkspaceMembership
+
+    client, holder, container = mcp_setup
+    alice = CALLERS["alice-token"]
+    viewer = CallerContext(user_id=UserId("dave"), tenant_id=TenantId("acme"))
+    CALLERS["dave-token"] = viewer
+    workspace = await container.use_cases.workspaces.create(alice, name="WS")
+    doc = await container.use_cases.documents.create(alice, workspace_id=workspace.id, title="Locked")
+    await container.use_cases.agent.apply_blocks(
+        alice, doc.id, [{"id": "b1", "type": "paragraph", "data": {"text": "x"}}]
+    )
+    await container.memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=datetime.now(UTC),
+        )
+    )
+
+    holder.use("dave-token")
+    with pytest.raises(ToolError):
+        await client.call_tool("replace_block", {
+            "document_id": doc.id, "block_id": "b1",
+            "block": {"type": "paragraph", "data": {"text": "hijacked"}},
+        })
+
 # ---- the REAL HTTP caller resolver (mcp-server / auth-integration) ----------
 #
 # Every test above injects a fake resolver, so the production auth path — parse

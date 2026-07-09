@@ -108,12 +108,31 @@ def build_mcp_server(
         return {"id": document.id, "title": document.title}
 
     @mcp.tool
-    async def insert_blocks(document_id: str, blocks: list[dict[str, Any]]) -> dict:
-        """Append blocks to a document through the live CRDT channel; the
-        edit appears immediately to connected collaborators."""
+    async def insert_blocks(
+        document_id: str,
+        blocks: list[dict[str, Any]],
+        after_block_id: str | None = None,
+    ) -> dict:
+        """Insert blocks into a document through the live CRDT channel; the edit
+        appears immediately to connected collaborators. Appends when
+        `after_block_id` is omitted, otherwise inserts just after that block."""
         caller = await resolve()
-        await cases.agent.apply_blocks(caller, DocumentId(document_id), blocks)
+        await cases.agent.insert_blocks(
+            caller, DocumentId(document_id), blocks, after_id=after_block_id
+        )
         return {"inserted": len(blocks)}
+
+    @mcp.tool
+    async def replace_block(
+        document_id: str, block_id: str, block: dict[str, Any]
+    ) -> dict:
+        """Replace a block's type and data through the live CRDT channel. The
+        block keeps its id (so comments stay anchored)."""
+        caller = await resolve()
+        await cases.agent.replace_block(
+            caller, DocumentId(document_id), block_id, block
+        )
+        return {"replaced": block_id}
 
     # ---- knowledge tools ---------------------------------------------------
 

@@ -67,9 +67,13 @@ export function createAgentPanel(documentId: string) {
 			});
 		},
 
-		async summarize() {
-			await perform('Summarize this document', async () => {
-				const result = await summarizeDocument(documentId);
+		async summarize(blockIds?: string[]) {
+			const label =
+				blockIds && blockIds.length
+					? `Summarize the selected block${blockIds.length > 1 ? 's' : ''}`
+					: 'Summarize this document';
+			await perform(label, async () => {
+				const result = await summarizeDocument(documentId, blockIds);
 				return {
 					role: 'agent',
 					text: blocksPreview(result.blocks),

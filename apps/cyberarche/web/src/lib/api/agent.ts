@@ -24,8 +24,10 @@ export interface AskResult {
 export const askAgent = (documentId: string, instruction: string) =>
 	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, { instruction });
 
-export const summarizeDocument = (documentId: string) =>
-	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/summarize`);
+export const summarizeDocument = (documentId: string, blockIds?: string[]) =>
+	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/summarize`, {
+		block_ids: blockIds ?? null
+	});
 
 export const draftContent = (documentId: string, instruction: string) =>
 	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/draft`, { instruction });

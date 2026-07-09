@@ -385,3 +385,84 @@ def test_agent_block_endpoints_replace_and_delete(api):
     assert api.delete(
         f"/api/v1/documents/{document['id']}/agent/blocks/b1", headers=headers
     ).status_code == 404
+
+
+# ---- positional insert / replace / summarize-selection (extend-agent-mcp) ---
+
+
+async def test_agent_inserts_blocks_at_a_position(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["first", "third"])
+
+    await use_cases.agent.insert_blocks(
+        alice,
+        document.id,
+        [{"id": "mid", "type": "paragraph", "data": {"text": "second"}}],
+        after_id="b1",
+    )
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    ids = [b["id"] for b in use_cases.agent._engine.read_blocks(state)]
+    assert ids == ["b1", "mid", "b2"]
+
+
+async def test_agent_replaces_a_block_keeping_its_id(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["plain paragraph"])
+
+    await use_cases.agent.replace_block(
+        alice, document.id, "b1", {"type": "heading", "data": {"text": "Title", "level": 1}}
+    )
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    block = use_cases.agent._engine.read_blocks(state)[0]
+    assert block["id"] == "b1" and block["type"] == "heading"
+    assert block["data"]["level"] == 1
+
+
+async def test_viewer_cannot_insert_or_replace(use_cases, memberships, clock, alice):
+    from tests.conftest import caller
+
+    viewer = caller("carol", "acme")
+    workspace, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["only block"])
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id,
+            user_id=viewer.user_id,
+            role=Role.VIEWER,
+            granted_at=clock.now(),
+        )
+    )
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.insert_blocks(
+            viewer, document.id, [{"id": "x", "type": "paragraph", "data": {}}], after_id="b1"
+        )
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.replace_block(
+            viewer, document.id, "b1", {"type": "paragraph", "data": {"text": "hijacked"}}
+        )
+
+
+async def test_summarize_selection_scopes_the_prompt_to_the_blocks(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["keep this", "and this", "ignore me"])
+    llm._responses = [LLMResponse(text="summary of b1, b2 [block:b1]", model="m")]
+
+    await use_cases.agent.summarize(alice, document.id, block_ids=["b1", "b2"])
+
+    prompt = llm.requests[0][-1].content
+    assert "b1, b2" in prompt  # the selection is named to the model
+    assert "only these blocks" in prompt.lower()
+
+
+async def test_summarize_without_selection_covers_the_whole_document(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["a", "b"])
+    llm._responses = [LLMResponse(text="whole-doc summary", model="m")]
+
+    await use_cases.agent.summarize(alice, document.id)
+
+    prompt = llm.requests[0][-1].content
+    assert "only these blocks" not in prompt.lower()

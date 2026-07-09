@@ -131,3 +131,59 @@ def test_blocks_without_an_id_are_inserted_not_matched():
     update = engine.replace_blocks(state, [{"type": "paragraph", "data": {"text": "x"}}])
     result = read(apply(state, update))
     assert [b.get("id") for b in result] == [None]
+
+
+# ---- insert-after + single-block replace (extend-agent-mcp-editing) ---------
+
+
+def test_insert_blocks_after_places_them_at_the_position():
+    engine = PycrdtEngine()
+    state = state_with(block("b1", "one"), block("b2", "two"))
+
+    update = engine.insert_blocks_after(state, "b1", [block("mid", "inserted")])
+    result = read(apply(state, update))
+
+    assert [b["id"] for b in result] == ["b1", "mid", "b2"]
+
+
+def test_insert_blocks_after_none_appends():
+    engine = PycrdtEngine()
+    state = state_with(block("b1", "one"))
+    update = engine.insert_blocks_after(state, None, [block("b2", "two")])
+    assert [b["id"] for b in read(apply(state, update))] == ["b1", "b2"]
+
+
+def test_insert_blocks_after_unknown_id_raises():
+    import pytest
+
+    from cyberarche.domain.errors import NotFound
+
+    engine = PycrdtEngine()
+    state = state_with(block("b1", "one"))
+    with pytest.raises(NotFound):
+        engine.insert_blocks_after(state, "ghost", [block("b2", "two")])
+
+
+def test_replace_block_swaps_type_and_data_keeping_the_id():
+    engine = PycrdtEngine()
+    state = state_with(block("b1", "plain"))
+
+    update = engine.replace_block(
+        state, "b1", {"id": "ignored", "type": "heading", "data": {"text": "Title", "level": 1}}
+    )
+    result = read(apply(state, update))
+
+    assert result[0]["id"] == "b1"  # id preserved -> comments stay anchored
+    assert result[0]["type"] == "heading"
+    assert result[0]["data"] == {"text": "Title", "level": 1}
+
+
+def test_replace_block_unknown_id_raises():
+    import pytest
+
+    from cyberarche.domain.errors import NotFound
+
+    engine = PycrdtEngine()
+    state = state_with(block("b1", "one"))
+    with pytest.raises(NotFound):
+        engine.replace_block(state, "ghost", block("x", "y"))
