@@ -93,6 +93,18 @@ test('undo/redo re-sync a focused block in place (not only on removal)', async (
 	await expect(paragraph).toHaveText('First draft');
 });
 
+test('a paragraph with $$…$$ renders display math when unfocused', async ({ page, request }) => {
+	await openDocument(page, request);
+	const editor = page.getByTestId('block-editor');
+	const paragraph = editor.locator('[data-block-type="paragraph"] .editable').first();
+	await paragraph.click();
+	await paragraph.pressSequentially('Divergence: $$\\nabla \\cdot \\mathbf{F}$$');
+	// Blur (focus another block) so the block switches from raw source to rich.
+	await page.getByTestId('append-block').click();
+	await expect(paragraph.locator('.katex-display')).toHaveCount(1);
+	await expect(paragraph).toContainText('Divergence:');
+});
+
 test('image block embeds an external URL', async ({ page, request }) => {
 	await openDocument(page, request);
 	await page.getByTestId('append-block').click();

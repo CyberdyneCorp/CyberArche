@@ -16,13 +16,14 @@ function escapeHtml(text: string): string {
 		.replace(/>/g, '&gt;');
 }
 
-function renderMath(source: string): string {
+function renderMath(source: string, displayMode: boolean): string {
 	try {
-		return katex.renderToString(source, { displayMode: false, throwOnError: true });
+		return katex.renderToString(source, { displayMode, throwOnError: true });
 	} catch (error) {
 		const message = escapeHtml(error instanceof Error ? error.message : 'invalid math');
 		// Non-destructive: show the raw source flagged, never drop it.
-		return `<span class="inline-math-error" title="${message}">$${escapeHtml(source)}$</span>`;
+		const fence = displayMode ? '$$' : '$';
+		return `<span class="inline-math-error" title="${message}">${fence}${escapeHtml(source)}${fence}</span>`;
 	}
 }
 
@@ -40,48 +41,70 @@ function renderEmphasis(escaped: string): string {
 export function renderInline(text: string): string {
 	if (!text) return '';
 	text = normalizeTexDelimiters(text);
-	// Split on unescaped `$…$` pairs. Even indices are plain text, odd are math.
-	const parts = splitMath(text);
-	return parts
-		.map((part, index) =>
-			index % 2 === 1 ? renderMath(part) : renderEmphasis(escapeHtml(part))
-		)
+	return tokenizeMath(text)
+		.map((token) => {
+			if (token.type === 'inline') return renderMath(token.value, false);
+			if (token.type === 'display') return renderMath(token.value, true);
+			return renderEmphasis(escapeHtml(token.value));
+		})
 		.join('')
 		.replace(/\\\$/g, '$'); // unescape literal dollars in the plain segments
 }
 
-/** Rewrite TeX `\(…\)` and `\[…\]` to `$…$` so one splitter handles all forms. */
+/** Rewrite TeX delimiters so one tokenizer handles every form: `\(…\)` → inline
+ * `$…$`, `\[…\]` → display `$$…$$`. */
 function normalizeTexDelimiters(text: string): string {
 	return text
-		.replace(/\\\((.+?)\\\)/gs, (_, body) => `$${body.trim()}$`)
-		.replace(/\\\[(.+?)\\\]/gs, (_, body) => `$${body.trim()}$`);
+		.replace(/\\\[(.+?)\\\]/gs, (_, body) => `$$${body.trim()}$$`)
+		.replace(/\\\((.+?)\\\)/gs, (_, body) => `$${body.trim()}$`);
 }
 
-/** ['before', 'math', 'between', 'math', 'after'] — odd slots are math bodies.
- * A `$` preceded by a backslash is literal and does not open/close math. */
-function splitMath(text: string): string[] {
-	const parts: string[] = [];
+interface MathToken {
+	type: 'text' | 'inline' | 'display';
+	value: string;
+}
+
+/** Split text into plain / inline `$…$` / display `$$…$$` segments. A `$`
+ * preceded by a backslash is literal; an unclosed delimiter folds back into
+ * text. `$$` is matched before `$`, so display math is not read as two empty
+ * inline spans (the bug that showed `$$\nabla$$` as raw source). */
+function tokenizeMath(text: string): MathToken[] {
+	const tokens: MathToken[] = [];
 	let buffer = '';
-	let mathBody: string | null = null;
-	for (let i = 0; i < text.length; i++) {
-		const char = text[i];
-		const escaped = i > 0 && text[i - 1] === '\\';
-		if (char === '$' && !escaped) {
-			if (mathBody === null) {
-				parts.push(buffer);
-				buffer = '';
-				mathBody = '';
-			} else {
-				parts.push(mathBody);
-				mathBody = null;
+	let i = 0;
+	const flush = () => {
+		if (buffer) tokens.push({ type: 'text', value: buffer });
+		buffer = '';
+	};
+	while (i < text.length) {
+		const unescaped = text[i] === '$' && text[i - 1] !== '\\';
+		if (unescaped && text[i + 1] === '$') {
+			const end = text.indexOf('$$', i + 2);
+			if (end !== -1) {
+				flush();
+				tokens.push({ type: 'display', value: text.slice(i + 2, end).trim() });
+				i = end + 2;
+				continue;
 			}
-			continue;
+		} else if (unescaped) {
+			const end = findInlineClose(text, i + 1);
+			if (end !== -1) {
+				flush();
+				tokens.push({ type: 'inline', value: text.slice(i + 1, end) });
+				i = end + 1;
+				continue;
+			}
 		}
-		if (mathBody === null) buffer += char;
-		else mathBody += char;
+		buffer += text[i];
+		i++;
 	}
-	// An unclosed `$` is not math — fold it back into the trailing text.
-	if (mathBody !== null) parts[parts.length - 1] += '$' + mathBody;
-	else parts.push(buffer);
-	return parts;
+	flush();
+	return tokens;
+}
+
+function findInlineClose(text: string, from: number): number {
+	for (let j = from; j < text.length; j++) {
+		if (text[j] === '$' && text[j - 1] !== '\\') return j;
+	}
+	return -1;
 }

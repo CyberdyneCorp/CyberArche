@@ -69,4 +69,23 @@ describe('renderInline', () => {
 	it('renders \\mathbf via KaTeX', () => {
 		expect(renderInline('$\\mathbf{E}$')).toContain('katex');
 	});
+
+	it('renders display math $$…$$ inside a paragraph (regression)', () => {
+		// Was shown as raw source because $$ was read as two empty $…$ spans.
+		const html = renderInline('Divergence: $$\\nabla \\cdot \\mathbf{F}$$');
+		expect(html).toContain('katex-display'); // KaTeX display mode (typeset)
+		expect(html).toContain('Divergence:'); // surrounding text kept
+		expect(html).not.toContain('$$'); // delimiters consumed, not shown raw
+	});
+
+	it('renders TeX \\[…\\] as display math, not inline', () => {
+		const html = renderInline('law: \\[ E = mc^2 \\]');
+		expect(html).toContain('katex-display');
+	});
+
+	it('still renders single-dollar math inline (no display block)', () => {
+		const html = renderInline('mass is $E = mc^2$ today');
+		expect(html).toContain('katex');
+		expect(html).not.toContain('katex-display');
+	});
 });
