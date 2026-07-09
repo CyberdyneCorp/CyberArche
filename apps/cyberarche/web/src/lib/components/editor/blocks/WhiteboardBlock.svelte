@@ -16,6 +16,10 @@
 	let expanded = $state(false);
 	let connectFrom = $state<string | null>(null);
 	let editingLabel = $state<string | null>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// Fill/stroke swatches offered for the selected shape.
+	const SWATCHES = ['#e11d48', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#64748b'];
 
 	// One whiteboard VM per block instance, over the shared Y.Doc.
 	const board: WhiteboardVM = createWhiteboard(vm.doc, block.id, {
@@ -25,6 +29,34 @@
 		onMirror: (elements) => vm.updateData(block.id, { elements })
 	});
 	$effect(() => () => board.destroy());
+
+	const selected = $derived(
+		board.selectedId ? board.byId(board.selectedId) : undefined
+	);
+
+	// Inline style beats the .shape CSS selector, so an unset field falls back
+	// to the default look while a set one wins.
+	function shapeStyle(element: WhiteboardElement): string {
+		const parts: string[] = [];
+		if (element.fill) parts.push(`fill:${element.fill}`);
+		if (element.stroke) parts.push(`stroke:${element.stroke}`);
+		return parts.join(';');
+	}
+
+	function pickImage(): void {
+		fileInput?.click();
+	}
+	function onImageChosen(event: Event): void {
+		const file = (event.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			// Embed as a data URL so the image travels in the scene/CRDT.
+			board.addImage(String(reader.result), 40, 40);
+		};
+		reader.readAsDataURL(file);
+		(event.target as HTMLInputElement).value = '';
+	}
 
 	let svg = $state<SVGSVGElement | null>(null);
 	let drag: { id: string; lastX: number; lastY: number } | null = null;
@@ -121,7 +153,36 @@
 				>
 			{/each}
 		</div>
+		<button
+			class="mini"
+			title="Insert image"
+			aria-label="Insert image"
+			data-testid="wb-tool-image"
+			onclick={pickImage}>🖼</button
+		>
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept="image/*"
+			data-testid="wb-image-input"
+			hidden
+			onchange={onImageChosen}
+		/>
 		<div class="right-tools">
+			{#if selected && selected.kind !== 'image' && selected.kind !== 'pen'}
+				<div class="swatches" data-testid="wb-style">
+					{#each SWATCHES as color (color)}
+						<button
+							class="swatch"
+							style={`background:${color}`}
+							title="Fill"
+							aria-label={`Fill ${color}`}
+							data-testid="wb-fill"
+							onclick={() => board.setStyle(selected!.id, { fill: color })}
+						></button>
+					{/each}
+				</div>
+			{/if}
 			{#if board.selectedId}
 				<button
 					class="mini"
@@ -186,29 +247,49 @@
 				ondblclick={() => (editingLabel = element.id)}
 			>
 				{#if element.kind === 'rect'}
-					<rect x={element.x} y={element.y} width={element.w} height={element.h} rx="8" />
+					<rect
+						x={element.x}
+						y={element.y}
+						width={element.w}
+						height={element.h}
+						rx="8"
+						style={shapeStyle(element)}
+					/>
 				{:else if element.kind === 'ellipse'}
 					<ellipse
 						cx={element.x + element.w / 2}
 						cy={element.y + element.h / 2}
 						rx={element.w / 2}
 						ry={element.h / 2}
+						style={shapeStyle(element)}
 					/>
 				{:else if element.kind === 'diamond'}
 					<polygon
 						points={`${element.x + element.w / 2},${element.y} ${element.x + element.w},${element.y + element.h / 2} ${element.x + element.w / 2},${element.y + element.h} ${element.x},${element.y + element.h / 2}`}
+						style={shapeStyle(element)}
+					/>
+				{:else if element.kind === 'image'}
+					<image
+						href={element.src}
+						x={element.x}
+						y={element.y}
+						width={element.w}
+						height={element.h}
+						preserveAspectRatio="xMidYMid meet"
 					/>
 				{:else if element.kind === 'pen'}
 					<polyline
 						class="pen"
 						points={(element.points ?? []).map((p) => p.join(',')).join(' ')}
+						style={element.stroke ? `stroke:${element.stroke}` : ''}
 					/>
 				{/if}
-				{#if element.kind !== 'pen'}
+				{#if element.kind !== 'pen' && element.kind !== 'image'}
 					<text
 						x={element.x + element.w / 2}
 						y={element.y + element.h / 2 + 4}
-						text-anchor="middle">{element.label}</text
+						text-anchor="middle"
+						style={element.color ? `fill:${element.color}` : ''}>{element.label}</text
 					>
 				{/if}
 			</g>

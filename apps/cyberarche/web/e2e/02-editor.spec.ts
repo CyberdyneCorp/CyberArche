@@ -264,3 +264,47 @@ test('a table cell renders inline emphasis when not being edited', async ({
 	await page.getByTestId('table-block').locator('.cell .editable').nth(1).click();
 	await expect(firstCell.locator('strong')).toHaveText('Bold');
 });
+
+test('whiteboard: place an image and style a shape', async ({ page, request }) => {
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/white');
+	await page.keyboard.press('Enter');
+	const board = page.getByTestId('whiteboard-block');
+	await expect(board).toBeVisible();
+
+	// Insert an image via the hidden file input (1x1 PNG data URL).
+	const png =
+		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+	await board.getByTestId('wb-image-input').setInputFiles({
+		name: 'dot.png',
+		mimeType: 'image/png',
+		buffer: Buffer.from(png, 'base64')
+	});
+	const image = board.locator('image');
+	await expect(image).toHaveCount(1);
+	// Embedded as a data URL so it travels in the scene.
+	await expect(image).toHaveAttribute('href', /^data:image\/png/);
+
+	// Draw a rectangle in empty space (clear of the image at 40–240px).
+	await board.getByTestId('wb-tool-rect').click();
+	await board.getByTestId('wb-canvas').click({ position: { x: 440, y: 300 } });
+	await page.getByTestId('wb-label-input').fill('Box');
+	await page.getByTestId('wb-label-input').press('Enter');
+
+	// Select it and apply a fill.
+	await board.locator('[data-kind="rect"]').first().click();
+	await board.getByTestId('wb-fill').first().click();
+	// The shape now carries an inline fill style.
+	const rect = board.locator('[data-kind="rect"] rect');
+	await expect(rect).toHaveAttribute('style', /fill:/);
+
+	// Both survive a reload.
+	await page.reload();
+	await page.getByTestId('whiteboard-block').waitFor();
+	await expect(page.getByTestId('whiteboard-block').locator('image')).toHaveCount(1);
+	await expect(page.getByTestId('whiteboard-block').locator('[data-kind="rect"] rect')).toHaveAttribute(
+		'style',
+		/fill:/
+	);
+});

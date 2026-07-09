@@ -114,4 +114,40 @@ describe('whiteboard VM', () => {
 		expect(Object.values(mirrored!)[0].label).toBe('A');
 		vi.useRealTimers();
 	});
+
+	it('addImage stores the source and places an image element', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const image = board.addImage('data:image/png;base64,AAAA', 20, 30);
+		expect(image.kind).toBe('image');
+		expect(image.src).toBe('data:image/png;base64,AAAA');
+		expect(board.byId(image.id)?.kind).toBe('image');
+	});
+
+	it('setStyle updates one element and leaves others untouched', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const a = board.addShape('rect', 0, 0);
+		const b = board.addShape('rect', 0, 100);
+
+		board.setStyle(a.id, { fill: '#f00', stroke: '#00f' });
+
+		expect(board.byId(a.id)?.fill).toBe('#f00');
+		expect(board.byId(a.id)?.stroke).toBe('#00f');
+		expect(board.byId(b.id)?.fill).toBeUndefined(); // per-element
+		expect(board.byId(a.id)?.label).toBe(''); // merged, other fields intact
+	});
+
+	it('an image and a style survive a scene round-trip through block data', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const image = board.addImage('data:image/png;base64,ZZ', 5, 5);
+		const shape = board.addShape('ellipse', 40, 40);
+		board.setStyle(shape.id, { fill: '#0f0' });
+
+		// The scene as block data would persist it (what the debounced mirror
+		// writes): every element keyed by id.
+		const scene = Object.fromEntries(board.elements.map((e) => [e.id, e]));
+		const restored = createWhiteboard(new Y.Doc(), 'b2', { initialElements: scene });
+
+		expect(restored.byId(image.id)?.src).toBe('data:image/png;base64,ZZ');
+		expect(restored.byId(shape.id)?.fill).toBe('#0f0');
+	});
 });

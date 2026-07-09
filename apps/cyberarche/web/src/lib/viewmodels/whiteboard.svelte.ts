@@ -12,7 +12,7 @@ import * as Y from 'yjs';
 
 export interface WhiteboardElement {
 	id: string;
-	kind: 'rect' | 'ellipse' | 'diamond' | 'text' | 'pen' | 'arrow';
+	kind: 'rect' | 'ellipse' | 'diamond' | 'text' | 'pen' | 'arrow' | 'image';
 	x: number;
 	y: number;
 	w: number;
@@ -21,6 +21,17 @@ export interface WhiteboardElement {
 	points?: number[][];
 	from?: string; // bound connector endpoints (element ids)
 	to?: string;
+	src?: string; // data URL for image elements
+	// Per-element styling (all optional; defaults applied at render).
+	fill?: string;
+	stroke?: string;
+	color?: string; // label colour
+}
+
+export interface ElementStyle {
+	fill?: string;
+	stroke?: string;
+	color?: string;
 }
 
 const LOCAL_ORIGIN = 'local';
@@ -117,6 +128,28 @@ export function createWhiteboard(
 			put(element);
 			selectedId = element.id;
 			return element;
+		},
+
+		addImage(src: string, x: number, y: number, w = 200, h = 140): WhiteboardElement {
+			const element: WhiteboardElement = {
+				id: crypto.randomUUID().replaceAll('-', '').slice(0, 12),
+				kind: 'image',
+				x,
+				y,
+				w,
+				h,
+				label: '',
+				src
+			};
+			put(element);
+			selectedId = element.id;
+			return element;
+		},
+
+		/** Set one element's styling; merges with existing style (spec 6.1). */
+		setStyle(id: string, style: ElementStyle): void {
+			const element = ymap.get(id);
+			if (element) put({ ...element, ...style });
 		},
 
 		addPen(points: number[][]): WhiteboardElement {
