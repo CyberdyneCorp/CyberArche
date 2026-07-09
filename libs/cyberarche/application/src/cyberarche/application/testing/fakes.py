@@ -406,6 +406,31 @@ class ScriptedImageGenerator:
         return GeneratedImage(content=_STUB_PNG, content_type="image/png")
 
 
+class ScriptedCodeExecutor:
+    """CodeExecutionPort fake: records code and returns a scripted result
+    (one PNG figure + stdout) so agent code-execution can be tested offline."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def run(self, code: str):
+        from cyberarche.application.ports.code_exec import (
+            CodeExecutionResult,
+            CodeImage,
+        )
+
+        self.calls.append(code)
+        return CodeExecutionResult(
+            success=True,
+            stdout="mean=2.0\n",
+            stderr="",
+            result="None",
+            error=None,
+            images=[CodeImage("figure_1.png", _STUB_PNG, "image/png")],
+            tables=[],
+        )
+
+
 class InMemoryAgentRunRepository:
     def __init__(self) -> None:
         self._items: list[AgentRun] = []

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     image_api_key: str = ""  # enables the agent's generate_image tool
     image_model: str = "gpt-image-1"
     image_base_url: str = ""
+    # Cyberdyne Python Interpreter (agent run_python tool); needs CyberdyneAuth
+    # service-token credentials to authenticate. Empty disables the tool.
+    interpreter_url: str = "https://interpreter.backend.coolify.cyberdynecorp.ai"
     connector_secret_key: str = ""
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
@@ -51,6 +54,7 @@ class Settings(BaseSettings):
             image_api_key=self.image_api_key,
             image_model=self.image_model,
             image_base_url=self.image_base_url,
+            interpreter_base_url=self.interpreter_url,
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,

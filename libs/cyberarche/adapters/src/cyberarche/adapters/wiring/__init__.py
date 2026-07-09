@@ -31,6 +31,7 @@ from cyberarche.application.ports.agent import AgentRunRepository
 from cyberarche.application.ports.api_keys import ApiKeyRepository
 from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
+from cyberarche.application.ports.code_exec import CodeExecutionPort
 from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
@@ -107,6 +108,9 @@ class WiringConfig:
     image_api_key: str = ""
     image_model: str = "gpt-image-1"
     image_base_url: str = ""  # OpenAI-compatible images endpoint; empty = OpenAI
+    # Python code execution (agent run_python tool). Empty URL = disabled; needs
+    # CyberdyneAuth service-token credentials to authenticate to the interpreter.
+    interpreter_base_url: str = ""
     connector_secret_key: str = ""
     # Shared infrastructure for multi-replica deployments (12.5/12.6):
     # with redis_url set, live realtime fanout and the job queue go through
@@ -162,6 +166,7 @@ def _build_use_cases(
     rag: RagPort,
     llm: LLMPort,
     images: ImageGenerationPort | None,
+    code: CodeExecutionPort | None,
     agent_runs: AgentRunRepository,
     connectors: ConnectorRepository,
     mcp_client: McpClientPort,
@@ -213,6 +218,7 @@ def _build_use_cases(
             connectors=connector_use_cases,
             images=images,
             blobs=blobs,
+            code=code,
         ),
         sharing=SharingUseCases(
             documents, memberships, share_links, comments, access, clock, ids
@@ -255,6 +261,20 @@ def _build_image_generator(config: WiringConfig, http: httpx.AsyncClient):
         api_key=config.image_api_key,
         model=config.image_model,
         base_url=config.image_base_url,
+    )
+
+
+def _build_code_executor(config: WiringConfig, service_tokens, shared_http):
+    """Cyberdyne Python Interpreter adapter, or None when unconfigured. Uses the
+    CyberdyneAuth service token (client-credentials) as the interpreter bearer."""
+    if not config.interpreter_base_url or service_tokens is None:
+        return None
+    from cyberarche.adapters.outbound.code_exec.cyberdyne_interpreter import (
+        CyberdyneInterpreterAdapter,
+    )
+
+    return CyberdyneInterpreterAdapter(
+        config.interpreter_base_url, shared_http(), service_tokens.service_token
     )
 
 
@@ -440,6 +460,7 @@ async def build_container(
     rag: RagPort | None = None,
     llm: LLMPort | None = None,
     images: ImageGenerationPort | None = None,
+    code: CodeExecutionPort | None = None,
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
@@ -492,6 +513,9 @@ async def build_container(
 
     if images is None:
         images = _build_image_generator(config, shared_http())
+
+    if code is None:
+        code = _build_code_executor(config, service_tokens, shared_http)
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -566,6 +590,7 @@ async def build_container(
             rag,
             llm,
             images,
+            code,
             agent_runs,
             connectors,
             mcp_client,

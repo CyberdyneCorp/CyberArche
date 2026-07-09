@@ -383,6 +383,64 @@ async def test_agent_generate_image_inserts_an_image_block(
     assert answer.blocks == []
 
 
+async def test_agent_run_python_inserts_figures_and_returns_output(
+    use_cases, llm, code_exec, alice
+):
+    workspace, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="run_python",
+                    arguments={"code": "import matplotlib.pyplot as plt\nplt.plot([1,2,3])"},
+                ),
+            ),
+        ),
+        LLMResponse(text="Here is your plot.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="plot it")
+
+    assert code_exec.calls  # the code actually ran
+    state = await use_cases.realtime.current_state(alice, document.id)
+    image_blocks = [
+        b for b in use_cases.agent._engine.read_blocks(state) if b["type"] == "image"
+    ]
+    assert len(image_blocks) == 1
+    assert image_blocks[0]["data"]["url"].startswith(
+        f"/api/v1/workspaces/{workspace.id}/files/"
+    )
+    # The run_python call is surfaced to the chat with its captured output.
+    py = next(c for c in answer.tool_calls if c.name == "run_python")
+    assert py.kind == "builtin"
+    assert "stdout" in py.result
+    assert "inserted 1 figure" in py.result
+
+
+async def test_run_python_reports_unavailable_when_unconfigured(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._code = None  # simulate no interpreter configured
+    result = await use_cases.agent._run_python(
+        alice, workspace.id, document.id, {"code": "1 + 1"}
+    )
+    assert "not configured" in result
+
+
+def test_figure_capture_epilogue_only_for_unsaved_matplotlib():
+    from cyberarche.adapters.outbound.code_exec.cyberdyne_interpreter import (
+        _with_figure_capture,
+    )
+
+    assert _with_figure_capture("print(1)") == "print(1)"  # no plotting -> unchanged
+    saved = "import matplotlib.pyplot as plt\nplt.plot([1])\nplt.savefig('x.png')"
+    assert _with_figure_capture(saved) == saved  # already saves -> unchanged
+    plot = "import matplotlib.pyplot as plt\nplt.plot([1, 2])"
+    captured = _with_figure_capture(plot)
+    assert captured.startswith(plot) and "savefig" in captured
+
+
 async def test_generate_image_reports_unavailable_when_unconfigured(use_cases, alice):
     workspace, document = await make_document(use_cases, alice)
     use_cases.agent._images = None  # simulate no image provider configured
