@@ -8,7 +8,8 @@ Block-based editing: text families, slash menu, Markdown shortcuts, and the tech
 The editor SHALL let a user insert, edit, move, split, merge, and delete blocks,
 and SHALL provide a slash (`/`) command menu to insert any supported block type
 at the cursor. Deleting a block SHALL be reachable from the block's controls,
-not only by emptying it.
+not only by emptying it. Pressing Backspace at the start of a non-empty block
+SHALL merge it into the previous block, joining their text.
 
 #### Scenario: Insert a block via slash menu
 - **WHEN** a user types `/` and selects a block type
@@ -19,19 +20,31 @@ not only by emptying it.
 - **WHEN** a user presses Enter in the middle of a paragraph block
 - **THEN** the editor SHALL split it into two blocks preserving both fragments
 
+#### Scenario: Merge into the previous block on Backspace
+- **WHEN** a user presses Backspace at the start of a non-empty block
+- **THEN** the block's text SHALL be appended to the previous block
+- **AND** the now-empty block SHALL be removed
+- **AND** the merge SHALL be undoable as a single step
+
 #### Scenario: Delete a block from its controls
 - **WHEN** a user activates the delete control on a block
 - **THEN** the block SHALL be removed from the document
-- **AND** the deletion SHALL be undoable
 
 ### Requirement: LaTeX math blocks
-The editor SHALL support LaTeX for both inline math and block-level math, and
-SHALL render it (via KaTeX) live as the user edits.
+The editor SHALL support LaTeX for both inline math (delimited by `$…$` within
+text) and block-level math (the `latex` block), rendering both via KaTeX. It
+SHALL preserve the raw source for editing and show a non-destructive error on
+invalid LaTeX.
 
 #### Scenario: Render a block equation
 - **WHEN** a user enters a valid LaTeX expression in a `latex` block
 - **THEN** the editor SHALL render the typeset equation
 - **AND** SHALL preserve the raw LaTeX source for editing
+
+#### Scenario: Render inline math within text
+- **WHEN** a paragraph contains a `$…$` fragment and is not being edited
+- **THEN** the editor SHALL render that fragment as typeset inline math
+- **AND** SHALL restore the raw `$…$` source when the paragraph is focused
 
 #### Scenario: Invalid LaTeX
 - **WHEN** a user enters LaTeX that fails to parse
@@ -59,11 +72,17 @@ highlighting.
 
 ### Requirement: Table blocks
 The editor SHALL support editable `table` blocks with add/remove row and column
-operations, and cells that may contain rich text.
+operations, and cells that may contain rich text (inline emphasis and math via
+the same inline renderer as paragraphs).
 
 #### Scenario: Add a column
 - **WHEN** a user adds a column to a table
 - **THEN** every row SHALL gain a cell in the new column position
+
+#### Scenario: A cell renders inline rich text
+- **WHEN** a cell holds `**bold**` or `$x^2$` and is not being edited
+- **THEN** the editor SHALL render the emphasis or math
+- **AND** SHALL restore the raw source when the cell is focused
 
 #### Scenario: Tables from ingested tabular data
 - **WHEN** the AI agent ingests a CSV or Excel sheet into the document
