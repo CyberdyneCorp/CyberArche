@@ -186,7 +186,7 @@ def test_folders_and_private_over_http(api):
 
     # Place the private doc into the teamspace folder -> it adopts the teamspace.
     placed = api.post(
-        f"/api/v1/documents/{private_doc['id']}/folder",
+        f"/api/v1/documents/{private_doc['id']}/location",
         json={"folder_id": folder["id"]},
         headers=headers,
     ).json()

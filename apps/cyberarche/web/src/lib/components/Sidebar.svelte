@@ -68,6 +68,68 @@
 
 	const docHref = (id: string) => `/w/${workspaceId}/d/${id}`;
 
+	// --- drag documents into a teamspace / folder / private -------------------
+	let dropTarget = $state<string | null>(null); // id of the hovered target
+
+	async function refresh() {
+		await Promise.all([teamspaces?.load(), documentTree.open(workspaceId)]);
+	}
+
+	function onDragStart(event: DragEvent, docId: string) {
+		event.dataTransfer?.setData('text/doc-id', docId);
+		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+	}
+
+	function allowDrop(event: DragEvent, target: string) {
+		event.preventDefault();
+		dropTarget = target;
+	}
+
+	async function onDrop(
+		event: DragEvent,
+		dest: { teamspaceId?: string; folderId?: string }
+	) {
+		event.preventDefault();
+		dropTarget = null;
+		const docId = event.dataTransfer?.getData('text/doc-id');
+		if (!docId) return;
+		const { placeInFolder, moveToTeamspace, moveToPrivate } = await import(
+			'$lib/api/folders'
+		);
+		if (dest.folderId) await placeInFolder(docId, dest.folderId);
+		else if (dest.teamspaceId) await moveToTeamspace(docId, dest.teamspaceId);
+		else await moveToPrivate(docId);
+		await refresh();
+	}
+
+	async function starDoc(doc: { id: string; title: string }) {
+		await teamspaces?.toggleFavorite(doc as never);
+	}
+
+	async function trashDoc(id: string) {
+		const { trashDocument } = await import('$lib/api/documents');
+		await trashDocument(id);
+		await refresh();
+	}
+
+	async function addChild(doc: {
+		id: string;
+		teamspace_id?: string | null;
+		folder_id?: string | null;
+	}) {
+		const child = await documentTree.create(
+			'',
+			doc.id,
+			doc.teamspace_id ?? undefined
+		);
+		if (doc.folder_id) {
+			const { placeInFolder } = await import('$lib/api/folders');
+			await placeInFolder(child.id, doc.folder_id);
+		}
+		await refresh();
+		await goto(docHref(child.id));
+	}
+
 	const privateRoots = $derived(
 		documentTree.roots.filter(
 			(n) => !n.document.teamspace_id && !n.document.folder_id
@@ -129,7 +191,15 @@
 			{/if}
 
 			{#each teamspaces.nodes as node (node.teamspace.id)}
-				<div class="row group" data-testid="teamspace-row">
+				<div
+					class="row group"
+					class:drop-target={dropTarget === `ts:${node.teamspace.id}`}
+					data-testid="teamspace-row"
+					role="group"
+					ondragover={(e) => allowDrop(e, `ts:${node.teamspace.id}`)}
+					ondragleave={() => (dropTarget = null)}
+					ondrop={(e) => onDrop(e, { teamspaceId: node.teamspace.id })}
+				>
 					<button
 						class="disclosure"
 						aria-label={node.expanded ? 'Collapse' : 'Expand'}
@@ -155,16 +225,8 @@
 				</div>
 				{#if node.expanded}
 					{@render folderList(node.teamspace.id)}
-					{#each node.documents as doc (doc.id)}
-						<a
-							class="row nested"
-							class:active={page.url.pathname === docHref(doc.id)}
-							href={docHref(doc.id)}
-							data-testid="teamspace-doc"
-						>
-							<span class="icon">▤</span>
-							<span class="title">{doc.title}</span>
-						</a>
+					{#each node.documents.filter((d) => !d.folder_id) as doc (doc.id)}
+						{@render docRow(doc, 'teamspace-doc')}
 					{:else}
 						<p class="empty nested">No pages yet</p>
 					{/each}
@@ -177,7 +239,15 @@
 		</nav>
 	{/if}
 
-	<nav class="section grow">
+	<nav
+		class="section grow"
+		class:drop-target={dropTarget === 'private'}
+		role="region"
+		aria-label="Private"
+		ondragover={(e) => allowDrop(e, 'private')}
+		ondragleave={() => (dropTarget = null)}
+		ondrop={(e) => onDrop(e, {})}
+	>
 		<div class="section-head">
 			<h2>Private</h2>
 			{#if teamspaces}
@@ -207,7 +277,15 @@
 
 {#snippet folderList(scope: string | null)}
 	{#each teamspaces?.foldersFor(scope) ?? [] as fn (fn.folder.id)}
-		<div class="row group" data-testid="folder-row">
+		<div
+			class="row group"
+			class:drop-target={dropTarget === `folder:${fn.folder.id}`}
+			data-testid="folder-row"
+			role="group"
+			ondragover={(e) => allowDrop(e, `folder:${fn.folder.id}`)}
+			ondragleave={() => (dropTarget = null)}
+			ondrop={(e) => onDrop(e, { folderId: fn.folder.id })}
+		>
 			<button
 				class="disclosure"
 				aria-label={fn.expanded ? 'Collapse' : 'Expand'}
@@ -226,20 +304,48 @@
 		</div>
 		{#if fn.expanded}
 			{#each fn.documents as doc (doc.id)}
-				<a
-					class="row nested"
-					class:active={page.url.pathname === docHref(doc.id)}
-					href={docHref(doc.id)}
-					data-testid="folder-doc"
-				>
-					<span class="icon">▤</span>
-					<span class="title">{doc.title}</span>
-				</a>
+				{@render docRow(doc, 'folder-doc')}
 			{:else}
 				<p class="empty nested">No pages yet</p>
 			{/each}
 		{/if}
 	{/each}
+{/snippet}
+
+{#snippet docRow(doc: import('$lib/api/documents').Document, testid: string)}
+	<div
+		class="row nested doc"
+		class:active={page.url.pathname === docHref(doc.id)}
+		role="listitem"
+		draggable="true"
+		ondragstart={(e) => onDragStart(e, doc.id)}
+	>
+		<a class="doc-link" href={docHref(doc.id)} data-testid={testid}>
+			<span class="icon">▤</span>
+			<span class="title">{doc.title}</span>
+		</a>
+		<button
+			class="row-add"
+			title={teamspaces?.isFavorite(doc.id) ? 'Unfavourite' : 'Favourite'}
+			aria-label="Favourite"
+			data-testid="doc-star"
+			onclick={() => starDoc(doc)}>{teamspaces?.isFavorite(doc.id) ? '★' : '☆'}</button
+		>
+		<button
+			class="row-add"
+			title="Add child document"
+			aria-label="Add child document"
+			data-testid="doc-add-child"
+			onclick={() => addChild(doc)}>＋</button
+		>
+		<button
+			class="row-add danger"
+			title="Move to trash"
+			aria-label="Move to trash"
+			data-testid="doc-trash"
+			onclick={() => trashDoc(doc.id)}>🗑</button
+		>
+	</div>
 {/snippet}
 
 	<!-- Documents reachable only through a direct grant: they belong to a
@@ -383,9 +489,41 @@
 		visibility: visible;
 	}
 	.disclosure {
-		width: 14px;
-		color: var(--tx3);
-		font-size: 9px;
+		width: 20px;
+		color: var(--tx2);
+		font-size: 13px;
+		line-height: 1;
+	}
+	.disclosure:hover {
+		color: var(--tx);
+	}
+	.drop-target {
+		outline: 2px dashed var(--acc);
+		outline-offset: -2px;
+		border-radius: var(--r-control);
+	}
+	.row.doc {
+		display: flex;
+		align-items: center;
+	}
+	.row.doc .doc-link {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex: 1;
+		min-width: 0;
+	}
+	.row.doc .row-add {
+		visibility: hidden;
+	}
+	.row.doc:hover .row-add {
+		visibility: visible;
+	}
+	.row-add.danger:hover {
+		color: var(--rose);
+	}
+	.row.doc {
+		cursor: grab;
 	}
 	.ts-icon {
 		display: grid;

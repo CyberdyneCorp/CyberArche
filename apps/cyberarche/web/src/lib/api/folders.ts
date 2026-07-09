@@ -36,7 +36,13 @@ export const folderDocuments = (folderId: string) =>
 	get<Document[]>(`/api/v1/folders/${folderId}/documents`);
 
 export const placeInFolder = (documentId: string, folderId: string | null) =>
-	post<Document>(`/api/v1/documents/${documentId}/folder`, { folder_id: folderId });
+	post<Document>(`/api/v1/documents/${documentId}/location`, { folder_id: folderId });
+
+export const moveToTeamspace = (documentId: string, teamspaceId: string) =>
+	post<Document>(`/api/v1/documents/${documentId}/location`, { teamspace_id: teamspaceId });
+
+export const moveToPrivate = (documentId: string) =>
+	post<Document>(`/api/v1/documents/${documentId}/location`, {});
 
 export const listPrivate = (workspaceId: string) =>
 	get<Document[]>(`/api/v1/workspaces/${workspaceId}/private`);

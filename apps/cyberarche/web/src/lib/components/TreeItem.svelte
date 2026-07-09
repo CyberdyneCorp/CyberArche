@@ -15,7 +15,16 @@
 	const active = $derived(page.url.pathname === href);
 </script>
 
-<div class="item" style="--depth: {depth}">
+<div
+	class="item"
+	style="--depth: {depth}"
+	role="listitem"
+	draggable="true"
+	ondragstart={(event) => {
+		event.dataTransfer?.setData('text/doc-id', node.document.id);
+		event.stopPropagation();
+	}}
+>
 	<button
 		class="disclosure"
 		aria-label={node.expanded ? 'Collapse' : 'Expand'}
@@ -72,9 +81,10 @@
 		visibility: visible;
 	}
 	.disclosure {
-		width: 16px;
-		color: var(--tx3);
-		font-size: 9px;
+		width: 20px;
+		color: var(--tx2);
+		font-size: 13px;
+		line-height: 1;
 		padding: 2px 0;
 	}
 	.doc {

@@ -127,3 +127,37 @@ async def test_non_editor_cannot_create_teamspace_folder(use_cases, memberships,
         await use_cases.folders.create(
             BOB, workspace.id, name="Nope", teamspace_id=teamspace.id
         )
+
+
+async def test_move_document_to_a_teamspace(use_cases, memberships, clock, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    private = await use_cases.documents.create(alice, workspace_id=workspace.id, title="Loose")
+
+    moved = await use_cases.documents.move_to_teamspace(alice, private.id, teamspace.id)
+    assert moved.teamspace_id == teamspace.id
+    assert moved.folder_id is None
+
+    # A workspace editor can now reach it (it is shared in the teamspace).
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=BOB.user_id,
+            role=Role.EDITOR, granted_at=clock.now(),
+        )
+    )
+    assert (await use_cases.documents.get(BOB, private.id)).id == private.id
+
+
+async def test_move_out_of_folder_to_private(use_cases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    folder = await use_cases.folders.create(
+        alice, workspace.id, name="Box", teamspace_id=teamspace.id
+    )
+    doc = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Doc", teamspace_id=teamspace.id
+    )
+    await use_cases.documents.place_in_folder(alice, doc.id, folder.id)
+
+    moved = await use_cases.documents.move_to_private(alice, doc.id)
+    assert moved.folder_id is None and moved.teamspace_id is None

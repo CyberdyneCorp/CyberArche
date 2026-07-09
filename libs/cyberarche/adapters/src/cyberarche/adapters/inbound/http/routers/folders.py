@@ -93,17 +93,22 @@ async def folder_documents(
 
 
 class PlaceDocumentRequest(BaseModel):
-    # Exactly one destination; both null means the private space.
+    # A folder, or a teamspace, or (both null) the private space.
     folder_id: str | None = None
+    teamspace_id: str | None = None
 
 
-@router.post("/api/v1/documents/{document_id}/folder")
+@router.post("/api/v1/documents/{document_id}/location")
 async def place_document(
     document_id: str, body: PlaceDocumentRequest, cases: Cases, caller: Caller
 ) -> DocumentResponse:
     if body.folder_id:
         document = await cases.documents.place_in_folder(
             caller, DocumentId(document_id), FolderId(body.folder_id)
+        )
+    elif body.teamspace_id:
+        document = await cases.documents.move_to_teamspace(
+            caller, DocumentId(document_id), TeamspaceId(body.teamspace_id)
         )
     else:
         document = await cases.documents.move_to_private(

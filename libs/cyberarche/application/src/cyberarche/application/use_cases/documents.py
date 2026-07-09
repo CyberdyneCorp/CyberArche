@@ -191,6 +191,24 @@ class DocumentUseCases:
         await self._documents.update(moved)
         return moved
 
+    async def move_to_teamspace(
+        self, caller: CallerContext, document_id: DocumentId, teamspace_id: TeamspaceId
+    ) -> Document:
+        """Move a document directly into a teamspace (dropped onto it): it leaves
+        any folder and adopts the teamspace's shared scope. The caller must be
+        able to edit the document and to add to the teamspace."""
+        document = await self._get_or_raise(caller, document_id)
+        await self._access.require_document(caller, document, Role.EDITOR)
+        await self._require_teamspace_of(caller, document.workspace_id, teamspace_id)
+        moved = replace(
+            document,
+            teamspace_id=teamspace_id,
+            folder_id=None,
+            updated_at=self._clock.now(),
+        )
+        await self._documents.update(moved)
+        return moved
+
     async def move_to_private(
         self, caller: CallerContext, document_id: DocumentId
     ) -> Document:

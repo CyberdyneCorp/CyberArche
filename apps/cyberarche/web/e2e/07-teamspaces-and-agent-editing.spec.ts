@@ -287,3 +287,49 @@ test('folders live under a teamspace and the Private section holds loose docs', 
 	// The Private section exists (loose docs live here, not a global "Documents").
 	await expect(page.getByRole('heading', { name: 'Private' })).toBeVisible();
 });
+
+test('drag a private doc into a teamspace, then star and trash it there', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	// A private doc to move.
+	const doc = await (
+		await request.post(`${API}/api/v1/documents`, {
+			data: { workspace_id: workspaceId, title: 'Draggable' },
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	await page.goto(`/w/${workspaceId}/d/${doc.id}`);
+	await page.getByTestId('block-editor').waitFor();
+
+	// A teamspace to drop it into.
+	await page.getByTestId('new-teamspace').click();
+	await page.getByTestId('teamspace-name').fill('Dropzone');
+	await page.getByTestId('teamspace-name').press('Enter');
+	const teamspace = page.getByTestId('teamspace-row').filter({ hasText: 'Dropzone' });
+	await expect(teamspace).toHaveCount(1);
+
+	// Drag the private doc (a tree item) onto the teamspace.
+	const source = page
+		.getByTestId('document-tree')
+		.locator('.item')
+		.filter({ hasText: 'Draggable' })
+		.first();
+	await source.dragTo(teamspace);
+
+	// It now lives under the teamspace, not Private.
+	await teamspace.getByLabel('Expand').click();
+	const inTeamspace = page.getByTestId('teamspace-doc').filter({ hasText: 'Draggable' });
+	await expect(inTeamspace).toHaveCount(1);
+
+	// Star it -> appears under Favorites.
+	await inTeamspace.hover();
+	await inTeamspace.locator('..').getByTestId('doc-star').click();
+	await expect(page.getByTestId('favorite-doc').filter({ hasText: 'Draggable' })).toHaveCount(1);
+
+	// Trash it -> gone from the teamspace.
+	await inTeamspace.hover();
+	await inTeamspace.locator('..').getByTestId('doc-trash').click();
+	await expect(page.getByTestId('teamspace-doc').filter({ hasText: 'Draggable' })).toHaveCount(0);
+});
