@@ -191,5 +191,12 @@ def test_folders_and_private_over_http(api):
         headers=headers,
     ).json()
     assert placed["teamspace_id"] == ts["id"]
+    assert placed["folder_id"] == folder["id"]
     in_folder = api.get(f"/api/v1/folders/{folder['id']}/documents", headers=headers).json()
     assert [d["id"] for d in in_folder] == [private_doc["id"]]
+
+    # Regression: the teamspace listing must expose folder_id so the sidebar can
+    # tell a foldered doc from a loose one — otherwise it renders the doc twice.
+    ts_docs = api.get(f"/api/v1/teamspaces/{ts['id']}/documents", headers=headers).json()
+    by_id = {d["id"]: d for d in ts_docs}
+    assert by_id[private_doc["id"]]["folder_id"] == folder["id"]

@@ -80,21 +80,41 @@ export function createTeamspaces(workspaceId: string) {
 				listPrivate(workspaceId),
 				listFolders(workspaceId)
 			]);
-			nodes = teamspaces.map((teamspace) => ({
-				teamspace,
-				documents: [],
-				expanded: false,
-				loaded: false
-			}));
+			// Preserve expansion across reloads, and refresh the documents of any
+			// node already expanded so a move shows up without collapsing the tree.
+			const prevTs = new Map(nodes.map((n) => [n.teamspace.id, n]));
+			nodes = await Promise.all(
+				teamspaces.map(async (teamspace) => {
+					const prev = prevTs.get(teamspace.id);
+					if (prev?.loaded) {
+						return {
+							teamspace,
+							documents: await teamspaceDocuments(teamspace.id),
+							expanded: prev.expanded,
+							loaded: true
+						};
+					}
+					return { teamspace, documents: [], expanded: prev?.expanded ?? false, loaded: false };
+				})
+			);
 			favorites = favs;
 			shared = sharedDocs;
 			privateDocs = priv;
-			folderNodes = folders.map((folder) => ({
-				folder,
-				documents: [],
-				expanded: false,
-				loaded: false
-			}));
+			const prevF = new Map(folderNodes.map((n) => [n.folder.id, n]));
+			folderNodes = await Promise.all(
+				folders.map(async (folder) => {
+					const prev = prevF.get(folder.id);
+					if (prev?.loaded) {
+						return {
+							folder,
+							documents: await folderDocuments(folder.id),
+							expanded: prev.expanded,
+							loaded: true
+						};
+					}
+					return { folder, documents: [], expanded: prev?.expanded ?? false, loaded: false };
+				})
+			);
 		},
 
 		async toggleFolder(folderId: string) {

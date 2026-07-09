@@ -318,8 +318,8 @@ test('drag a private doc into a teamspace, then star and trash it there', async 
 		.first();
 	await source.dragTo(teamspace);
 
-	// It now lives under the teamspace, not Private.
-	await teamspace.getByLabel('Expand').click();
+	// It now lives under the teamspace, not Private. The teamspace is already
+	// expanded (a freshly created teamspace opens) and stays open across the move.
 	const inTeamspace = page.getByTestId('teamspace-doc').filter({ hasText: 'Draggable' });
 	await expect(inTeamspace).toHaveCount(1);
 
@@ -332,4 +332,45 @@ test('drag a private doc into a teamspace, then star and trash it there', async 
 	await inTeamspace.hover();
 	await inTeamspace.locator('..').getByTestId('doc-trash').click();
 	await expect(page.getByTestId('teamspace-doc').filter({ hasText: 'Draggable' })).toHaveCount(0);
+});
+
+test('dragging a doc into a folder places it once and keeps the teamspace open', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	const doc = await (
+		await request.post(`${API}/api/v1/documents`, {
+			data: { workspace_id: workspaceId, title: 'ToFolder' },
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	await page.goto(`/w/${workspaceId}/d/${doc.id}`);
+	await page.getByTestId('block-editor').waitFor();
+
+	// A teamspace with a folder, both expanded.
+	await page.getByTestId('new-teamspace').click();
+	await page.getByTestId('teamspace-name').fill('Docs');
+	await page.getByTestId('teamspace-name').press('Enter');
+	const teamspace = page.getByTestId('teamspace-row').filter({ hasText: 'Docs' });
+	await teamspace.hover();
+	page.once('dialog', (d) => d.accept('Bucket'));
+	await teamspace.getByTestId('teamspace-add-folder').click();
+	const folder = page.getByTestId('folder-row').filter({ hasText: 'Bucket' });
+	await expect(folder).toHaveCount(1);
+	await folder.getByLabel('Expand').click();
+
+	// Drag the private doc onto the folder.
+	const source = page
+		.getByTestId('document-tree')
+		.locator('.item')
+		.filter({ hasText: 'ToFolder' })
+		.first();
+	await source.dragTo(folder);
+
+	// Regression: it lands under the folder exactly once — not also as a loose
+	// teamspace doc — and the teamspace does not collapse (the folder is still shown).
+	await expect(page.getByTestId('folder-doc').filter({ hasText: 'ToFolder' })).toHaveCount(1);
+	await expect(page.getByTestId('teamspace-doc').filter({ hasText: 'ToFolder' })).toHaveCount(0);
+	await expect(folder).toHaveCount(1);
 });

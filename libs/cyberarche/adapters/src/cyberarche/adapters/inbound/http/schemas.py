@@ -71,6 +71,7 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
     trashed: bool
     teamspace_id: str | None = None
+    folder_id: str | None = None
 
     @staticmethod
     def from_domain(document: Document) -> "DocumentResponse":
@@ -85,6 +86,7 @@ class DocumentResponse(BaseModel):
             updated_at=document.updated_at,
             trashed=document.trashed,
             teamspace_id=document.teamspace_id,
+            folder_id=document.folder_id,
         )
 
 
