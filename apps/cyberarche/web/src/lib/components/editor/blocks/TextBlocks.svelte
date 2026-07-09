@@ -43,6 +43,7 @@
 		value: text,
 		focused,
 		rich: true, // render inline math ($…$) and emphasis when unfocused
+		syncSignal: vm.historyRevision, // force a re-sync on undo/redo while focused
 		menuOpen: vm.slashFor === block.id,
 		onchange,
 		onenter,

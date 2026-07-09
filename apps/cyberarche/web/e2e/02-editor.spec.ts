@@ -68,6 +68,31 @@ test('typing, markdown shortcuts, and the slash menu', async ({ page, request })
 	await expect(page.getByTestId('code-block')).toBeVisible();
 });
 
+test('undo/redo re-sync a focused block in place (not only on removal)', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	const editor = page.getByTestId('block-editor');
+	const paragraph = editor.locator('[data-block-type="paragraph"] .editable').first();
+	await paragraph.click();
+	await paragraph.pressSequentially('First');
+	// Let the ~500ms undo capture window close so the next edit is its own step —
+	// undo then reverts only the text and the block (and focus) survive.
+	await page.waitForTimeout(650);
+	await paragraph.pressSequentially(' draft');
+	await expect(paragraph).toHaveText('First draft');
+
+	// The bug: a focused contenteditable did not re-render on undo, so the last
+	// edit stayed visible. Cmd/Ctrl+Z must revert the text in place.
+	await page.keyboard.press('ControlOrMeta+z');
+	await expect(paragraph).toHaveText('First');
+
+	// Redo re-applies it.
+	await page.keyboard.press('ControlOrMeta+Shift+z');
+	await expect(paragraph).toHaveText('First draft');
+});
+
 test('LaTeX renders and surfaces errors without losing source', async ({ page, request }) => {
 	await openDocument(page, request);
 

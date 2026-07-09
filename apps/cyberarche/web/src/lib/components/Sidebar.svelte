@@ -78,6 +78,30 @@
 		toasts.success('Deleted permanently');
 	}
 
+	async function restoreAllTrash() {
+		const ids = documentTree.trash.map((d) => d.id);
+		if (ids.length === 0) return;
+		for (const id of ids) await documentTree.restore(id);
+		await refresh();
+		toasts.success(ids.length === 1 ? 'Restored 1 document' : `Restored ${ids.length} documents`);
+	}
+
+	async function emptyTrash() {
+		const ids = documentTree.trash.map((d) => d.id);
+		if (ids.length === 0) return;
+		const ok = await dialogs.confirm({
+			title: 'Empty trash',
+			message: `Permanently delete ${
+				ids.length === 1 ? 'this document' : `all ${ids.length} documents`
+			} in the trash? This cannot be undone.`,
+			confirmLabel: 'Delete all',
+			danger: true
+		});
+		if (!ok) return;
+		for (const id of ids) await documentTree.purge(id);
+		toasts.success('Trash emptied');
+	}
+
 	async function signOut() {
 		session.logout();
 		await goto('/signin');
@@ -494,22 +518,40 @@
 	{/if}
 
 	{#if documentTree.trash.length > 0}
-		<nav class="section">
-			<h2>Trash</h2>
-			{#each documentTree.trash as doc (doc.id)}
-				<div class="trash-row" data-testid="trash-doc">
-					<span class="title">{doc.title}</span>
-					<button data-testid="trash-restore" onclick={() => documentTree.restore(doc.id)}
-						>Restore</button
+		<nav class="section trash">
+			<div class="section-head">
+				<h2><span class="trash-icon" aria-hidden="true">🗑</span> Trash</h2>
+				<div class="trash-actions">
+					<button
+						class="mini"
+						title="Restore all documents"
+						data-testid="trash-restore-all"
+						onclick={restoreAllTrash}>Restore all</button
 					>
 					<button
-						class="danger"
-						data-testid="trash-purge"
-						title="Delete permanently"
-						onclick={() => confirmPurge(doc.id, doc.title)}>Delete</button
+						class="mini danger"
+						title="Delete all permanently"
+						data-testid="trash-empty"
+						onclick={emptyTrash}>Delete all</button
 					>
 				</div>
-			{/each}
+			</div>
+			<div class="trash-list">
+				{#each documentTree.trash as doc (doc.id)}
+					<div class="trash-row" data-testid="trash-doc">
+						<span class="title">{doc.title || 'Untitled'}</span>
+						<button data-testid="trash-restore" onclick={() => documentTree.restore(doc.id)}
+							>Restore</button
+						>
+						<button
+							class="danger"
+							data-testid="trash-purge"
+							title="Delete permanently"
+							onclick={() => confirmPurge(doc.id, doc.title)}>Delete</button
+						>
+					</div>
+				{/each}
+			</div>
 		</nav>
 	{/if}
 
@@ -688,6 +730,40 @@
 	}
 	.empty.nested {
 		padding-left: 20px;
+	}
+	.trash h2 {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+	}
+	.trash-icon {
+		font-size: 11px;
+	}
+	.trash-actions {
+		display: flex;
+		gap: 4px;
+	}
+	.mini {
+		font-size: 10px;
+		font-weight: 500;
+		padding: 2px 6px;
+		border-radius: 5px;
+		color: var(--acc-strong);
+	}
+	.mini:hover {
+		background: var(--accbg);
+	}
+	.mini.danger {
+		color: var(--rose);
+	}
+	.mini.danger:hover {
+		background: var(--aibg, var(--bg2));
+	}
+	/* Cap the trash list and let it scroll, so a large trash never pushes the
+	 * footer off-screen or breaks the sidebar layout. */
+	.trash-list {
+		max-height: 168px;
+		overflow-y: auto;
 	}
 	.trash-row {
 		display: flex;

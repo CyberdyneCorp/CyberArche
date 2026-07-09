@@ -10,6 +10,7 @@
 		focused = false,
 		menuOpen = false,
 		rich = false,
+		syncSignal = 0,
 		onchange,
 		onenter,
 		onbackspaceempty,
@@ -24,6 +25,9 @@
 		menuOpen?: boolean;
 		/** Render inline math/emphasis when unfocused (display only). */
 		rich?: boolean;
+		/** Changes on undo/redo: forces a DOM re-sync from `value` even while the
+		 * field is focused (normal remote edits stay caret-safe and don't set it). */
+		syncSignal?: number;
 		onchange: (text: string) => void;
 		onenter?: (before: string, after: string) => void;
 		onbackspaceempty?: () => void;
@@ -57,6 +61,33 @@
 			element.innerHTML = renderInline(current);
 		} else if (element.textContent !== current) {
 			element.textContent = current;
+		}
+	});
+
+	// Undo/redo: the sync effect above bails while the element is focused (to keep
+	// the caret during typing), so a local undo would be invisible. When
+	// `syncSignal` changes we force the DOM to match the model and drop the caret
+	// at the end. Guarded so ordinary typing (which doesn't bump the signal) is
+	// untouched.
+	let lastSyncSignal = -1; // sentinel: any real signal (>= 0) differs on mount
+	$effect(() => {
+		const signal = syncSignal;
+		const current = value;
+		if (!element || signal === lastSyncSignal) return;
+		lastSyncSignal = signal;
+		if (!editing && rich) {
+			element.innerHTML = renderInline(current);
+			return;
+		}
+		if (element.textContent === current) return;
+		element.textContent = current;
+		if (document.activeElement === element) {
+			const range = document.createRange();
+			range.selectNodeContents(element);
+			range.collapse(false);
+			const selection = window.getSelection();
+			selection?.removeAllRanges();
+			selection?.addRange(range);
 		}
 	});
 

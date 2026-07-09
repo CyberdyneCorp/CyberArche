@@ -141,6 +141,22 @@ describe('editor ViewModel', () => {
 		expect(vm.blocks).toHaveLength(1);
 	});
 
+	it('undo/redo bump historyRevision so focused fields re-sync', () => {
+		// EditableText ignores value changes while focused (caret safety), so a
+		// focused undo would be invisible unless historyRevision changes. Guard it.
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.handleTextInput(id, 'hello');
+		expect(vm.blocks[0].data.text).toBe('hello');
+
+		const before = vm.historyRevision;
+		vm.undo();
+		expect(vm.historyRevision).toBe(before + 1);
+
+		vm.redo();
+		expect(vm.historyRevision).toBe(before + 2);
+	});
+
 	it('heading shortcut honours the hash count (# -> h1, ### -> h3)', () => {
 		// Regression: `create()` hard-coded level 2 and the captured `#{1,3}`
 		// group was discarded, so `# ` and `### ` both produced an h2. The old

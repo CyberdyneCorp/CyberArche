@@ -16,9 +16,14 @@
 
 	function onKeydown(event: KeyboardEvent) {
 		const meta = event.metaKey || event.ctrlKey;
-		if (!meta || event.key.toLowerCase() !== 'z') return;
+		if (!meta) return;
+		const key = event.key.toLowerCase();
+		// Cmd/Ctrl+Z = undo; Cmd/Ctrl+Shift+Z or Ctrl+Y = redo.
+		const isRedo = (key === 'z' && event.shiftKey) || key === 'y';
+		const isUndo = key === 'z' && !event.shiftKey;
+		if (!isUndo && !isRedo) return;
 		event.preventDefault();
-		if (event.shiftKey) editor.redo();
+		if (isRedo) editor.redo();
 		else editor.undo();
 	}
 </script>

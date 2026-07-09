@@ -52,7 +52,7 @@ test('sign in, create workspace and documents, organize the tree', async ({ page
 	await childRow.getByLabel('Move to trash').click();
 	await expect(page.getByTestId('tree-doc')).toHaveCount(1);
 	await expect(page.getByTestId('trash-doc')).toHaveCount(1);
-	await page.getByRole('button', { name: 'Restore' }).click();
+	await page.getByTestId('trash-doc').getByTestId('trash-restore').click();
 	await expect(page.getByTestId('trash-doc')).toHaveCount(0);
 });
 

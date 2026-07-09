@@ -430,3 +430,39 @@ test('delete a folder then its teamspace from the sidebar, moving docs to Trash'
 	await page.getByTestId('dialog-confirm').click();
 	await expect(page.getByTestId('teamspace-row').filter({ hasText: 'Doomed' })).toHaveCount(0);
 });
+
+test('restore all, then empty the trash from the sidebar', async ({ page, request }) => {
+	await openDocument(page, request);
+	const headers = { Authorization: `Bearer ${session.access}` };
+	async function trashNew(title: string) {
+		const d = await (
+			await request.post(`${API}/api/v1/documents`, {
+				data: { workspace_id: workspaceId, title },
+				headers
+			})
+		).json();
+		await request.delete(`${API}/api/v1/documents/${d.id}`, { headers });
+	}
+
+	await trashNew('Bulk A');
+	await trashNew('Bulk B');
+	// Reload so the sidebar loads the trash from the server.
+	await page.reload();
+	await page.getByTestId('block-editor').waitFor();
+	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Bulk A' })).toHaveCount(1);
+	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Bulk B' })).toHaveCount(1);
+
+	// Restore all empties the trash.
+	await page.getByTestId('trash-restore-all').click();
+	await expect(page.getByTestId('trash-doc')).toHaveCount(0);
+
+	// Trash one more, then Delete all — which asks for confirmation first.
+	await trashNew('Bulk C');
+	await page.reload();
+	await page.getByTestId('block-editor').waitFor();
+	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Bulk C' })).toHaveCount(1);
+	await page.getByTestId('trash-empty').click();
+	await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+	await page.getByTestId('dialog-confirm').click();
+	await expect(page.getByTestId('trash-doc')).toHaveCount(0);
+});

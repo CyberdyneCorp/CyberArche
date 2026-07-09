@@ -50,6 +50,7 @@
 							<EditableText
 								value={cell}
 								rich
+								syncSignal={vm.historyRevision}
 								onchange={(next) => setHeader(column, next)}
 								onfocus={() => vm.focus(block.id)}
 							/>
@@ -75,6 +76,7 @@
 								<EditableText
 									value={cell}
 									rich
+									syncSignal={vm.historyRevision}
 									onchange={(next) => setCell(rowIndex, column, next)}
 									onfocus={() => vm.focus(block.id)}
 								/>

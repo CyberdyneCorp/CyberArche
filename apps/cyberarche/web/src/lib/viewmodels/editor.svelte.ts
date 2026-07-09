@@ -40,6 +40,10 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 	let focusedId = $state<string | null>(null);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	// Bumped on every undo/redo so focused contenteditable fields re-sync their
+	// DOM from the model. Remote edits do NOT bump it (they stay caret-safe per
+	// the block-level LWW rule, D-9), so only a local undo/redo forces a refresh.
+	let historyRevision = $state(0);
 	let readOnly = $state(false);
 	let slashFor = $state<string | null>(null); // block id with an open slash menu
 	let slashQuery = $state('');
@@ -99,6 +103,11 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		},
 		get canRedo() {
 			return canRedo;
+		},
+		/** Increments on each undo/redo; contenteditable fields watch it to force
+		 * a DOM re-sync even while focused. */
+		get historyRevision() {
+			return historyRevision;
 		},
 		get readOnly() {
 			return readOnly;
@@ -276,10 +285,12 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		undo(): void {
 			undoManager.undo();
 			refreshHistory();
+			historyRevision++;
 		},
 		redo(): void {
 			undoManager.redo();
 			refreshHistory();
+			historyRevision++;
 		},
 
 		/** Seed an empty document with one paragraph so typing can start. */
