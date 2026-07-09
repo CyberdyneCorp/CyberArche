@@ -2,6 +2,13 @@
  * Backs the sidebar's Favorites and Teamspaces sections. */
 
 import type { Document } from '$lib/api/documents';
+import {
+	createFolder,
+	folderDocuments,
+	listFolders,
+	listPrivate,
+	type Folder
+} from '$lib/api/folders';
 import { listSharedWithMe } from '$lib/api/sharing';
 import {
 	addFavorite,
@@ -20,10 +27,19 @@ export interface TeamspaceNode {
 	loaded: boolean;
 }
 
+export interface FolderNode {
+	folder: Folder;
+	documents: Document[];
+	expanded: boolean;
+	loaded: boolean;
+}
+
 export function createTeamspaces(workspaceId: string) {
 	let nodes = $state<TeamspaceNode[]>([]);
 	let favorites = $state<Document[]>([]);
 	let shared = $state<Document[]>([]);
+	let privateDocs = $state<Document[]>([]);
+	let folderNodes = $state<FolderNode[]>([]);
 	let error = $state<string | null>(null);
 
 	const favoriteIds = $derived(new Set(favorites.map((d) => d.id)));
@@ -39,6 +55,16 @@ export function createTeamspaces(workspaceId: string) {
 		get shared() {
 			return shared;
 		},
+		/** The caller's own private (teamspace-less, folderless) documents. */
+		get private() {
+			return privateDocs;
+		},
+		/** Top-level folders in a scope: a teamspace id, or null for private. */
+		foldersFor(teamspaceId: string | null): FolderNode[] {
+			return folderNodes.filter(
+				(n) => n.folder.teamspace_id === teamspaceId && n.folder.parent_folder_id === null
+			);
+		},
 		get error() {
 			return error;
 		},
@@ -47,10 +73,12 @@ export function createTeamspaces(workspaceId: string) {
 		},
 
 		async load() {
-			const [teamspaces, favs, sharedDocs] = await Promise.all([
+			const [teamspaces, favs, sharedDocs, priv, folders] = await Promise.all([
 				listTeamspaces(workspaceId),
 				listFavorites(),
-				listSharedWithMe()
+				listSharedWithMe(),
+				listPrivate(workspaceId),
+				listFolders(workspaceId)
 			]);
 			nodes = teamspaces.map((teamspace) => ({
 				teamspace,
@@ -60,6 +88,45 @@ export function createTeamspaces(workspaceId: string) {
 			}));
 			favorites = favs;
 			shared = sharedDocs;
+			privateDocs = priv;
+			folderNodes = folders.map((folder) => ({
+				folder,
+				documents: [],
+				expanded: false,
+				loaded: false
+			}));
+		},
+
+		async toggleFolder(folderId: string) {
+			const node = folderNodes.find((n) => n.folder.id === folderId);
+			if (!node) return;
+			node.expanded = !node.expanded;
+			if (node.expanded && !node.loaded) {
+				node.documents = await folderDocuments(folderId);
+				node.loaded = true;
+			}
+		},
+
+		async createFolder(name: string, teamspaceId: string | null): Promise<Folder | null> {
+			error = null;
+			try {
+				const folder = await createFolder(workspaceId, name, teamspaceId);
+				folderNodes = [
+					...folderNodes,
+					{ folder, documents: [], expanded: false, loaded: false }
+				];
+				return folder;
+			} catch (err) {
+				error = (err as Error).message;
+				return null;
+			}
+		},
+
+		async reloadFolder(folderId: string) {
+			const node = folderNodes.find((n) => n.folder.id === folderId);
+			if (!node) return;
+			node.documents = await folderDocuments(folderId);
+			node.loaded = true;
 		},
 
 		async toggle(teamspaceId: string) {

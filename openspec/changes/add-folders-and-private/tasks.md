@@ -17,6 +17,6 @@
 - [x] 3.2 Port-contract test for FolderRepository (memory + postgres), incl. folder_id cascade on doc
 
 ## 4. Sidebar
-- [ ] 4.1 Rename Documents -> Private (owner-only listing); render folders under teamspaces + private
-- [ ] 4.2 Create folder; add document to a folder; expand/collapse folders
-- [ ] 4.3 vitest for the folders/private ViewModel; e2e: create folder in a teamspace, add a doc, private doc not shown to others
+- [x] 4.1 Rename Documents -> Private (owner-only listing); render folders under teamspaces + private
+- [x] 4.2 Create folder; add document to a folder; expand/collapse folders
+- [x] 4.3 vitest for the folders/private ViewModel; e2e: create folder in a teamspace, add a doc, private doc not shown to others

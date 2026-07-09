@@ -11,6 +11,7 @@ export interface Document {
 	updated_at: string;
 	trashed: boolean;
 	teamspace_id: string | null;
+	folder_id?: string | null;
 }
 
 export const createDocument = (

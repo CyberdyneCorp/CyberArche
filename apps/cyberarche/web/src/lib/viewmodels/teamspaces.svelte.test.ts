@@ -43,6 +43,8 @@ describe('teamspaces ViewModel', () => {
 				'GET /api/v1/workspaces/ws-1/teamspaces': [TEAMSPACE],
 				'GET /api/v1/favorites': [DOC('fav-1')],
 				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': [],
 				'GET /api/v1/teamspaces/ts-1/documents': [DOC('d-1', 'ts-1')]
 			})
 		);
@@ -65,7 +67,9 @@ describe('teamspaces ViewModel', () => {
 			routedFetch({
 				'GET /api/v1/workspaces/ws-1/teamspaces': [],
 				'GET /api/v1/favorites': [DOC('fav-1')],
-				'GET /api/v1/shared': []
+				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': []
 			})
 		);
 		const vm = createTeamspaces('ws-1');
@@ -82,6 +86,8 @@ describe('teamspaces ViewModel', () => {
 				'GET /api/v1/workspaces/ws-1/teamspaces': [],
 				'GET /api/v1/favorites': [],
 				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': [],
 				'POST /api/v1/favorites': null,
 				'DELETE /api/v1/favorites/d-1': null
 			})
@@ -104,6 +110,8 @@ describe('teamspaces ViewModel', () => {
 				'GET /api/v1/workspaces/ws-1/teamspaces': [],
 				'GET /api/v1/favorites': [],
 				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': [],
 				'POST /api/v1/workspaces/ws-1/teamspaces': TEAMSPACE
 			})
 		);
@@ -141,7 +149,9 @@ describe('teamspaces ViewModel', () => {
 			routedFetch({
 				'GET /api/v1/workspaces/ws-1/teamspaces': [],
 				'GET /api/v1/favorites': [],
-				'GET /api/v1/shared': [DOC('granted-1')]
+				'GET /api/v1/shared': [DOC('granted-1')],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': []
 			})
 		);
 		const vm = createTeamspaces('ws-1');
@@ -150,5 +160,37 @@ describe('teamspaces ViewModel', () => {
 		expect(vm.shared.map((d) => d.id)).toEqual(['granted-1']);
 		// A granted document is not implicitly a favourite.
 		expect(vm.isFavorite('granted-1')).toBe(false);
+	});
+
+	it('exposes folders scoped to a teamspace or private, and loads their docs', async () => {
+		const FOLDER = (id: string, teamspace_id: string | null) => ({
+			id,
+			workspace_id: 'ws-1',
+			name: `Folder ${id}`,
+			teamspace_id,
+			parent_folder_id: null,
+			created_by: 'alice',
+			created_at: '2026-01-01T00:00:00Z'
+		});
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/workspaces/ws-1/teamspaces': [TEAMSPACE],
+				'GET /api/v1/favorites': [],
+				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [DOC('p1')],
+				'GET /api/v1/workspaces/ws-1/folders': [FOLDER('f-ts', 'ts-1'), FOLDER('f-priv', null)],
+				'GET /api/v1/folders/f-ts/documents': [DOC('d-in-folder')]
+			})
+		);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+
+		expect(vm.private.map((d) => d.id)).toEqual(['p1']);
+		expect(vm.foldersFor('ts-1').map((n) => n.folder.id)).toEqual(['f-ts']);
+		expect(vm.foldersFor(null).map((n) => n.folder.id)).toEqual(['f-priv']);
+
+		await vm.toggleFolder('f-ts');
+		expect(vm.foldersFor('ts-1')[0].documents.map((d) => d.id)).toEqual(['d-in-folder']);
 	});
 });

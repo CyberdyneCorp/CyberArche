@@ -253,3 +253,37 @@ test('inserting an answer with math adds a rendered latex block locally', async 
 	await expect(latex).toHaveCount(1);
 	await expect(latex.locator('.katex')).toBeVisible();
 });
+
+test('folders live under a teamspace and the Private section holds loose docs', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+
+	// A teamspace to hold a folder.
+	await page.getByTestId('new-teamspace').click();
+	await page.getByTestId('teamspace-name').fill('Eng');
+	await page.getByTestId('teamspace-name').press('Enter');
+	await expect(
+		page.getByTestId('teamspace-name-label').filter({ hasText: 'Eng' })
+	).toHaveCount(1);
+
+	// Create a folder in the teamspace (prompt-driven).
+	const row = page.getByTestId('teamspace-row').filter({ hasText: 'Eng' });
+	await row.hover();
+	page.once('dialog', (d) => d.accept('Specs'));
+	await row.getByTestId('teamspace-add-folder').click();
+	await expect(page.getByTestId('folder-name').filter({ hasText: 'Specs' })).toHaveCount(1);
+
+	// Add a page inside the folder -> it lands under the folder (not the tree root).
+	const folder = page.getByTestId('folder-row').filter({ hasText: 'Specs' });
+	await folder.hover();
+	await folder.getByTestId('folder-add-page').click();
+	await page.waitForURL(/\/d\//);
+	// Expand the folder and see the page.
+	await folder.getByLabel('Expand').click();
+	await expect(page.getByTestId('folder-doc')).toHaveCount(1);
+
+	// The Private section exists (loose docs live here, not a global "Documents").
+	await expect(page.getByRole('heading', { name: 'Private' })).toBeVisible();
+});

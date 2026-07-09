@@ -22,6 +22,28 @@
 		await goto(`/w/${workspaceId}/d/${document.id}`);
 	}
 
+	async function newFolder(teamspaceId: string | null) {
+		if (!teamspaces) return;
+		const name = prompt('Folder name')?.trim();
+		if (name) await teamspaces.createFolder(name, teamspaceId);
+	}
+
+	async function newDocumentInFolder(folder: {
+		id: string;
+		teamspace_id: string | null;
+	}) {
+		// Create the doc in the folder's scope, then group it under the folder.
+		const document = await documentTree.create(
+			'',
+			undefined,
+			folder.teamspace_id ?? undefined
+		);
+		const { placeInFolder } = await import('$lib/api/folders');
+		await placeInFolder(document.id, folder.id);
+		await teamspaces?.reloadFolder(folder.id);
+		await goto(`/w/${workspaceId}/d/${document.id}`);
+	}
+
 	async function createTeamspace(event: SubmitEvent) {
 		event.preventDefault();
 		const name = teamspaceName.trim();
@@ -45,6 +67,15 @@
 	}
 
 	const docHref = (id: string) => `/w/${workspaceId}/d/${id}`;
+
+	const privateRoots = $derived(
+		documentTree.roots.filter(
+			(n) => !n.document.teamspace_id && !n.document.folder_id
+		)
+	);
+	const privateEmpty = $derived(
+		privateRoots.length === 0 && (teamspaces?.foldersFor(null).length ?? 0) === 0
+	);
 </script>
 
 <aside class="sidebar">
@@ -109,6 +140,13 @@
 					<span class="title" data-testid="teamspace-name-label">{node.teamspace.name}</span>
 					<button
 						class="row-add"
+						title="New folder"
+						aria-label="New folder"
+						data-testid="teamspace-add-folder"
+						onclick={() => newFolder(node.teamspace.id)}>📁</button
+					>
+					<button
+						class="row-add"
 						title="Add a page"
 						aria-label="Add a page"
 						data-testid="teamspace-add-page"
@@ -116,6 +154,7 @@
 					>
 				</div>
 				{#if node.expanded}
+					{@render folderList(node.teamspace.id)}
 					{#each node.documents as doc (doc.id)}
 						<a
 							class="row nested"
@@ -139,18 +178,69 @@
 	{/if}
 
 	<nav class="section grow">
-		<h2>Documents</h2>
+		<div class="section-head">
+			<h2>Private</h2>
+			{#if teamspaces}
+				<button
+					class="section-add"
+					title="New folder"
+					aria-label="New private folder"
+					data-testid="private-add-folder"
+					onclick={() => newFolder(null)}>📁</button
+				>
+			{/if}
+		</div>
 		<div class="tree" data-testid="document-tree">
+			{#if teamspaces}
+				{@render folderList(null)}
+			{/if}
 			{#each documentTree.roots as node (node.document.id)}
-				{#if !node.document.teamspace_id}
+				{#if !node.document.teamspace_id && !node.document.folder_id}
 					<TreeItem {node} {teamspaces} />
 				{/if}
 			{/each}
-			{#if documentTree.roots.length === 0}
-				<p class="empty">No documents yet</p>
+			{#if privateEmpty}
+				<p class="empty">Nothing private yet</p>
 			{/if}
 		</div>
 	</nav>
+
+{#snippet folderList(scope: string | null)}
+	{#each teamspaces?.foldersFor(scope) ?? [] as fn (fn.folder.id)}
+		<div class="row group" data-testid="folder-row">
+			<button
+				class="disclosure"
+				aria-label={fn.expanded ? 'Collapse' : 'Expand'}
+				onclick={() => teamspaces!.toggleFolder(fn.folder.id)}
+				>{fn.expanded ? '▾' : '▸'}</button
+			>
+			<span class="ts-icon">📁</span>
+			<span class="title" data-testid="folder-name">{fn.folder.name}</span>
+			<button
+				class="row-add"
+				title="Add a page"
+				aria-label="Add a page to folder"
+				data-testid="folder-add-page"
+				onclick={() => newDocumentInFolder(fn.folder)}>＋</button
+			>
+		</div>
+		{#if fn.expanded}
+			{#each fn.documents as doc (doc.id)}
+				<a
+					class="row nested"
+					class:active={page.url.pathname === docHref(doc.id)}
+					href={docHref(doc.id)}
+					data-testid="folder-doc"
+				>
+					<span class="icon">▤</span>
+					<span class="title">{doc.title}</span>
+				</a>
+			{:else}
+				<p class="empty nested">No pages yet</p>
+			{/each}
+		{/if}
+	{/each}
+{/snippet}
 
 	<!-- Documents reachable only through a direct grant: they belong to a
 	     workspace or teamspace the user is not a member of, so they cannot
