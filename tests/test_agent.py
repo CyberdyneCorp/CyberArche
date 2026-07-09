@@ -401,9 +401,13 @@ async def test_agent_run_python_inserts_figures_and_returns_output(
         LLMResponse(text="Here is your plot.", model="m"),
     ]
 
-    answer = await use_cases.agent.ask(alice, document.id, instruction="plot it")
+    answer = await use_cases.agent.ask(
+        alice, document.id, instruction="plot it", auth_token="user-jwt"
+    )
 
     assert code_exec.calls  # the code actually ran
+    # The caller's bearer is forwarded so the interpreter runs as the user.
+    assert code_exec.tokens == ["user-jwt"]
     state = await use_cases.realtime.current_state(alice, document.id)
     image_blocks = [
         b for b in use_cases.agent._engine.read_blocks(state) if b["type"] == "image"

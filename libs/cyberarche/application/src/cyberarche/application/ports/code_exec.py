@@ -27,8 +27,15 @@ class CodeExecutionResult:
 
 
 class CodeExecutionPort(Protocol):
-    async def run(self, code: str) -> CodeExecutionResult:
+    async def run(
+        self, code: str, *, auth_token: str | None = None
+    ) -> CodeExecutionResult:
         """Execute Python. Never raises for user-code errors — those come back as
         success=False with the detail in `error`/`stderr`. May raise only for
-        transport/infrastructure failures."""
+        transport/infrastructure failures.
+
+        `auth_token`, when given, is the caller's bearer to run as (the
+        interpreter authorizes per-user); adapters fall back to a service token
+        when it is absent.
+        """
         ...

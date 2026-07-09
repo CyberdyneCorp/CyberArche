@@ -265,16 +265,24 @@ def _build_image_generator(config: WiringConfig, http: httpx.AsyncClient):
 
 
 def _build_code_executor(config: WiringConfig, service_tokens, shared_http):
-    """Cyberdyne Python Interpreter adapter, or None when unconfigured. Uses the
-    CyberdyneAuth service token (client-credentials) as the interpreter bearer."""
-    if not config.interpreter_base_url or service_tokens is None:
+    """Cyberdyne Python Interpreter adapter, or None when no URL is configured.
+
+    The interpreter authorizes per-user, so calls forward the caller's bearer;
+    the service token (when available) is only a fallback for callerless paths."""
+    if not config.interpreter_base_url:
         return None
     from cyberarche.adapters.outbound.code_exec.cyberdyne_interpreter import (
         CyberdyneInterpreterAdapter,
     )
 
+    if service_tokens is not None:
+        fallback = service_tokens.service_token
+    else:
+        async def fallback() -> str:
+            return ""
+
     return CyberdyneInterpreterAdapter(
-        config.interpreter_base_url, shared_http(), service_tokens.service_token
+        config.interpreter_base_url, shared_http(), fallback
     )
 
 
