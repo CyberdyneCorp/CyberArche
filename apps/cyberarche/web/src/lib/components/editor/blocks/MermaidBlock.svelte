@@ -8,12 +8,19 @@
 	const vm = editor as EditorVM;
 
 	const source = $derived((block.data.source as string) ?? '');
+	// Stable per instance: the block id never changes, and reading it INSIDE the
+	// render effect would subscribe the effect to the whole `block` prop — which
+	// gets a fresh object on every document mirror (i.e. every keystroke in any
+	// block), re-rendering the diagram and causing the flicker/empty jitter.
+	const renderId = $derived(`m-${block.id}`);
 	let view = $state<'rendered' | 'source'>('rendered');
 	let svg = $state('');
 	let error = $state<string | null>(null);
 
 	mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
 
+	// Depend ONLY on `source` (a value-memoized derived): the diagram re-renders
+	// when its own source changes, never because another block was edited.
 	$effect(() => {
 		const current = source;
 		if (!current.trim()) {
@@ -21,15 +28,20 @@
 			error = null;
 			return;
 		}
+		let stale = false;
 		mermaid
-			.render(`m-${block.id}`, current)
+			.render(renderId, current)
 			.then((result) => {
+				if (stale) return; // a newer source arrived; drop this result
 				svg = result.svg;
 				error = null;
 			})
 			.catch((err: Error) => {
-				error = err.message.split('\n')[0];
+				if (!stale) error = err.message.split('\n')[0];
 			});
+		return () => {
+			stale = true;
+		};
 	});
 </script>
 

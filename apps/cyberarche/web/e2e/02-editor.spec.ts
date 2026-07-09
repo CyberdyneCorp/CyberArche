@@ -338,3 +338,29 @@ test('the block gutter stays reachable when the mouse sweeps toward it', async (
 	await del.click(); // and is actually clickable
 	await expect(page.locator('.editable', { hasText: 'a section' })).toHaveCount(0);
 });
+
+test('a mermaid diagram stays rendered while typing in another block', async ({
+	page,
+	request
+}) => {
+	// Regression: the render effect read block.id directly, subscribing it to the
+	// whole block prop — which is re-created on every document mirror (any
+	// keystroke). So typing elsewhere re-ran mermaid.render, blanking the diagram
+	// (and jittering the layout).
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/mermaid');
+	await page.keyboard.press('Enter');
+	const mm = page.getByTestId('mermaid-block').last();
+	await mm.locator('textarea').fill('graph TD; A-->B; B-->C');
+	const svg = mm.getByTestId('mermaid-render').locator('svg');
+	await expect(svg).toBeVisible();
+	const id = await svg.getAttribute('id');
+
+	// Type in a separate block: the diagram must not re-render or vanish.
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('unrelated text');
+
+	await expect(svg).toBeVisible();
+	expect(await svg.getAttribute('id')).toBe(id); // same svg, not re-rendered
+});
