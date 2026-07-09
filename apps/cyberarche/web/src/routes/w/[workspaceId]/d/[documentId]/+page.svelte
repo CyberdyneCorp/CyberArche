@@ -28,7 +28,11 @@
 	let connectors = $state<ConnectorsVM | null>(null);
 
 	$effect(() => {
-		agent = createAgentPanel(documentId);
+		agent = createAgentPanel(documentId, {
+			// Insert applies to the live editor doc (CRDT peer): immediate and
+			// offline-safe, rather than a server round-trip the offline tab can't see.
+			insertLocal: (blocks) => editor?.insertBlocks(blocks as never)
+		});
 		const sharingVm = createSharing(workspaceId, documentId);
 		sharing = sharingVm;
 		sharingVm.load();

@@ -10,6 +10,8 @@ server tools and external connectors into the same registry.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -88,7 +90,10 @@ _SYSTEM_PROMPT = (
     "The open document and its block ids are given to you — never look it up "
     "by title. To change it, call insert_blocks / update_block / delete_block; "
     "these act on the open document only. When asked to produce content "
-    "without editing, return plain paragraphs separated by blank lines."
+    "without editing, return plain paragraphs separated by blank lines. The "
+    "editor renders your answer: write math as $inline$ or $$display$$, "
+    "diagrams as ```mermaid fenced blocks, and code as ```language fenced "
+    "blocks — do not use \\[ \\] or \\( \\) delimiters."
 )
 
 
@@ -159,7 +164,7 @@ class AgentUseCases:
             messages,
             session_connectors,
         )
-        return AgentAnswer(text=text, blocks=_paragraph_blocks(self._ids, text))
+        return AgentAnswer(text=text, blocks=_answer_blocks(self._ids, text))
 
     async def summarize(
         self,
@@ -595,9 +600,74 @@ def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | No
     return {ConnectorId(cid) for cid in session_connectors}
 
 
+_FENCE_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\n(.*?)```", re.DOTALL)
+_DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.DOTALL)
+
+
+def _answer_blocks(ids: IdPort, text: str) -> list[dict]:
+    """Parse an agent answer into typed, renderable blocks.
+
+    Fenced ```mermaid -> mermaid, ```lang -> code, display math ($$…$$ or
+    \\[…\\]) -> latex, and prose -> paragraphs. Inline \\(…\\) in prose is
+    normalized to $…$ so the editor's inline renderer typesets it. The editor
+    already renders latex/mermaid/code blocks; this is what lets an inserted
+    answer show as more than raw source.
+    """
+    blocks: list[dict] = []
+
+    def paragraphs(chunk: str) -> None:
+        for para in chunk.split("\n\n"):
+            body = _inline_math(para.strip())
+            if body:
+                blocks.append(
+                    {"id": ids.new_id(), "type": "paragraph", "data": {"text": body}}
+                )
+
+    def emit_display_math(segment: str) -> None:
+        last = 0
+        for m in _DISPLAY_MATH_RE.finditer(segment):
+            paragraphs(segment[last : m.start()])
+            source = (m.group(1) or m.group(2) or "").strip()
+            blocks.append(
+                {"id": ids.new_id(), "type": "latex", "data": {"source": source}}
+            )
+            last = m.end()
+        paragraphs(segment[last:])
+
+    # Split on fenced blocks first; the gaps between fences are prose+math.
+    cursor = 0
+    for fence in _FENCE_RE.finditer(text):
+        emit_display_math(text[cursor : fence.start()])
+        lang = (fence.group(1) or "").strip().lower()
+        source = fence.group(2).rstrip("\n")
+        if lang == "mermaid":
+            blocks.append(
+                {"id": ids.new_id(), "type": "mermaid", "data": {"source": source}}
+            )
+        else:
+            blocks.append(
+                {
+                    "id": ids.new_id(),
+                    "type": "code",
+                    "data": {"source": source, "language": lang or "text"},
+                }
+            )
+        cursor = fence.end()
+    emit_display_math(text[cursor:])
+
+    # Never return nothing: fall back to the raw text as one paragraph.
+    if not blocks and text.strip():
+        blocks.append(
+            {"id": ids.new_id(), "type": "paragraph", "data": {"text": text.strip()}}
+        )
+    return blocks
+
+
+def _inline_math(text: str) -> str:
+    r"""Normalize inline \(…\) to $…$ so the editor's inline renderer typesets it."""
+    return re.sub(r"\\\((.+?)\\\)", lambda m: f"${m.group(1).strip()}$", text)
+
+
+# Kept as a thin alias: some callers/tests refer to the old name.
 def _paragraph_blocks(ids: IdPort, text: str) -> list[dict]:
-    return [
-        {"id": ids.new_id(), "type": "paragraph", "data": {"text": chunk.strip()}}
-        for chunk in text.split("\n\n")
-        if chunk.strip()
-    ]
+    return _answer_blocks(ids, text)

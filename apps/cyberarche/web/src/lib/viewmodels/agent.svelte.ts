@@ -20,7 +20,14 @@ export interface AgentMessage {
 	inserted?: boolean;
 }
 
-export function createAgentPanel(documentId: string) {
+export interface AgentPanelOptions {
+	/** Apply blocks to the local editor document (a CRDT peer edit). When
+	 * provided, Insert uses this instead of the server round-trip, so blocks
+	 * appear immediately and sync — even offline. */
+	insertLocal?: (blocks: Record<string, unknown>[]) => void;
+}
+
+export function createAgentPanel(documentId: string, options: AgentPanelOptions = {}) {
 	let messages = $state<AgentMessage[]>([]);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -97,7 +104,12 @@ export function createAgentPanel(documentId: string) {
 		 * on the backend — collaborators see it appear immediately). */
 		async insert(message: AgentMessage) {
 			if (!message.blocks?.length) return;
-			await insertBlocks(documentId, message.blocks);
+			if (options.insertLocal) {
+				// Local CRDT peer edit: shows immediately and syncs, offline-safe.
+				options.insertLocal(message.blocks);
+			} else {
+				await insertBlocks(documentId, message.blocks);
+			}
 			messages = messages.map((m) => (m === message ? { ...m, inserted: true } : m));
 		},
 

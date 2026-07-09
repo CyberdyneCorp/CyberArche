@@ -225,4 +225,27 @@ describe('editor ViewModel', () => {
 		expect(vm.mergeWithPrevious(first)).toBeNull();
 		expect(vm.blocks).toHaveLength(1);
 	});
+
+	it('insertBlocks appends typed blocks to the local doc as one undo step', () => {
+		const vm = editor();
+		vm.insertAfter(null, 'paragraph'); // seed one block
+
+		vm.insertBlocks([
+			{ id: 'x1', type: 'paragraph', data: { text: 'answer' } },
+			{ id: 'x2', type: 'latex', data: { source: 'E=mc^2' } },
+			{ id: 'x3', type: 'mermaid', data: { source: 'graph TD; A-->B' } }
+		]);
+
+		expect(vm.blocks.map((b) => b.type)).toEqual([
+			'paragraph',
+			'paragraph',
+			'latex',
+			'mermaid'
+		]);
+		expect(vm.blocks[2].data.source).toBe('E=mc^2');
+
+		// One undo step removes all three inserted blocks.
+		vm.undo();
+		expect(vm.blocks).toHaveLength(1);
+	});
 });

@@ -220,3 +220,36 @@ test('a trashed document can be permanently deleted', async ({ page, request }) 
 	});
 	expect(restore.status()).toBe(404);
 });
+
+test('inserting an answer with math adds a rendered latex block locally', async ({
+	page,
+	request
+}) => {
+	// The backend parses answers into typed blocks; stub ask to return a latex
+	// block so this is deterministic. Insert applies to the local editor doc,
+	// so it must appear without relying on a server broadcast.
+	await page.route('**/agent/ask', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				answer: 'The identity is $$e^{i\\pi}+1=0$$.',
+				blocks: [
+					{ id: 'm1', type: 'paragraph', data: { text: 'The identity is' } },
+					{ id: 'm2', type: 'latex', data: { source: 'e^{i\\pi}+1=0' } }
+				]
+			})
+		})
+	);
+	await openDocument(page, request);
+
+	await page.getByTestId('agent-toggle').click();
+	await page.getByTestId('agent-prompt').fill('Euler?');
+	await page.getByTestId('agent-prompt').press('Enter');
+	await page.getByTestId('insert-as-block').click();
+
+	// A real latex block appears and KaTeX renders it — not raw source text.
+	const latex = page.getByTestId('block-editor').locator('[data-block-type="latex"]');
+	await expect(latex).toHaveCount(1);
+	await expect(latex.locator('.katex')).toBeVisible();
+});

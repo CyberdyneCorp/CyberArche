@@ -466,3 +466,60 @@ async def test_summarize_without_selection_covers_the_whole_document(use_cases, 
 
     prompt = llm.requests[0][-1].content
     assert "only these blocks" not in prompt.lower()
+
+
+# ---- answer -> typed blocks (agent-renderable-blocks) -----------------------
+
+from cyberarche.application.use_cases.agent import _answer_blocks  # noqa: E402
+
+
+class _Ids:
+    def __init__(self): self.n = 0
+    def new_id(self):
+        self.n += 1
+        return f"id{self.n}"
+
+
+def test_answer_blocks_detects_code_mermaid_latex_and_prose():
+    text = (
+        "Here is the idea.\n\n"
+        "```python\nprint('hi')\n```\n\n"
+        "A diagram:\n\n"
+        "```mermaid\ngraph TD; A-->B\n```\n\n"
+        "The law is $$E = mc^2$$ exactly."
+    )
+    blocks = _answer_blocks(_Ids(), text)
+    kinds = [(b["type"], b["data"]) for b in blocks]
+
+    assert ("paragraph", {"text": "Here is the idea."}) in kinds
+    code = next(b for b in blocks if b["type"] == "code")
+    assert code["data"] == {"source": "print('hi')", "language": "python"}
+    mermaid = next(b for b in blocks if b["type"] == "mermaid")
+    assert mermaid["data"]["source"] == "graph TD; A-->B"
+    latex = next(b for b in blocks if b["type"] == "latex")
+    assert latex["data"]["source"] == "E = mc^2"
+
+
+def test_answer_blocks_converts_bracket_display_math_to_latex():
+    text = "The equations:\n\n\\[ \\nabla \\cdot E = 0 \\]"
+    blocks = _answer_blocks(_Ids(), text)
+    latex = [b for b in blocks if b["type"] == "latex"]
+    assert len(latex) == 1
+    assert latex[0]["data"]["source"] == "\\nabla \\cdot E = 0"
+
+
+def test_answer_blocks_normalizes_inline_paren_math_to_dollar():
+    blocks = _answer_blocks(_Ids(), "The value \\(x^2\\) is positive.")
+    assert blocks[0]["type"] == "paragraph"
+    assert blocks[0]["data"]["text"] == "The value $x^2$ is positive."
+
+
+def test_answer_blocks_plain_prose_is_paragraphs():
+    blocks = _answer_blocks(_Ids(), "First para.\n\nSecond para.")
+    assert [b["type"] for b in blocks] == ["paragraph", "paragraph"]
+    assert [b["data"]["text"] for b in blocks] == ["First para.", "Second para."]
+
+
+def test_answer_blocks_never_empty_for_nonempty_text():
+    blocks = _answer_blocks(_Ids(), "just text")
+    assert blocks and blocks[0]["data"]["text"] == "just text"

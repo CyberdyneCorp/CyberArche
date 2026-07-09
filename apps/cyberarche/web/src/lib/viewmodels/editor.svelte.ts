@@ -121,6 +121,22 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			return block.id;
 		},
 
+		/** Append already-typed blocks (e.g. an agent answer) to the local
+		 * document as one undo step. Applying locally — not via the server —
+		 * means they appear immediately and sync through the normal update
+		 * flow, so an offline connection no longer hides an insert. */
+		insertBlocks(incoming: BlockData[]): void {
+			if (incoming.length === 0) return;
+			undoManager.stopCapturing();
+			transact(() => {
+				for (const block of incoming) {
+					yblocks.insert(yblocks.length, [toYMap(block)]);
+				}
+			});
+			undoManager.stopCapturing();
+			if (incoming.length > 0) focusedId = incoming[incoming.length - 1].id;
+		},
+
 		updateData(id: string, patch: Record<string, unknown>): void {
 			const index = indexOf(id);
 			if (index < 0) return;
