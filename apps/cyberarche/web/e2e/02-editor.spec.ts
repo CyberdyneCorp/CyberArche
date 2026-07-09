@@ -308,3 +308,33 @@ test('whiteboard: place an image and style a shape', async ({ page, request }) =
 		/fill:/
 	);
 });
+
+test('the block gutter stays reachable when the mouse sweeps toward it', async ({
+	page,
+	request
+}) => {
+	// Regression: the gutter (add/move/comment/delete) sat in a negative-margin
+	// strip with a dead gap between it and the text, so moving the mouse over to
+	// click a button lost :hover and the gutter vanished first.
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('a section');
+
+	const row = page.locator('[data-block-id]').last();
+	const body = row.locator('.body');
+	const del = row.getByTestId('block-delete');
+
+	await body.hover();
+	await expect(del).toBeVisible();
+
+	const btn = (await del.boundingBox())!;
+	const bodyBox = (await body.boundingBox())!;
+	const midY = btn.y + btn.height / 2;
+	// The dead zone between the button's right edge and the text's left edge.
+	const gapX = (btn.x + btn.width + bodyBox.x) / 2;
+
+	await page.mouse.move(gapX, midY);
+	await expect(del).toBeVisible(); // stays visible while crossing the gap
+	await del.click(); // and is actually clickable
+	await expect(page.locator('.editable', { hasText: 'a section' })).toHaveCount(0);
+});

@@ -113,15 +113,24 @@
 		display: flex;
 		gap: 4px;
 		border-radius: var(--r-control);
+		/* Extend the row's hover box left to house the gutter, with no dead gap
+		 * between the text and the buttons — otherwise the mouse loses :hover on
+		 * the way over and the gutter vanishes before it can be clicked. The
+		 * negative margin keeps the body visually in the same column. */
+		position: relative;
+		padding-left: 126px;
+		margin-left: -126px;
 	}
 	.gutter {
+		position: absolute;
+		left: 4px;
+		top: 0;
 		display: flex;
 		gap: 1px;
 		visibility: hidden;
 		align-items: flex-start;
 		padding-top: 5px;
 		/* Fits add / up / down / comments / delete without overflowing. */
-		margin-left: -122px;
 		width: 118px;
 		justify-content: flex-end;
 	}
