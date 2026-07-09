@@ -11,7 +11,14 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from cyberarche.domain.errors import ValidationFailed
-from cyberarche.domain.ids import DocumentId, TeamspaceId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    DocumentId,
+    FolderId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 
 MAX_TITLE_LENGTH = 500
 
@@ -33,6 +40,8 @@ class Document:
     trashed_from_parent_id: DocumentId | None = None
     # Optional teamspace of the same workspace (teamspaces spec).
     teamspace_id: TeamspaceId | None = None
+    # Optional folder grouping this document (add-folders-and-private).
+    folder_id: FolderId | None = None
 
     @staticmethod
     def create(

@@ -11,6 +11,7 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
     TeamspaceUseCases,
@@ -34,3 +35,4 @@ class UseCases:
     api_keys: ApiKeyUseCases
     teamspaces: TeamspaceUseCases
     favorites: FavoriteUseCases
+    folders: FolderUseCases

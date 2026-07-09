@@ -39,6 +39,7 @@ async def adapters(request):
             "favorites": fakes.InMemoryFavoriteRepository(),
             "memberships": fakes.InMemoryMembershipRepository(),
             "connectors": fakes.InMemoryConnectorRepository(),
+            "folders": fakes.InMemoryFolderRepository(),
         }
         return
     # postgres: real adapters over TEST_DATABASE_URL (integration runs)
@@ -53,6 +54,7 @@ async def adapters(request):
     from cyberarche.adapters.outbound.postgres.connectors import (
         PostgresConnectorRepository,
     )
+    from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
     from cyberarche.adapters.outbound.postgres.teamspaces import (
         PostgresFavoriteRepository,
         PostgresTeamspaceRepository,
@@ -67,7 +69,7 @@ async def adapters(request):
             "TRUNCATE workspaces, documents, snapshots, crdt_updates, "
             "workspace_memberships, document_grants, share_links, agent_runs, "
             "mcp_connectors, ingestion_tasks, comments, api_keys, "
-            "teamspaces, teamspace_memberships, favorites CASCADE"
+            "teamspaces, teamspace_memberships, favorites, folders CASCADE"
         )
         yield {
             "workspaces": PostgresWorkspaceRepository(pool),
@@ -80,6 +82,7 @@ async def adapters(request):
             "favorites": PostgresFavoriteRepository(pool),
             "memberships": PostgresMembershipRepository(pool),
             "connectors": PostgresConnectorRepository(pool),
+            "folders": PostgresFolderRepository(pool),
         }
     finally:
         await pool.close()
@@ -438,3 +441,60 @@ async def test_connector_repository_contract(adapters):
     both = await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1"))
     assert {c.id for c in both} == {"c-ws", "c-doc"}
     assert await repo.credentials(ConnectorId("c-doc")) == b"enc-doc"
+
+
+async def test_folder_repository_contract(adapters):
+    from cyberarche.domain.folders import Folder
+    from cyberarche.domain.ids import FolderId, TeamspaceId
+
+    ws_repo, doc_repo = adapters["workspaces"], adapters["documents"]
+    repo = adapters["folders"]
+    await ws_repo.add(workspace())
+
+    def folder(fid, name, teamspace_id=None, parent=None):
+        return Folder(
+            id=FolderId(fid), workspace_id=WorkspaceId("ws-1"), tenant_id=TenantId("acme"),
+            name=name, created_by=UserId("alice"), created_at=NOW,
+            teamspace_id=TeamspaceId(teamspace_id) if teamspace_id else None,
+            parent_folder_id=FolderId(parent) if parent else None,
+        )
+
+    await repo.add(folder("f-root", "Root"))
+    await repo.add(folder("f-child", "Child", parent="f-root"))
+
+    got = await repo.get(TenantId("acme"), FolderId("f-root"))
+    assert got.name == "Root" and got.teamspace_id is None
+    assert await repo.get(TenantId("globex"), FolderId("f-root")) is None
+    ids = {f.id for f in await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1"))}
+    assert ids == {"f-root", "f-child"}
+
+    await repo.update(folder("f-root", "Renamed"))
+    assert (await repo.get(TenantId("acme"), FolderId("f-root"))).name == "Renamed"
+
+
+async def test_document_folder_id_roundtrips_and_cascades(adapters, request):
+    """documents.folder_id round-trips; ON DELETE SET NULL detaches on folder
+    delete. The cascade half is Postgres-only (real FK)."""
+    from cyberarche.domain.folders import Folder
+    from cyberarche.domain.ids import FolderId
+
+    ws_repo, doc_repo, folders = (
+        adapters["workspaces"], adapters["documents"], adapters["folders"],
+    )
+    await ws_repo.add(workspace())
+    await folders.add(
+        Folder(id=FolderId("f1"), workspace_id=WorkspaceId("ws-1"), tenant_id=TenantId("acme"),
+               name="Box", created_by=UserId("alice"), created_at=NOW)
+    )
+    from dataclasses import replace
+    await doc_repo.add(replace(document("d1"), folder_id=FolderId("f1")))
+
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d1"))).folder_id == "f1"
+    assert [d.id for d in await doc_repo.list_for_folder(TenantId("acme"), FolderId("f1"))] == ["d1"]
+
+    if request.node.callspec.params["adapters"] != "postgres":
+        import pytest
+
+        pytest.skip("postgres-only: FK ON DELETE SET NULL")
+    await folders.delete(TenantId("acme"), FolderId("f1"))
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d1"))).folder_id is None

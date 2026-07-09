@@ -22,6 +22,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
     InMemoryFavoriteRepository,
+    InMemoryFolderRepository,
     InMemoryIngestionRepository,
     InMemoryMembershipRepository,
     InMemoryRag,
@@ -41,6 +42,7 @@ from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -146,6 +148,7 @@ def use_cases(
     ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
     access = AccessControl(memberships, teamspace_repo)
+    folder_repo = InMemoryFolderRepository()
     engine = PycrdtEngine()
     realtime = RealtimeUseCases(
         documents, update_log, engine, access, snapshots, clock, ids
@@ -173,7 +176,7 @@ def use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids, teamspace_repo),
+        documents=DocumentUseCases(documents, access, clock, ids, teamspace_repo, folder_repo),
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, engine, realtime
         ),
@@ -198,6 +201,7 @@ def use_cases(
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
         teamspaces=TeamspaceUseCases(teamspace_repo, documents, access, clock, ids),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
+        folders=FolderUseCases(folder_repo, documents, access, clock, ids),
     )
 
 

@@ -18,9 +18,12 @@ OUTSIDER = caller("dave", "globex")
 
 
 async def setup(use_cases: UseCases, alice):
+    # A shared (teamspace) document, so workspace-role inheritance applies —
+    # teamspace-less documents are now private to their creator.
     workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
     document = await use_cases.documents.create(
-        alice, workspace_id=workspace.id, title="Shared Doc"
+        alice, workspace_id=workspace.id, title="Shared Doc", teamspace_id=teamspace.id
     )
     return workspace, document
 
@@ -48,9 +51,9 @@ async def test_document_grant_overrides_inherited_workspace_role(use_cases, alic
     await use_cases.sharing.invite_to_workspace(
         alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
     )
-    # Editor everywhere in the workspace...
+    # Editor everywhere in the teamspace...
     other = await use_cases.documents.create(
-        alice, workspace_id=workspace.id, title="Other"
+        alice, workspace_id=workspace.id, title="Other", teamspace_id=document.teamspace_id
     )
     await use_cases.agent.apply_blocks(BOB, other.id, [BLOCK])
 
@@ -244,3 +247,39 @@ async def test_shared_with_me_is_scoped_to_the_calling_user(use_cases, alice):
 
     # Carol was granted nothing; Dave's grant must not leak to her.
     assert await use_cases.sharing.list_shared_with_me(CAROL) == []
+
+
+# ---- private documents (add-folders-and-private) ----------------------------
+
+
+async def test_teamspaceless_document_is_private_to_its_creator(use_cases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    private = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="My private notes"
+    )
+    # Bob is an editor of the whole workspace...
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+
+    # ...but a workspace role does not reach a private (teamspace-less) doc.
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.apply_blocks(BOB, private.id, [BLOCK])
+    # The creator has full access.
+    await use_cases.agent.apply_blocks(alice, private.id, [BLOCK])
+
+
+async def test_grant_reaches_a_private_document(use_cases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    private = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Private"
+    )
+    await use_cases.sharing.grant_on_document(
+        alice, private.id, user_id=BOB.user_id, role=Role.VIEWER
+    )
+
+    # The grant reaches the private doc: Bob can read it...
+    assert await use_cases.sharing.list_comments(BOB, private.id) == []
+    # ...but a viewer grant is read-only.
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.apply_blocks(BOB, private.id, [BLOCK])

@@ -167,8 +167,9 @@ async def test_parity_all_surfaces_deny_the_same_edit(mcp_setup):
     )
     CALLERS["carol-token"] = viewer
     workspace = await container.use_cases.workspaces.create(alice, name="WS")
+    teamspace = await container.use_cases.teamspaces.create(alice, workspace.id, name="Team")
     document = await container.use_cases.documents.create(
-        alice, workspace_id=workspace.id, title="Locked"
+        alice, workspace_id=workspace.id, title="Locked", teamspace_id=teamspace.id
     )
     await container.memberships.add_workspace_member(
         WorkspaceMembership(

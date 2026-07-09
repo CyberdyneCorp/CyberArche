@@ -31,9 +31,13 @@ def make_document(api) -> tuple[str, str]:
     workspace = api.post(
         "/api/v1/workspaces", json={"name": "RT"}, headers=auth()
     ).json()
+    teamspace = api.post(
+        f"/api/v1/workspaces/{workspace['id']}/teamspaces",
+        json={"name": "Team"}, headers=auth(),
+    ).json()
     document = api.post(
         "/api/v1/documents",
-        json={"workspace_id": workspace["id"], "title": "Live"},
+        json={"workspace_id": workspace["id"], "title": "Live", "teamspace_id": teamspace["id"]},
         headers=auth(),
     ).json()
     return workspace["id"], document["id"]

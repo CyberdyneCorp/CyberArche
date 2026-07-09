@@ -32,6 +32,7 @@ from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthenticated, NotFound
 from cyberarche.domain.ids import (
     DocumentId,
+    FolderId,
     SnapshotId,
     TeamspaceId,
     TenantId,
@@ -39,6 +40,7 @@ from cyberarche.domain.ids import (
     WorkspaceId,
 )
 from cyberarche.domain.memberships import DocumentGrant, WorkspaceMembership
+from cyberarche.domain.folders import Folder
 from cyberarche.domain.snapshots import Snapshot
 from cyberarche.domain.teamspaces import Teamspace, TeamspaceMembership
 from cyberarche.domain.workspaces import Workspace
@@ -156,6 +158,15 @@ class InMemoryDocumentRepository:
                 d.id for d in self._items.values() if d.parent_id == current
             )
         return removed
+
+    async def list_for_folder(
+        self, tenant_id: TenantId, folder_id: FolderId
+    ) -> list[Document]:
+        return [
+            d
+            for d in self._items.values()
+            if d.tenant_id == tenant_id and d.folder_id == folder_id and not d.trashed
+        ]
 
     async def list_for_teamspace(
         self, tenant_id: TenantId, teamspace_id: TeamspaceId
@@ -699,3 +710,53 @@ class StaticTokenPort:
 class AllowAllAuthorization:
     async def evaluate(self, *, user_id: str, action: str, resource: str) -> bool:
         return True
+
+
+class InMemoryFolderRepository:
+    def __init__(self) -> None:
+        self._items: dict[FolderId, Folder] = {}
+
+    async def add(self, folder: Folder) -> None:
+        self._items[folder.id] = folder
+
+    async def get(self, tenant_id: TenantId, folder_id: FolderId) -> Folder | None:
+        folder = self._items.get(folder_id)
+        if folder is None or folder.tenant_id != tenant_id:
+            return None
+        return folder
+
+    async def list_for_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Folder]:
+        return [
+            f
+            for f in self._items.values()
+            if f.tenant_id == tenant_id and f.workspace_id == workspace_id
+        ]
+
+    async def list_for_teamspace(
+        self, tenant_id: TenantId, teamspace_id: TeamspaceId
+    ) -> list[Folder]:
+        return [
+            f
+            for f in self._items.values()
+            if f.tenant_id == tenant_id and f.teamspace_id == teamspace_id
+        ]
+
+    async def update(self, folder: Folder) -> None:
+        self._items[folder.id] = folder
+
+    async def delete(self, tenant_id: TenantId, folder_id: FolderId) -> None:
+        root = self._items.get(folder_id)
+        if root is None or root.tenant_id != tenant_id:
+            return
+        # Cascade sub-folders (mirrors the FK ON DELETE CASCADE).
+        frontier = [folder_id]
+        while frontier:
+            current = frontier.pop()
+            if current not in self._items:
+                continue
+            del self._items[current]
+            frontier.extend(
+                f.id for f in self._items.values() if f.parent_folder_id == current
+            )

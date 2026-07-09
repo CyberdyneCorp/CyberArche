@@ -62,15 +62,22 @@ class AccessControl:
     async def document_role(
         self, caller: CallerContext, document: Document
     ) -> Role | None:
-        """Strongest of workspace and teamspace roles; a document-level grant
-        overrides both (it may deliberately demote) — see design D-1."""
-        workspace_role = await self.workspace_role(caller, document.workspace_id)
-        teamspace_role = (
-            await self.teamspace_role(caller, document.teamspace_id)
-            if document.teamspace_id
-            else None
-        )
+        """Effective role on a document.
+
+        A teamspace-less document is PRIVATE (add-folders-and-private D-1): a
+        document grant wins, otherwise the creator is owner, otherwise no access
+        — the workspace role does not reach a private document. A document in a
+        teamspace inherits as before: strongest of workspace and teamspace roles,
+        with a document grant overriding.
+        """
         grant = await self._memberships.document_grant(document.id, caller.user_id)
+        if document.teamspace_id is None:
+            if grant is not None:
+                return grant.role
+            return Role.OWNER if caller.user_id == document.created_by else None
+
+        workspace_role = await self.workspace_role(caller, document.workspace_id)
+        teamspace_role = await self.teamspace_role(caller, document.teamspace_id)
         return effective_role(
             workspace_role, grant.role if grant else None, teamspace_role
         )

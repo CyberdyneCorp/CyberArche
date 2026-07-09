@@ -15,8 +15,9 @@ from cyberarche.domain.memberships import Role, WorkspaceMembership
 
 async def make_document(use_cases: UseCases, alice, *, title="Doc"):
     workspace = await use_cases.workspaces.create(alice, name="Docs")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
     document = await use_cases.documents.create(
-        alice, workspace_id=workspace.id, title=title
+        alice, workspace_id=workspace.id, title=title, teamspace_id=teamspace.id
     )
     return workspace, document
 

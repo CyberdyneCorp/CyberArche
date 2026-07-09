@@ -33,8 +33,9 @@ def edit(state: bytes, insert: str, index: int = 0) -> bytes:
 
 async def setup_document(use_cases: UseCases, alice):
     workspace = await use_cases.workspaces.create(alice, name="Docs")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
     document = await use_cases.documents.create(
-        alice, workspace_id=workspace.id, title="Doc"
+        alice, workspace_id=workspace.id, title="Doc", teamspace_id=teamspace.id
     )
     return workspace, document
 

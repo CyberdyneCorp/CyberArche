@@ -14,6 +14,7 @@ import asyncpg
 from cyberarche.domain.documents import Document
 from cyberarche.domain.ids import (
     DocumentId,
+    FolderId,
     SnapshotId,
     TeamspaceId,
     TenantId,
@@ -56,6 +57,7 @@ def _document_from_row(row: asyncpg.Record) -> Document:
         teamspace_id=(
             TeamspaceId(row["teamspace_id"]) if row["teamspace_id"] else None
         ),
+        folder_id=FolderId(row["folder_id"]) if row["folder_id"] else None,
     )
 
 
@@ -124,8 +126,8 @@ class PostgresDocumentRepository:
             INSERT INTO documents
                 (id, workspace_id, tenant_id, title, parent_id, position,
                  created_by, created_at, updated_at, trashed,
-                 trashed_from_parent_id, teamspace_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 trashed_from_parent_id, teamspace_id, folder_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             """,
             *_document_params(document),
         )
@@ -195,6 +197,20 @@ class PostgresDocumentRepository:
         )
         return [_document_from_row(r) for r in rows]
 
+    async def list_for_folder(
+        self, tenant_id: TenantId, folder_id: FolderId
+    ) -> list[Document]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM documents
+            WHERE tenant_id = $1 AND folder_id = $2 AND trashed = FALSE
+            ORDER BY position
+            """,
+            tenant_id,
+            folder_id,
+        )
+        return [_document_from_row(r) for r in rows]
+
     async def update(self, document: Document) -> None:
         await self._pool.execute(_UPDATE_SQL, *_document_update_params(document))
 
@@ -261,7 +277,8 @@ class PostgresDocumentRepository:
 _UPDATE_SQL = """
     UPDATE documents SET
         title = $2, parent_id = $3, position = $4, updated_at = $5,
-        trashed = $6, trashed_from_parent_id = $7, teamspace_id = $8
+        trashed = $6, trashed_from_parent_id = $7, teamspace_id = $8,
+        folder_id = $9
     WHERE id = $1
 """
 
@@ -276,6 +293,7 @@ def _document_update_params(document: Document) -> tuple[Any, ...]:
         document.trashed,
         document.trashed_from_parent_id,
         document.teamspace_id,
+        document.folder_id,
     )
 
 
@@ -302,6 +320,7 @@ def _document_params(document: Document) -> tuple[Any, ...]:
         document.trashed,
         document.trashed_from_parent_id,
         document.teamspace_id,
+        document.folder_id,
     )
 
 

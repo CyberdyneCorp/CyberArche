@@ -41,6 +41,7 @@ from cyberarche.application.ports.queue import TaskQueuePort
 from cyberarche.application.ports.rag import IngestionRepository, RagPort
 from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRepository
 from cyberarche.application.ports.storage import BlobStoragePort
+from cyberarche.application.ports.folders import FolderRepository
 from cyberarche.application.ports.teamspaces import (
     FavoriteRepository,
     TeamspaceRepository,
@@ -53,6 +54,7 @@ from cyberarche.application.use_cases.api_keys import (
 )
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -131,6 +133,7 @@ class Container:
     comments: CommentRepository
     teamspaces: TeamspaceRepository
     favorites: FavoriteRepository
+    folders: FolderRepository
     blobs: BlobStoragePort
     queue: TaskQueuePort
     peer_bus: PeerBusPort
@@ -160,6 +163,7 @@ def _build_use_cases(
     comments: CommentRepository,
     teamspaces: TeamspaceRepository,
     favorites: FavoriteRepository,
+    folders: FolderRepository,
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
     peer_bus: PeerBusPort,
@@ -180,7 +184,7 @@ def _build_use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids, teamspaces),
+        documents=DocumentUseCases(documents, access, clock, ids, teamspaces, folders),
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, crdt_engine, realtime
         ),
@@ -207,6 +211,7 @@ def _build_use_cases(
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
         teamspaces=TeamspaceUseCases(teamspaces, documents, access, clock, ids),
         favorites=FavoriteUseCases(favorites, documents, access),
+        folders=FolderUseCases(folders, documents, access, clock, ids),
     )
 
 
@@ -242,6 +247,7 @@ class _Repositories:
     api_keys: ApiKeyRepository
     teamspaces: TeamspaceRepository
     favorites: FavoriteRepository
+    folders: FolderRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -269,6 +275,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         PostgresCommentRepository,
         PostgresShareLinkRepository,
     )
+    from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
     from cyberarche.adapters.outbound.postgres.teamspaces import (
         PostgresFavoriteRepository,
         PostgresTeamspaceRepository,
@@ -291,6 +298,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         api_keys=PostgresApiKeyRepository(pool),
         teamspaces=PostgresTeamspaceRepository(pool),
         favorites=PostgresFavoriteRepository(pool),
+        folders=PostgresFolderRepository(pool),
     )
 
 
@@ -311,6 +319,7 @@ def _memory_repositories() -> _Repositories:
         api_keys=fakes.InMemoryApiKeyRepository(),
         teamspaces=fakes.InMemoryTeamspaceRepository(),
         favorites=fakes.InMemoryFavoriteRepository(),
+        folders=fakes.InMemoryFolderRepository(),
     )
 
 
@@ -512,6 +521,7 @@ async def build_container(
         comments=comments,
         teamspaces=repos.teamspaces,
         favorites=repos.favorites,
+        folders=repos.folders,
         blobs=blobs,
         queue=queue,
         peer_bus=peer_bus,
@@ -533,6 +543,7 @@ async def build_container(
             comments,
             repos.teamspaces,
             repos.favorites,
+            repos.folders,
             blobs,
             queue,
             peer_bus,

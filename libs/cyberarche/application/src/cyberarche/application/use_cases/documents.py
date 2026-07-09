@@ -6,14 +6,17 @@ Tenant scope always comes from the caller, never from request input.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
+from cyberarche.application.ports.folders import FolderRepository
 from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.teamspaces import TeamspaceRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound, ValidationFailed
-from cyberarche.domain.ids import DocumentId, TeamspaceId, WorkspaceId
+from cyberarche.domain.ids import DocumentId, FolderId, TeamspaceId, WorkspaceId
 from cyberarche.domain.memberships import Role
 
 
@@ -25,12 +28,14 @@ class DocumentUseCases:
         clock: ClockPort,
         ids: IdPort,
         teamspaces: TeamspaceRepository | None = None,
+        folders: "FolderRepository | None" = None,
     ) -> None:
         self._documents = documents
         self._access = access
         self._clock = clock
         self._ids = ids
         self._teamspaces = teamspaces
+        self._folders = folders
 
     async def create(
         self,
@@ -164,6 +169,57 @@ class DocumentUseCases:
             raise ValidationFailed("only a trashed document can be purged")
         await self._access.require_document(caller, document, Role.EDITOR)
         return await self._documents.purge(caller.tenant_id, document_id)
+
+    async def place_in_folder(
+        self, caller: CallerContext, document_id: DocumentId, folder_id: FolderId
+    ) -> Document:
+        """Put a document in a folder; it adopts the folder's teamspace scope so
+        access follows the container (add-folders-and-private D-2)."""
+        document = await self._get_or_raise(caller, document_id)
+        await self._access.require_document(caller, document, Role.EDITOR)
+        if self._folders is None:
+            raise ValidationFailed("folders are not configured")
+        folder = await self._folders.get(caller.tenant_id, folder_id)
+        if folder is None:
+            raise NotFound("folder not found")
+        moved = replace(
+            document,
+            folder_id=folder_id,
+            teamspace_id=folder.teamspace_id,
+            updated_at=self._clock.now(),
+        )
+        await self._documents.update(moved)
+        return moved
+
+    async def move_to_private(
+        self, caller: CallerContext, document_id: DocumentId
+    ) -> Document:
+        """Remove a document from any folder/teamspace: it becomes private to
+        the caller (who must be able to edit it)."""
+        document = await self._get_or_raise(caller, document_id)
+        await self._access.require_document(caller, document, Role.EDITOR)
+        moved = replace(
+            document,
+            folder_id=None,
+            teamspace_id=None,
+            updated_at=self._clock.now(),
+        )
+        await self._documents.update(moved)
+        return moved
+
+    async def list_private(
+        self, caller: CallerContext, *, workspace_id: WorkspaceId
+    ) -> list[Document]:
+        """The caller's own private root documents: no teamspace, no folder."""
+        await self._access.require_workspace(caller, workspace_id, Role.VIEWER)
+        roots = await self._documents.children(caller.tenant_id, workspace_id, None)
+        return [
+            d
+            for d in roots
+            if d.teamspace_id is None
+            and d.folder_id is None
+            and d.created_by == caller.user_id
+        ]
 
     async def list_trashed(
         self, caller: CallerContext, *, workspace_id: WorkspaceId
