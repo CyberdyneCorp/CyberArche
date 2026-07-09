@@ -53,4 +53,20 @@ describe('renderInline', () => {
 	it('is empty for empty input', () => {
 		expect(renderInline('')).toBe('');
 	});
+
+	it('renders TeX \\(…\\) inline delimiters as math', () => {
+		const html = renderInline('fields \\(\\mathbf{E}\\) and \\(\\mathbf{B}\\)');
+		expect(html).toContain('katex');
+		expect(html).not.toContain('\\('); // delimiters consumed
+	});
+
+	it('renders TeX \\[…\\] inline delimiters as math', () => {
+		const html = renderInline('law: \\[ E = mc^2 \\]');
+		expect(html).toContain('katex');
+		expect(html).not.toContain('\\[');
+	});
+
+	it('renders \\mathbf via KaTeX', () => {
+		expect(renderInline('$\\mathbf{E}$')).toContain('katex');
+	});
 });

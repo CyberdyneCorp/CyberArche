@@ -523,3 +523,86 @@ def test_answer_blocks_plain_prose_is_paragraphs():
 def test_answer_blocks_never_empty_for_nonempty_text():
     blocks = _answer_blocks(_Ids(), "just text")
     assert blocks and blocks[0]["data"]["text"] == "just text"
+
+
+# ---- block normalization: no empty source blocks (agent-renderable-blocks) --
+
+from cyberarche.application.use_cases.agent import _normalize_block  # noqa: E402
+
+
+def test_normalize_maps_misplaced_content_to_source():
+    # The model put the mermaid source under data.text (it only knew text blocks).
+    b = _normalize_block({"type": "mermaid", "data": {"text": "graph TD; A-->B"}})
+    assert b["data"]["source"] == "graph TD; A-->B"
+
+    b = _normalize_block({"type": "latex", "data": {"code": "E=mc^2"}})
+    assert b["data"]["source"] == "E=mc^2"
+
+
+def test_normalize_defaults_code_language_and_source():
+    b = _normalize_block({"type": "code", "data": {"text": "print(1)"}})
+    assert b["data"]["source"] == "print(1)"
+    assert b["data"]["language"] == "text"
+
+
+def test_normalize_keeps_correct_source_and_leaves_text_blocks():
+    b = _normalize_block({"type": "mermaid", "data": {"source": "graph LR; X-->Y"}})
+    assert b["data"]["source"] == "graph LR; X-->Y"
+    p = _normalize_block({"type": "paragraph", "data": {"text": "hello"}})
+    assert p["data"] == {"text": "hello"}
+
+
+async def test_agent_insert_of_a_sourceless_mermaid_is_not_empty(use_cases, alice):
+    # Regression: an agent-inserted mermaid with content in the wrong key used to
+    # land as an empty (placeholder-only) block.
+    _, document = await make_document(use_cases, alice)
+    await use_cases.agent.apply_blocks(
+        alice, document.id, [{"type": "mermaid", "data": {"text": "graph TD; A-->B"}}]
+    )
+    state = await use_cases.realtime.current_state(alice, document.id)
+    block = use_cases.agent._engine.read_blocks(state)[0]
+    assert block["type"] == "mermaid"
+    assert block["data"]["source"] == "graph TD; A-->B"  # not empty
+
+
+# ---- no duplicate insert: agent that edits live offers no manual Insert ------
+
+
+async def test_answer_has_no_insert_blocks_when_agent_edited_live(use_cases, llm, alice):
+    """Regression: the agent inserted a diagram via its tool AND the answer
+    offered Insert, so clicking it added a second (and the live one was empty).
+    When the agent edits during the run, the answer carries no insertable blocks.
+    """
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="insert_blocks",
+                    arguments={"blocks": [{"type": "mermaid", "data": {"source": "graph TD; A-->B"}}]},
+                ),
+            ),
+        ),
+        LLMResponse(text="I added the diagram.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="draw it")
+
+    assert answer.text == "I added the diagram."
+    assert answer.blocks == []  # already in the doc; nothing to insert again
+    # And the live insert is a real (non-empty) mermaid block.
+    state = await use_cases.realtime.current_state(alice, document.id)
+    blocks = use_cases.agent._engine.read_blocks(state)
+    assert [b["type"] for b in blocks] == ["mermaid"]
+    assert blocks[0]["data"]["source"] == "graph TD; A-->B"
+
+
+async def test_answer_carries_blocks_when_agent_did_not_edit(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="Here is a summary paragraph.", model="m")]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="explain")
+
+    assert answer.blocks and answer.blocks[0]["type"] == "paragraph"

@@ -34,9 +34,12 @@ function renderEmphasis(escaped: string): string {
 		.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
 }
 
-/** Render `text` to display HTML. `$` is the math delimiter; `\$` is a literal. */
+/** Render `text` to display HTML. `$` is the math delimiter; `\$` is a literal.
+ * TeX `\(…\)` and `\[…\]` delimiters are accepted too, so content the agent (or
+ * a paste) wrote in that form still typesets. */
 export function renderInline(text: string): string {
 	if (!text) return '';
+	text = normalizeTexDelimiters(text);
 	// Split on unescaped `$…$` pairs. Even indices are plain text, odd are math.
 	const parts = splitMath(text);
 	return parts
@@ -45,6 +48,13 @@ export function renderInline(text: string): string {
 		)
 		.join('')
 		.replace(/\\\$/g, '$'); // unescape literal dollars in the plain segments
+}
+
+/** Rewrite TeX `\(…\)` and `\[…\]` to `$…$` so one splitter handles all forms. */
+function normalizeTexDelimiters(text: string): string {
+	return text
+		.replace(/\\\((.+?)\\\)/gs, (_, body) => `$${body.trim()}$`)
+		.replace(/\\\[(.+?)\\\]/gs, (_, body) => `$${body.trim()}$`);
 }
 
 /** ['before', 'math', 'between', 'math', 'after'] — odd slots are math bodies.

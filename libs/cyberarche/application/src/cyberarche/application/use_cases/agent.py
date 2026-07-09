@@ -156,7 +156,7 @@ class AgentUseCases:
                 ),
             ),
         ]
-        text = await self._run_loop(
+        text, edited = await self._run_loop(
             caller,
             document_id,
             document.workspace_id,
@@ -164,7 +164,10 @@ class AgentUseCases:
             messages,
             session_connectors,
         )
-        return AgentAnswer(text=text, blocks=_answer_blocks(self._ids, text))
+        # If the agent already applied its edit live, don't offer to insert it
+        # again (that produced a duplicate block); otherwise carry insertables.
+        blocks = [] if edited else _answer_blocks(self._ids, text)
+        return AgentAnswer(text=text, blocks=blocks)
 
     async def summarize(
         self,
@@ -227,6 +230,7 @@ class AgentUseCases:
         self, caller: CallerContext, document_id: DocumentId, blocks: list[dict]
     ) -> bytes:
         """Insert blocks as a CRDT peer: live, attributed, conflict-free."""
+        blocks = [_normalize_block(block) for block in blocks]
         for block in blocks:
             validate_block_type(block.get("type", ""))
         state = await self._realtime.current_state(caller, document_id)
@@ -244,6 +248,7 @@ class AgentUseCases:
         after_id: str | None = None,
     ) -> bytes:
         """Insert blocks after `after_id` (append when None), as a CRDT peer."""
+        blocks = [_normalize_block(block) for block in blocks]
         for block in blocks:
             validate_block_type(block.get("type", ""))
         state = await self._realtime.current_state(caller, document_id)
@@ -315,7 +320,7 @@ class AgentUseCases:
         prompt: str,
         messages: list[LLMMessage],
         session_connectors: set[str] | None = None,
-    ) -> str:
+    ) -> tuple[str, bool]:
         tools_used: list[str] = []
         tools = await self._available_tools(
             caller, workspace_id, document_id, session_connectors
@@ -351,7 +356,11 @@ class AgentUseCases:
             outcome=response.text[:500],
             model=response.model,
         )
-        return response.text
+        # Whether the agent already wrote to the document during this run — if so
+        # the answer's content is in the doc, and offering a manual Insert would
+        # duplicate it.
+        edited = any(name in _EDITING_TOOL_NAMES for name in tools_used)
+        return response.text, edited
 
     async def _available_tools(
         self,
@@ -527,6 +536,9 @@ class AgentUseCases:
         return f"# {document.title}\n{rendered}"
 
 
+_EDITING_TOOL_NAMES = {"insert_blocks", "update_block", "delete_block"}
+
+
 def _editing_tools() -> list[tuple[ToolSpec, str]]:
     """(spec, operation) pairs. These act on the agent's OPEN document — the
     model never supplies a document id, so it cannot address another one."""
@@ -534,8 +546,14 @@ def _editing_tools() -> list[tuple[ToolSpec, str]]:
         (
             ToolSpec(
                 name="insert_blocks",
-                description="Append blocks to the open document. Each block is "
-                "{type, data}; text blocks use data.text.",
+                description=(
+                    "Append blocks to the open document. Each block is "
+                    "{type, data}. Data by type: paragraph/heading/quote/callout/"
+                    "bulleted_list/numbered_list/todo -> {text}; code -> "
+                    "{source, language}; latex -> {source}; mermaid -> {source}; "
+                    "table -> {header: [..], rows: [[..]]}. Put math in $…$/$$…$$, "
+                    "diagrams in a mermaid block, code in a code block."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -602,6 +620,28 @@ def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | No
 
 _FENCE_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\n(.*?)```", re.DOTALL)
 _DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.DOTALL)
+
+
+_SOURCE_BLOCKS = {"code", "latex", "mermaid"}
+
+
+def _normalize_block(block: dict) -> dict:
+    """Repair blocks whose content the model put under the wrong key.
+
+    Source-based blocks (code/latex/mermaid) render from data.source; a model
+    that only saw "text blocks use data.text" often fills data.text/code/content
+    instead, yielding an empty (placeholder-only) block. Map those to source,
+    and default a code block's language.
+    """
+    block_type = block.get("type", "paragraph")
+    data = dict(block.get("data") or {})
+    if block_type in _SOURCE_BLOCKS and not (data.get("source") or "").strip():
+        data["source"] = (
+            data.get("text") or data.get("code") or data.get("content") or ""
+        )
+    if block_type == "code" and not data.get("language"):
+        data["language"] = data.get("lang") or "text"
+    return {**block, "data": data}
 
 
 def _answer_blocks(ids: IdPort, text: str) -> list[dict]:

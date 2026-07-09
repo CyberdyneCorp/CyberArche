@@ -20,6 +20,13 @@
 
 	let copied = $state<number | null>(null);
 
+	// Auto-scroll the thread to the newest message after each answer.
+	let thread = $state<HTMLElement | null>(null);
+	$effect(() => {
+		agent.messages.length; // track new messages
+		if (thread) thread.scrollTop = thread.scrollHeight;
+	});
+
 	let toolsOpen = $state(false);
 	const enabledConnectors = $derived(
 		(connectors?.items ?? []).filter((c) => c.enabled).length
@@ -118,7 +125,7 @@
 		</section>
 	{/if}
 
-	<div class="thread" data-testid="agent-thread">
+	<div class="thread" data-testid="agent-thread" bind:this={thread}>
 		{#each agent.messages as message, index (index)}
 			{#if message.role === 'user'}
 				<div class="bubble user">{message.text}</div>
