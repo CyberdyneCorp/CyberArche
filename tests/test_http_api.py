@@ -153,3 +153,43 @@ def test_a_live_document_cannot_be_purged_over_http(api):
     response = api.delete(f"/api/v1/documents/{document['id']}/trash", headers=headers)
     assert response.status_code == 422
     assert api.get(f"/api/v1/documents/{document['id']}", headers=headers).status_code == 200
+
+
+def test_folders_and_private_over_http(api):
+    headers = auth("alice-token")
+    ws = api.post("/api/v1/workspaces", json={"name": "WS"}, headers=headers).json()
+    ts = api.post(
+        f"/api/v1/workspaces/{ws['id']}/teamspaces", json={"name": "Team"}, headers=headers
+    ).json()
+
+    # Create a folder in the teamspace.
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Research", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    assert folder["teamspace_id"] == ts["id"]
+    listed = api.get(f"/api/v1/workspaces/{ws['id']}/folders", headers=headers).json()
+    assert [f["id"] for f in listed] == [folder["id"]]
+
+    # A private doc shows up under /private, a teamspace doc does not.
+    private_doc = api.post(
+        "/api/v1/documents", json={"workspace_id": ws["id"], "title": "Mine"}, headers=headers
+    ).json()
+    api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Shared", "teamspace_id": ts["id"]},
+        headers=headers,
+    )
+    private = api.get(f"/api/v1/workspaces/{ws['id']}/private", headers=headers).json()
+    assert [d["id"] for d in private] == [private_doc["id"]]
+
+    # Place the private doc into the teamspace folder -> it adopts the teamspace.
+    placed = api.post(
+        f"/api/v1/documents/{private_doc['id']}/folder",
+        json={"folder_id": folder["id"]},
+        headers=headers,
+    ).json()
+    assert placed["teamspace_id"] == ts["id"]
+    in_folder = api.get(f"/api/v1/folders/{folder['id']}/documents", headers=headers).json()
+    assert [d["id"] for d in in_folder] == [private_doc["id"]]

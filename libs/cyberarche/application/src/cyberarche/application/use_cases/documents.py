@@ -221,6 +221,17 @@ class DocumentUseCases:
             and d.created_by == caller.user_id
         ]
 
+    async def list_for_folder(
+        self, caller: CallerContext, folder_id: FolderId
+    ) -> list[Document]:
+        """Documents in a folder that the caller may view."""
+        docs = await self._documents.list_for_folder(caller.tenant_id, folder_id)
+        visible: list[Document] = []
+        for document in docs:
+            if await self._access.document_role(caller, document) is not None:
+                visible.append(document)
+        return visible
+
     async def list_trashed(
         self, caller: CallerContext, *, workspace_id: WorkspaceId
     ) -> list[Document]:

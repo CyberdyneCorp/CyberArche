@@ -13,7 +13,7 @@
 - [x] 2.5 Tests: private access rule, folder create/list/nest/delete-detaches, place-in-folder scope, list_private scoping
 
 ## 3. HTTP + contract
-- [ ] 3.1 Routes: folders CRUD; place document in folder / teamspace / private; list private; list folder contents
+- [x] 3.1 Routes: folders CRUD; place document in folder / teamspace / private; list private; list folder contents
 - [x] 3.2 Port-contract test for FolderRepository (memory + postgres), incl. folder_id cascade on doc
 
 ## 4. Sidebar
