@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, UploadFile
 from pydantic import BaseModel
 
-from cyberarche.adapters.inbound.http.dependencies import AccessToken, Caller, Cases
+from cyberarche.adapters.inbound.http.dependencies import Caller, Cases
 from cyberarche.application.ports.agent import AgentRun
 from cyberarche.domain.ids import DocumentId
 
@@ -78,7 +78,7 @@ class AgentRunResponse(BaseModel):
 
 @router.post("/ask")
 async def ask(
-    document_id: str, body: AskRequest, cases: Cases, caller: Caller, token: AccessToken
+    document_id: str, body: AskRequest, cases: Cases, caller: Caller
 ) -> AskResponse:
     answer = await cases.agent.ask(
         caller,
@@ -87,7 +87,6 @@ async def ask(
         session_connectors=set(body.enabled_connectors)
         if body.enabled_connectors is not None
         else None,
-        auth_token=token,
     )
     return AskResponse(
         answer=answer.text,
@@ -111,24 +110,22 @@ async def summarize(
     document_id: str,
     cases: Cases,
     caller: Caller,
-    token: AccessToken,
     body: SummarizeRequest | None = None,
 ) -> BlocksResponse:
     blocks = await cases.agent.summarize(
         caller,
         DocumentId(document_id),
         block_ids=body.block_ids if body else None,
-        auth_token=token,
     )
     return BlocksResponse(blocks=blocks)
 
 
 @router.post("/draft")
 async def draft(
-    document_id: str, body: AskRequest, cases: Cases, caller: Caller, token: AccessToken
+    document_id: str, body: AskRequest, cases: Cases, caller: Caller
 ) -> BlocksResponse:
     blocks = await cases.agent.draft(
-        caller, DocumentId(document_id), instruction=body.instruction, auth_token=token
+        caller, DocumentId(document_id), instruction=body.instruction
     )
     return BlocksResponse(blocks=blocks)
 

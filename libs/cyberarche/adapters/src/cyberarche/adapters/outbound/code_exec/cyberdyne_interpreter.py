@@ -51,16 +51,11 @@ class CyberdyneInterpreterAdapter:
         self._http = http
         self._token_source = token_source
 
-    async def _headers(self, auth_token: str | None) -> dict[str, str]:
-        # The interpreter authorizes per-user, so prefer the caller's bearer;
-        # fall back to the service token only when none was forwarded.
-        token = auth_token or await self._token_source()
-        return {"Authorization": f"Bearer {token}"}
+    async def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {await self._token_source()}"}
 
-    async def run(
-        self, code: str, *, auth_token: str | None = None
-    ) -> CodeExecutionResult:
-        headers = await self._headers(auth_token)
+    async def run(self, code: str) -> CodeExecutionResult:
+        headers = await self._headers()
         session_resp = await self._http.post(
             f"{self._base}/sessions", json={}, headers=headers
         )

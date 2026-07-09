@@ -50,12 +50,5 @@ async def require_caller(
     )
 
 
-def access_token(request: Request) -> str:
-    """The caller's raw bearer, for outbound calls that run as the user
-    (e.g. the Python interpreter authorizes per-user)."""
-    return _bearer_token(request)
-
-
 Cases = Annotated[UseCases, Depends(get_use_cases)]
 Caller = Annotated[CallerContext, Depends(require_caller)]
-AccessToken = Annotated[str, Depends(access_token)]

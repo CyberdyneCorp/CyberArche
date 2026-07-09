@@ -169,7 +169,6 @@ class AgentUseCases:
         *,
         instruction: str,
         session_connectors: set[str] | None = None,
-        auth_token: str | None = None,
     ) -> AgentAnswer:
         """Answer/act grounded in the document, with tool use.
 
@@ -195,7 +194,6 @@ class AgentUseCases:
             instruction,
             messages,
             session_connectors,
-            auth_token,
         )
         # If the agent already applied its edit live, don't offer to insert it
         # again (that produced a duplicate block); otherwise carry insertables.
@@ -208,7 +206,6 @@ class AgentUseCases:
         document_id: DocumentId,
         *,
         block_ids: list[str] | None = None,
-        auth_token: str | None = None,
     ) -> list[dict]:
         if block_ids:
             selection = ", ".join(block_ids)
@@ -222,24 +219,16 @@ class AgentUseCases:
                 "Summarize this document concisely for a reader who has not "
                 "seen it. Cite the block ids you drew from."
             )
-        answer = await self.ask(
-            caller, document_id, instruction=instruction, auth_token=auth_token
-        )
+        answer = await self.ask(caller, document_id, instruction=instruction)
         return answer.blocks
 
     async def draft(
-        self,
-        caller: CallerContext,
-        document_id: DocumentId,
-        *,
-        instruction: str,
-        auth_token: str | None = None,
+        self, caller: CallerContext, document_id: DocumentId, *, instruction: str
     ) -> list[dict]:
         answer = await self.ask(
             caller,
             document_id,
             instruction=f"Draft the following as document content:\n{instruction}",
-            auth_token=auth_token,
         )
         return answer.blocks
 
@@ -362,7 +351,6 @@ class AgentUseCases:
         prompt: str,
         messages: list[LLMMessage],
         session_connectors: set[str] | None = None,
-        auth_token: str | None = None,
     ) -> tuple[str, bool, list[ToolCallLog]]:
         tools_used: list[str] = []
         call_log: list[ToolCallLog] = []
@@ -383,12 +371,7 @@ class AgentUseCases:
             for call in response.tool_calls:
                 tools_used.append(call.name)
                 result = await self._dispatch(
-                    caller,
-                    workspace_id,
-                    document_id,
-                    call,
-                    session_connectors,
-                    auth_token,
+                    caller, workspace_id, document_id, call, session_connectors
                 )
                 kind, connector = _classify_tool(call.name)
                 call_log.append(
@@ -452,7 +435,6 @@ class AgentUseCases:
         document_id: DocumentId,
         call: ToolCall,
         session_connectors: set[str] | None = None,
-        auth_token: str | None = None,
     ) -> str:
         """Editing tools bind to the OPEN document (design D-2), so a
         hallucinated id can never reach another document."""
@@ -462,7 +444,7 @@ class AgentUseCases:
             )
         if call.name == "run_python":
             return await self._run_python(
-                caller, workspace_id, document_id, call.arguments, auth_token
+                caller, workspace_id, document_id, call.arguments
             )
         for spec, operation in _editing_tools():
             if spec.name == call.name:
@@ -563,7 +545,6 @@ class AgentUseCases:
         workspace_id: WorkspaceId,
         document_id: DocumentId,
         arguments: dict,
-        auth_token: str | None = None,
     ) -> str:
         if self._code is None or self._blobs is None:
             return "error: code execution is not configured"
@@ -573,7 +554,7 @@ class AgentUseCases:
         try:
             document = await self._get_document(caller, document_id)
             await self._access.require_document(caller, document, Role.EDITOR)
-            outcome = await self._code.run(code, auth_token=auth_token)
+            outcome = await self._code.run(code)
             # Store each figure and insert it into the document as an image block.
             blocks = []
             for image in outcome.images:

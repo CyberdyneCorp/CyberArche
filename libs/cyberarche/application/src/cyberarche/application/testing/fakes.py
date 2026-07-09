@@ -412,16 +412,14 @@ class ScriptedCodeExecutor:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.tokens: list[str | None] = []
 
-    async def run(self, code: str, *, auth_token: str | None = None):
+    async def run(self, code: str):
         from cyberarche.application.ports.code_exec import (
             CodeExecutionResult,
             CodeImage,
         )
 
         self.calls.append(code)
-        self.tokens.append(auth_token)
         return CodeExecutionResult(
             success=True,
             stdout="mean=2.0\n",
