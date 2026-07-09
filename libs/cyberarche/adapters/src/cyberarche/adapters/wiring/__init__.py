@@ -31,6 +31,7 @@ from cyberarche.application.ports.agent import AgentRunRepository
 from cyberarche.application.ports.api_keys import ApiKeyRepository
 from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
+from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
     ConnectorRepository,
@@ -54,6 +55,7 @@ from cyberarche.application.use_cases.api_keys import (
 )
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -101,6 +103,10 @@ class WiringConfig:
     llm_model: str = "claude-sonnet-5"
     llm_api_key: str = ""
     llm_base_url: str = ""
+    # Image generation (agent generate_image tool). Empty api_key = disabled.
+    image_api_key: str = ""
+    image_model: str = "gpt-image-1"
+    image_base_url: str = ""  # OpenAI-compatible images endpoint; empty = OpenAI
     connector_secret_key: str = ""
     # Shared infrastructure for multi-replica deployments (12.5/12.6):
     # with redis_url set, live realtime fanout and the job queue go through
@@ -155,6 +161,7 @@ def _build_use_cases(
     ingestions: IngestionRepository,
     rag: RagPort,
     llm: LLMPort,
+    images: ImageGenerationPort | None,
     agent_runs: AgentRunRepository,
     connectors: ConnectorRepository,
     mcp_client: McpClientPort,
@@ -204,6 +211,8 @@ def _build_use_cases(
             ids,
             model_name=model_name,
             connectors=connector_use_cases,
+            images=images,
+            blobs=blobs,
         ),
         sharing=SharingUseCases(
             documents, memberships, share_links, comments, access, clock, ids
@@ -212,6 +221,7 @@ def _build_use_cases(
         teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
         favorites=FavoriteUseCases(favorites, documents, access),
         folders=FolderUseCases(folders, documents, access, clock, ids),
+        files=FileUseCases(blobs, access, ids),
     )
 
 
@@ -230,6 +240,22 @@ def _build_llm(config: WiringConfig, http: httpx.AsyncClient) -> LLMPort:
     from cyberarche.adapters.outbound.llm.openai_compatible import OpenAICompatibleLLM
 
     return OpenAICompatibleLLM(llm_config, http)
+
+
+def _build_image_generator(config: WiringConfig, http: httpx.AsyncClient):
+    """OpenAI image generator, or None when no image API key is configured."""
+    if not config.image_api_key:
+        return None
+    from cyberarche.adapters.outbound.imagegen.openai_images import (
+        OpenAIImageGenerator,
+    )
+
+    return OpenAIImageGenerator(
+        http,
+        api_key=config.image_api_key,
+        model=config.image_model,
+        base_url=config.image_base_url,
+    )
 
 
 @dataclass(slots=True)
@@ -413,6 +439,7 @@ async def build_container(
     token_port: TokenPort | None = None,
     rag: RagPort | None = None,
     llm: LLMPort | None = None,
+    images: ImageGenerationPort | None = None,
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
@@ -462,6 +489,9 @@ async def build_container(
             from cyberarche.application.testing.fakes import ScriptedLLM
 
             llm = ScriptedLLM([])  # no provider configured (tests/sample)
+
+    if images is None:
+        images = _build_image_generator(config, shared_http())
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -535,6 +565,7 @@ async def build_container(
             ingestions,
             rag,
             llm,
+            images,
             agent_runs,
             connectors,
             mcp_client,

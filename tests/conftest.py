@@ -33,6 +33,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryUpdateLog,
     InMemoryWorkspaceRepository,
     NaiveSecretBox,
+    ScriptedImageGenerator,
     ScriptedLLM,
     SequentialIds,
     StaticTokenPort,
@@ -42,6 +43,7 @@ from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -78,6 +80,11 @@ def rag() -> InMemoryRag:
 @pytest.fixture
 def llm() -> ScriptedLLM:
     return ScriptedLLM([])
+
+
+@pytest.fixture
+def images() -> ScriptedImageGenerator:
+    return ScriptedImageGenerator()
 
 
 @pytest.fixture
@@ -132,6 +139,7 @@ def use_cases(
     memberships: InMemoryMembershipRepository,
     rag: InMemoryRag,
     llm: ScriptedLLM,
+    images: ScriptedImageGenerator,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
     secret_box: NaiveSecretBox,
@@ -196,6 +204,8 @@ def use_cases(
             ids,
             model_name="scripted-test-model",
             connectors=connectors,
+            images=images,
+            blobs=blobs,
         ),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
@@ -204,6 +214,7 @@ def use_cases(
         ),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
         folders=FolderUseCases(folder_repo, documents, access, clock, ids),
+        files=FileUseCases(blobs, access, ids),
     )
 
 

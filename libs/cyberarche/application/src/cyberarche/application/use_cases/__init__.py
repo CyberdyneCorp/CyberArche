@@ -8,6 +8,7 @@ from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -36,3 +37,4 @@ class UseCases:
     teamspaces: TeamspaceUseCases
     favorites: FavoriteUseCases
     folders: FolderUseCases
+    files: FileUseCases

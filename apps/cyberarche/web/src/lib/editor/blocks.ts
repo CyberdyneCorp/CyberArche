@@ -2,6 +2,8 @@
 
 import DividerBlock from '$lib/components/editor/blocks/DividerBlock.svelte';
 import CodeBlock from '$lib/components/editor/blocks/CodeBlock.svelte';
+import EmbedBlock from '$lib/components/editor/blocks/EmbedBlock.svelte';
+import ImageBlock from '$lib/components/editor/blocks/ImageBlock.svelte';
 import LatexBlock from '$lib/components/editor/blocks/LatexBlock.svelte';
 import MermaidBlock from '$lib/components/editor/blocks/MermaidBlock.svelte';
 import TableBlock from '$lib/components/editor/blocks/TableBlock.svelte';
@@ -144,5 +146,23 @@ export function registerBuiltinBlocks(): void {
 			rows: [['', '']]
 		}),
 		component: TableBlock
+	});
+	registerBlock({
+		type: 'image',
+		label: 'Image',
+		icon: '🖼',
+		group: 'media',
+		hint: 'Upload or embed by URL',
+		create: () => ({ url: '', alt: '' }),
+		component: ImageBlock
+	});
+	registerBlock({
+		type: 'embed',
+		label: 'Embed',
+		icon: '🎬',
+		group: 'media',
+		hint: 'YouTube, Vimeo, or a link',
+		create: () => ({ url: '' }),
+		component: EmbedBlock
 	});
 }

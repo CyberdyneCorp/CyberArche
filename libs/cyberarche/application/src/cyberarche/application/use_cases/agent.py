@@ -20,6 +20,8 @@ from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.agent import AgentRun, AgentRunRepository
 from cyberarche.application.ports.crdt import CrdtEnginePort
 from cyberarche.application.ports.extraction import FileExtractorPort
+from cyberarche.application.ports.images import ImageGenerationPort
+from cyberarche.application.ports.storage import BlobStoragePort
 from cyberarche.application.ports.llm import (
     LLMMessage,
     LLMPort,
@@ -113,8 +115,12 @@ class AgentUseCases:
         tools: ToolRegistry | None = None,
         model_name: str = "",
         connectors: ConnectorUseCases | None = None,
+        images: ImageGenerationPort | None = None,
+        blobs: BlobStoragePort | None = None,
     ) -> None:
         self._llm = llm
+        self._images = images
+        self._blobs = blobs
         self._documents = documents
         self._realtime = realtime
         self._knowledge = knowledge
@@ -372,6 +378,8 @@ class AgentUseCases:
         """Document-bound editing tools, the built-in tools, and the external
         MCP tools active for this document + session (namespaced by connector)."""
         tools = [spec for spec, _ in _editing_tools()] + self._tools.specs()
+        if self._images is not None and self._blobs is not None:
+            tools = tools + [_image_tool_spec()]
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(
                 caller,
@@ -391,6 +399,10 @@ class AgentUseCases:
     ) -> str:
         """Editing tools bind to the OPEN document (design D-2), so a
         hallucinated id can never reach another document."""
+        if call.name == "generate_image":
+            return await self._run_generate_image(
+                caller, workspace_id, document_id, call.arguments
+            )
         for spec, operation in _editing_tools():
             if spec.name == call.name:
                 return await self._run_editing_tool(
@@ -447,6 +459,42 @@ class AgentUseCases:
         except Exception as error:
             return f"error: {error}"
         return f"error: unknown operation {operation}"
+
+    async def _run_generate_image(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
+        arguments: dict,
+    ) -> str:
+        if self._images is None or self._blobs is None:
+            return "error: image generation is not configured"
+        prompt = str(arguments.get("prompt", "")).strip()
+        if not prompt:
+            return "error: prompt required"
+        size = str(arguments.get("size", "") or "1024x1024")
+        try:
+            document = await self._get_document(caller, document_id)
+            await self._access.require_document(caller, document, Role.EDITOR)
+            image = await self._images.generate(prompt, size=size)
+            file_id = self._ids.new_id()
+            await self._blobs.put(
+                f"files/{workspace_id}/{file_id}",
+                image.content,
+                content_type=image.content_type,
+            )
+            url = f"/api/v1/workspaces/{workspace_id}/files/{file_id}"
+            block = {
+                "id": self._ids.new_id(),
+                "type": "image",
+                "data": {"url": url, "alt": prompt},
+            }
+            await self.apply_blocks(caller, document_id, [block])
+            return f"generated and inserted an image for: {prompt}"
+        except NotAuthorized:
+            return "error: you do not have permission to edit this document"
+        except Exception as error:
+            return f"error: {error}"
 
     async def _document_context(
         self, caller: CallerContext, document_id: DocumentId
@@ -536,7 +584,37 @@ class AgentUseCases:
         return f"# {document.title}\n{rendered}"
 
 
-_EDITING_TOOL_NAMES = {"insert_blocks", "update_block", "delete_block"}
+_EDITING_TOOL_NAMES = {
+    "insert_blocks",
+    "update_block",
+    "delete_block",
+    "generate_image",
+}
+
+
+def _image_tool_spec() -> ToolSpec:
+    return ToolSpec(
+        name="generate_image",
+        description=(
+            "Generate an image from a text prompt and insert it as an image "
+            "block into the open document. Use for illustrations, diagrams the "
+            "user asks to 'draw'/'picture', or requested artwork."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "What the image should depict.",
+                },
+                "size": {
+                    "type": "string",
+                    "description": "Optional, e.g. 1024x1024, 1024x1536, 1536x1024.",
+                },
+            },
+            "required": ["prompt"],
+        },
+    )
 
 
 def _editing_tools() -> list[tuple[ToolSpec, str]]:
@@ -551,8 +629,11 @@ def _editing_tools() -> list[tuple[ToolSpec, str]]:
                     "{type, data}. Data by type: paragraph/heading/quote/callout/"
                     "bulleted_list/numbered_list/todo -> {text}; code -> "
                     "{source, language}; latex -> {source}; mermaid -> {source}; "
-                    "table -> {header: [..], rows: [[..]]}. Put math in $…$/$$…$$, "
-                    "diagrams in a mermaid block, code in a code block."
+                    "table -> {header: [..], rows: [[..]]}; image -> {url, alt} "
+                    "(an existing image URL); embed -> {url} (a YouTube/Vimeo/https "
+                    "link). Put math in $…$/$$…$$, diagrams in a mermaid block, code "
+                    "in a code block. To CREATE a new image from a prompt, use the "
+                    "generate_image tool instead of an image block."
                 ),
                 parameters={
                     "type": "object",
@@ -641,6 +722,9 @@ def _normalize_block(block: dict) -> dict:
         )
     if block_type == "code" and not data.get("language"):
         data["language"] = data.get("lang") or "text"
+    if block_type in {"image", "embed"} and not (data.get("url") or "").strip():
+        # Models often put the address under src/href instead of url.
+        data["url"] = data.get("src") or data.get("href") or data.get("url") or ""
     return {**block, "data": data}
 
 

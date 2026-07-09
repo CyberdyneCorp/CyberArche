@@ -9,6 +9,7 @@ from cyberarche.adapters.inbound.http.routers.connectors import (
     router as connectors_router,
 )
 from cyberarche.adapters.inbound.http.routers.documents import router as documents_router
+from cyberarche.adapters.inbound.http.routers.files import router as files_router
 from cyberarche.adapters.inbound.http.routers.folders import router as folders_router
 from cyberarche.adapters.inbound.http.routers.health import router as health_router
 from cyberarche.adapters.inbound.http.routers.knowledge import (
@@ -32,4 +33,5 @@ all_routers = [
     sharing_router,
     teamspaces_router,
     folders_router,
+    files_router,
 ]

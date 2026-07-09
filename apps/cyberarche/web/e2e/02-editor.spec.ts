@@ -93,6 +93,59 @@ test('undo/redo re-sync a focused block in place (not only on removal)', async (
 	await expect(paragraph).toHaveText('First draft');
 });
 
+test('image block embeds an external URL', async ({ page, request }) => {
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/image');
+	await expect(page.getByTestId('slash-menu')).toBeVisible();
+	await page.keyboard.press('Enter');
+
+	const block = page.getByTestId('image-block');
+	await expect(block).toBeVisible();
+	await block.getByTestId('image-url-input').fill('https://example.com/pic.png');
+	await block.getByTestId('image-url-apply').click();
+	await expect(block.getByTestId('image-external')).toHaveAttribute(
+		'src',
+		'https://example.com/pic.png'
+	);
+});
+
+test('image block uploads a file and renders the served image', async ({ page, request }) => {
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/image');
+	await page.keyboard.press('Enter');
+
+	const block = page.getByTestId('image-block');
+	// A minimal valid 1x1 PNG (correct magic bytes so the backend accepts it).
+	const png = Buffer.from(
+		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC',
+		'base64'
+	);
+	await block
+		.getByTestId('image-file-input')
+		.setInputFiles({ name: 'dot.png', mimeType: 'image/png', buffer: png });
+
+	// Uploaded images are served behind auth and rendered through <AuthImage>.
+	await expect(block.getByTestId('auth-image')).toBeVisible();
+});
+
+test('embed block renders a YouTube player', async ({ page, request }) => {
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/embed');
+	await expect(page.getByTestId('slash-menu')).toBeVisible();
+	await page.keyboard.press('Enter');
+
+	const block = page.getByTestId('embed-block');
+	await block.getByTestId('embed-url-input').fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+	await block.getByTestId('embed-url-apply').click();
+	await expect(block.getByTestId('embed-iframe')).toHaveAttribute(
+		'src',
+		'https://www.youtube.com/embed/dQw4w9WgXcQ'
+	);
+});
+
 test('LaTeX renders and surfaces errors without losing source', async ({ page, request }) => {
 	await openDocument(page, request);
 

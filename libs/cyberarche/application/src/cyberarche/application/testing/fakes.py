@@ -386,6 +386,26 @@ class ScriptedLLM:
         return self._responses.pop(0)
 
 
+_STUB_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+class ScriptedImageGenerator:
+    """ImageGenerationPort fake: returns a fixed 1x1 PNG and records prompts."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def generate(self, prompt: str, *, size: str = "1024x1024"):
+        from cyberarche.application.ports.images import GeneratedImage
+
+        self.prompts.append(prompt)
+        return GeneratedImage(content=_STUB_PNG, content_type="image/png")
+
+
 class InMemoryAgentRunRepository:
     def __init__(self) -> None:
         self._items: list[AgentRun] = []

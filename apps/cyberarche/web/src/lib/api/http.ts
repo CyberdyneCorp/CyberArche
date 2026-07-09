@@ -51,6 +51,30 @@ export async function request<T>(
 export const get = <T>(path: string) => request<T>(path);
 export const post = <T>(path: string, body?: unknown) =>
 	request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+/** POST multipart/form-data. `request` leaves the Content-Type unset for a
+ * non-string body, so fetch adds the multipart boundary itself. */
+export const postForm = <T>(path: string, form: FormData) =>
+	request<T>(path, { method: 'POST', body: form });
+
+/** Fetch binary content (e.g. an uploaded image) with bearer auth + one refresh
+ * retry. Used by <AuthImage> to load membership-gated files into an object URL,
+ * since an <img> tag cannot send the Authorization header itself. */
+export async function getBlob(path: string): Promise<Blob> {
+	const send = async () => {
+		const headers = new Headers();
+		const token = auth.getAccessToken();
+		if (token) headers.set('Authorization', `Bearer ${token}`);
+		return fetch(`${API_BASE}${path}`, { headers });
+	};
+	let response = await send();
+	if (response.status === 401 && (await auth.tryRefresh())) {
+		response = await send();
+	}
+	if (!response.ok) {
+		throw new ApiError(response.status, response.statusText);
+	}
+	return response.blob();
+}
 export const patch = <T>(path: string, body: unknown) =>
 	request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
 export const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });

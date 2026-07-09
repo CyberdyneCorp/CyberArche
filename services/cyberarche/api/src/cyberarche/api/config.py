@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-5"
     llm_api_key: str = ""
     llm_base_url: str = ""
+    image_api_key: str = ""  # enables the agent's generate_image tool
+    image_model: str = "gpt-image-1"
+    image_base_url: str = ""
     connector_secret_key: str = ""
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
@@ -45,6 +48,9 @@ class Settings(BaseSettings):
             llm_model=self.llm_model,
             llm_api_key=self.llm_api_key,
             llm_base_url=self.llm_base_url,
+            image_api_key=self.image_api_key,
+            image_model=self.image_model,
+            image_base_url=self.image_base_url,
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,

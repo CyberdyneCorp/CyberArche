@@ -312,6 +312,45 @@ async def test_agent_inserts_and_deletes_blocks_via_tools(use_cases, llm, alice)
     assert blocks[0]["data"]["text"] == "keep"
 
 
+async def test_agent_generate_image_inserts_an_image_block(
+    use_cases, llm, images, alice
+):
+    workspace, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(id="c1", name="generate_image", arguments={"prompt": "a red fox"}),
+            ),
+        ),
+        LLMResponse(text="Here is your image.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="draw a fox")
+
+    assert images.prompts == ["a red fox"]
+    state = await use_cases.realtime.current_state(alice, document.id)
+    image_blocks = [
+        b for b in use_cases.agent._engine.read_blocks(state) if b["type"] == "image"
+    ]
+    assert len(image_blocks) == 1
+    assert image_blocks[0]["data"]["url"].startswith(
+        f"/api/v1/workspaces/{workspace.id}/files/"
+    )
+    assert image_blocks[0]["data"]["alt"] == "a red fox"
+    # The agent edited the doc, so it does not also offer manual-insert blocks.
+    assert answer.blocks == []
+
+
+async def test_generate_image_reports_unavailable_when_unconfigured(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._images = None  # simulate no image provider configured
+    result = await use_cases.agent._run_generate_image(
+        alice, workspace.id, document.id, {"prompt": "x"}
+    )
+    assert "not configured" in result
+
+
 async def test_editing_tools_are_offered_and_bound_to_the_open_document(
     use_cases, llm, alice
 ):
