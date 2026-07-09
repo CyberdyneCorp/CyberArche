@@ -312,6 +312,47 @@ async def test_agent_inserts_and_deletes_blocks_via_tools(use_cases, llm, alice)
     assert blocks[0]["data"]["text"] == "keep"
 
 
+def test_classify_tool_distinguishes_mcp_editing_builtin():
+    from cyberarche.application.use_cases.agent import _classify_tool
+
+    assert _classify_tool("insert_blocks") == ("editing", None)
+    assert _classify_tool("generate_image") == ("editing", None)
+    assert _classify_tool("rag_query") == ("builtin", None)
+    assert _classify_tool("github__create_issue") == ("mcp", "github")
+
+
+async def test_ask_returns_tool_calls_for_the_chat(use_cases, llm, alice):
+    workspace, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="rag_query",
+                    arguments={"workspace_id": workspace.id, "query": "specs"},
+                ),
+                ToolCall(
+                    id="c2",
+                    name="insert_blocks",
+                    arguments={"blocks": [{"type": "paragraph", "data": {"text": "hi"}}]},
+                ),
+            ),
+        ),
+        LLMResponse(text="done", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="do stuff")
+
+    calls = {c.name: c for c in answer.tool_calls}
+    assert calls["rag_query"].kind == "builtin"
+    assert calls["insert_blocks"].kind == "editing"
+    # Arguments and result are captured so the chat can expand the call.
+    assert calls["rag_query"].arguments["query"] == "specs"
+    assert calls["rag_query"].ok
+    assert calls["insert_blocks"].result.startswith("inserted 1 block")
+
+
 async def test_agent_generate_image_inserts_an_image_block(
     use_cases, llm, images, alice
 ):

@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
@@ -76,12 +76,29 @@ class ToolRegistry:
             return f"error: {error}"
 
 
+_MAX_TOOL_RESULT_CHARS = 4000
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallLog:
+    """One tool call the agent made during a run, surfaced to the chat UI so the
+    user can inspect what the agent did (name, inputs, output)."""
+
+    name: str
+    kind: str  # "mcp" | "editing" | "builtin"
+    connector: str | None  # the MCP connector slug, for kind == "mcp"
+    arguments: dict
+    result: str
+    ok: bool
+
+
 @dataclass(frozen=True, slots=True)
 class AgentAnswer:
     """An answer plus the blocks the user may insert into the document."""
 
     text: str
     blocks: list[dict]
+    tool_calls: list[ToolCallLog] = field(default_factory=list)
 
 
 _SYSTEM_PROMPT = (
@@ -162,7 +179,7 @@ class AgentUseCases:
                 ),
             ),
         ]
-        text, edited = await self._run_loop(
+        text, edited, tool_calls = await self._run_loop(
             caller,
             document_id,
             document.workspace_id,
@@ -173,7 +190,7 @@ class AgentUseCases:
         # If the agent already applied its edit live, don't offer to insert it
         # again (that produced a duplicate block); otherwise carry insertables.
         blocks = [] if edited else _answer_blocks(self._ids, text)
-        return AgentAnswer(text=text, blocks=blocks)
+        return AgentAnswer(text=text, blocks=blocks, tool_calls=tool_calls)
 
     async def summarize(
         self,
@@ -326,8 +343,9 @@ class AgentUseCases:
         prompt: str,
         messages: list[LLMMessage],
         session_connectors: set[str] | None = None,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, list[ToolCallLog]]:
         tools_used: list[str] = []
+        call_log: list[ToolCallLog] = []
         tools = await self._available_tools(
             caller, workspace_id, document_id, session_connectors
         )
@@ -346,6 +364,17 @@ class AgentUseCases:
                 tools_used.append(call.name)
                 result = await self._dispatch(
                     caller, workspace_id, document_id, call, session_connectors
+                )
+                kind, connector = _classify_tool(call.name)
+                call_log.append(
+                    ToolCallLog(
+                        name=call.name,
+                        kind=kind,
+                        connector=connector,
+                        arguments=dict(call.arguments or {}),
+                        result=result[:_MAX_TOOL_RESULT_CHARS],
+                        ok=not result.startswith("error:"),
+                    )
                 )
                 messages.append(
                     LLMMessage(
@@ -366,7 +395,7 @@ class AgentUseCases:
         # the answer's content is in the doc, and offering a manual Insert would
         # duplicate it.
         edited = any(name in _EDITING_TOOL_NAMES for name in tools_used)
-        return response.text, edited
+        return response.text, edited, call_log
 
     async def _available_tools(
         self,
@@ -590,6 +619,17 @@ _EDITING_TOOL_NAMES = {
     "delete_block",
     "generate_image",
 }
+
+
+def _classify_tool(name: str) -> tuple[str, str | None]:
+    """(kind, connector_slug). MCP tools are namespaced 'slug__tool'; the fixed
+    document-editing tools are their own kind; everything else is built-in."""
+    if name in _EDITING_TOOL_NAMES:
+        return "editing", None
+    parts = split_qualified(name)
+    if parts is not None:
+        return "mcp", parts[0]
+    return "builtin", None
 
 
 def _image_tool_spec() -> ToolSpec:

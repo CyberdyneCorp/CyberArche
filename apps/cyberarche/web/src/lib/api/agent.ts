@@ -15,10 +15,21 @@ export interface BlocksResponse {
 	inserted: boolean;
 }
 
+export interface AgentToolCall {
+	name: string;
+	kind: 'mcp' | 'editing' | 'builtin';
+	connector: string | null;
+	arguments: Record<string, unknown>;
+	result: string;
+	ok: boolean;
+}
+
 export interface AskResult {
 	answer: string;
 	/** Insertable representation of the answer. */
 	blocks: Record<string, unknown>[];
+	/** Tool calls made this turn (built-in, editing, external MCP). */
+	tool_calls: AgentToolCall[];
 }
 
 export const askAgent = (documentId: string, instruction: string) =>

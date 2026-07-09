@@ -9,7 +9,8 @@ import {
 	insertBlocks,
 	listAgentRuns,
 	summarizeDocument,
-	type AgentRun
+	type AgentRun,
+	type AgentToolCall
 } from '$lib/api/agent';
 
 export interface AgentMessage {
@@ -18,6 +19,8 @@ export interface AgentMessage {
 	/** Block payloads offered for insertion (summaries, drafts). */
 	blocks?: Record<string, unknown>[];
 	inserted?: boolean;
+	/** Tool calls the agent made for this answer (shown, expandable). */
+	toolCalls?: AgentToolCall[];
 }
 
 export interface AgentPanelOptions {
@@ -69,8 +72,8 @@ export function createAgentPanel(documentId: string, options: AgentPanelOptions 
 		 * answer offers Insert / Replace / Copy (ai-agent spec). */
 		async ask(instruction: string) {
 			await perform(instruction, async () => {
-				const { answer, blocks } = await askAgent(documentId, instruction);
-				return { role: 'agent', text: answer, blocks };
+				const { answer, blocks, tool_calls } = await askAgent(documentId, instruction);
+				return { role: 'agent', text: answer, blocks, toolCalls: tool_calls };
 			});
 		},
 

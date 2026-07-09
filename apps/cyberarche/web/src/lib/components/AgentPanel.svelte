@@ -1,7 +1,19 @@
 <script lang="ts">
 	/** The violet right rail (design: everything the AI touches is violet). */
+	import type { AgentToolCall } from '$lib/api/agent';
 	import type { AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import type { ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
+
+	const TOOL_ICON = { mcp: '🔌', editing: '✎', builtin: '🛠' } as const;
+
+	function toolLabel(call: AgentToolCall): string {
+		if (call.kind === 'mcp' && call.connector) {
+			const prefix = `${call.connector}__`;
+			const bare = call.name.startsWith(prefix) ? call.name.slice(prefix.length) : call.name;
+			return `${call.connector} · ${bare}`;
+		}
+		return call.name;
+	}
 
 	let {
 		agent,
@@ -132,6 +144,26 @@
 			{:else}
 				<div class="bubble agent">
 					<span class="tag">✦ Agent</span>
+					{#if message.toolCalls?.length}
+						<div class="tool-calls" data-testid="tool-calls">
+							{#each message.toolCalls as call, ci (ci)}
+								<details class="tool-call" class:failed={!call.ok} data-testid="tool-call">
+									<summary>
+										<span class="tc-icon" aria-hidden="true">{TOOL_ICON[call.kind]}</span>
+										<span class="tc-name">{toolLabel(call)}</span>
+										<span class="tc-kind">{call.kind}</span>
+										{#if !call.ok}<span class="tc-fail" title="This call returned an error">⚠</span>{/if}
+									</summary>
+									<div class="tc-body">
+										<span class="tc-label">Input</span>
+										<pre class="tc-pre">{JSON.stringify(call.arguments, null, 2)}</pre>
+										<span class="tc-label">Output</span>
+										<pre class="tc-pre">{call.result || '(no output)'}</pre>
+									</div>
+								</details>
+							{/each}
+						</div>
+					{/if}
 					<p class="answer">{message.text}</p>
 					{#if message.blocks?.length}
 						<div class="actions">
@@ -356,6 +388,88 @@
 		white-space: pre-wrap;
 		font-size: 13px;
 		line-height: 1.55;
+	}
+	.tool-calls {
+		margin: 6px 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.tool-call {
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: var(--bg0);
+		font-size: 12px;
+	}
+	.tool-call.failed {
+		border-color: var(--rose);
+	}
+	.tool-call summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 8px;
+		cursor: pointer;
+		list-style: none;
+		user-select: none;
+	}
+	.tool-call summary::-webkit-details-marker {
+		display: none;
+	}
+	.tool-call summary::before {
+		content: '▸';
+		color: var(--tx3);
+		font-size: 10px;
+	}
+	.tool-call[open] summary::before {
+		content: '▾';
+	}
+	.tc-icon {
+		font-size: 11px;
+	}
+	.tc-name {
+		flex: 1;
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tc-kind {
+		font-size: 9.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--ai);
+		background: var(--aibg, var(--accbg));
+		padding: 1px 5px;
+		border-radius: 999px;
+	}
+	.tc-fail {
+		color: var(--rose);
+	}
+	.tc-body {
+		padding: 0 8px 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.tc-label {
+		font-size: 9.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--tx3);
+		margin-top: 4px;
+	}
+	.tc-pre {
+		margin: 0;
+		padding: 6px 8px;
+		background: var(--bg2);
+		border-radius: 6px;
+		font-size: 11px;
+		line-height: 1.45;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 240px;
+		overflow: auto;
 	}
 	.thinking .answer {
 		color: var(--tx3);

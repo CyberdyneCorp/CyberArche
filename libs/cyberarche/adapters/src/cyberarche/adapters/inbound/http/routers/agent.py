@@ -21,11 +21,23 @@ class AskRequest(BaseModel):
     enabled_connectors: list[str] | None = None
 
 
+class ToolCallResponse(BaseModel):
+    name: str
+    kind: str  # "mcp" | "editing" | "builtin"
+    connector: str | None = None
+    arguments: dict
+    result: str
+    ok: bool
+
+
 class AskResponse(BaseModel):
     answer: str
     # Insertable representation of the answer (ai-agent spec: every answer
     # can be inserted into the document without retyping it).
     blocks: list[dict]
+    # The tool calls the agent made this turn, so the chat can show and expand
+    # them (name, arguments, result) — built-in, editing, and external MCP.
+    tool_calls: list[ToolCallResponse] = []
 
 
 class BlocksResponse(BaseModel):
@@ -76,7 +88,21 @@ async def ask(
         if body.enabled_connectors is not None
         else None,
     )
-    return AskResponse(answer=answer.text, blocks=answer.blocks)
+    return AskResponse(
+        answer=answer.text,
+        blocks=answer.blocks,
+        tool_calls=[
+            ToolCallResponse(
+                name=c.name,
+                kind=c.kind,
+                connector=c.connector,
+                arguments=c.arguments,
+                result=c.result,
+                ok=c.ok,
+            )
+            for c in answer.tool_calls
+        ],
+    )
 
 
 @router.post("/summarize")
