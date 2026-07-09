@@ -200,4 +200,34 @@ describe('ArcheProvider token lifecycle', () => {
 		expect(tokens.tryRefresh).toHaveBeenCalledTimes(1);
 		provider.destroy();
 	});
+
+	it('backs off exponentially between reconnect attempts and resets on a frame', () => {
+		vi.useFakeTimers();
+		const tokens = { getAccessToken: () => LIVE, tryRefresh: vi.fn(async () => false) };
+		const provider = new ArcheProvider('doc-1', tokens);
+		expect(FakeSocket.instances).toHaveLength(1);
+
+		// First failure: retry after 1500ms.
+		FakeSocket.instances[0].handshakeFailed();
+		vi.advanceTimersByTime(1499);
+		expect(FakeSocket.instances).toHaveLength(1); // not yet
+		vi.advanceTimersByTime(1);
+		expect(FakeSocket.instances).toHaveLength(2); // reconnected at 1500
+
+		// Second failure: the delay doubled to 3000ms.
+		FakeSocket.instances[1].handshakeFailed();
+		vi.advanceTimersByTime(1500);
+		expect(FakeSocket.instances).toHaveLength(2); // 1500 is no longer enough
+		vi.advanceTimersByTime(1500);
+		expect(FakeSocket.instances).toHaveLength(3); // reconnected at 3000
+
+		// A frame from the server resets the backoff to the base delay.
+		FakeSocket.instances[2].onmessage?.({ data: new Uint8Array(0).buffer } as MessageEvent);
+		FakeSocket.instances[2].handshakeFailed();
+		vi.advanceTimersByTime(1500);
+		expect(FakeSocket.instances).toHaveLength(4); // back to 1500 after the reset
+
+		provider.destroy();
+		vi.useRealTimers();
+	});
 });

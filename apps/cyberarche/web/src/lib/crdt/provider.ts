@@ -35,6 +35,10 @@ export interface TokenSource {
 }
 
 const RECONNECT_DELAY_MS = 1500;
+/** Cap on the exponential backoff between reconnect attempts. A backend deploy
+ * or outage would otherwise spam a fixed-interval retry (~1 error/1.5s) into
+ * the console; backoff keeps the tab reconnecting without the noise. */
+const RECONNECT_MAX_MS = 20_000;
 const PEER_TTL_MS = 30_000;
 /** Server close codes (adapters/inbound/http/realtime.py). */
 const CLOSE_UNAUTHENTICATED = 4401;
@@ -75,6 +79,9 @@ export class ArcheProvider {
 	private socket: WebSocket | null = null;
 	private closed = false;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Consecutive failed attempts, for exponential backoff. Reset when the
+	 * server sends its first frame (a genuinely established connection). */
+	private reconnectAttempts = 0;
 
 	/** Set while a refresh-and-retry is in flight, so an expiry storm triggers
 	 * exactly one refresh. */
@@ -163,7 +170,18 @@ export class ArcheProvider {
 			this.refreshThenReconnect();
 			return;
 		}
-		this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+		this.scheduleReconnect();
+	}
+
+	/** Reconnect after an exponentially backed-off delay (capped), so a backend
+	 * deploy or outage doesn't spam a fixed-interval retry. */
+	private scheduleReconnect(): void {
+		const delay = Math.min(
+			RECONNECT_DELAY_MS * 2 ** this.reconnectAttempts,
+			RECONNECT_MAX_MS
+		);
+		this.reconnectAttempts += 1;
+		this.reconnectTimer = setTimeout(() => this.connect(), delay);
 	}
 
 	/** Refresh once, then reconnect. Concurrent calls collapse into one. */
@@ -199,6 +217,7 @@ export class ArcheProvider {
 		// refresh cycle is over and a later failure may refresh again.
 		this.refreshing = false;
 		this.refreshed = false;
+		this.reconnectAttempts = 0; // established: reset the backoff
 
 		if (typeof event.data === 'string') {
 			this.handleControl(JSON.parse(event.data));
