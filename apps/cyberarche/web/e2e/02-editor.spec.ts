@@ -111,9 +111,9 @@ test('tables add rows and columns', async ({ page, request }) => {
 	await page.keyboard.press('Enter');
 
 	const table = page.getByTestId('table-block').last();
-	await expect(table.locator('th input')).toHaveCount(2);
+	await expect(table.locator('th .cell .editable')).toHaveCount(2);
 	await table.getByTestId('add-column').click();
-	await expect(table.locator('th input')).toHaveCount(3);
+	await expect(table.locator('th .cell .editable')).toHaveCount(3);
 	await table.getByTestId('add-row').click();
 	await expect(table.locator('tbody tr')).toHaveCount(2);
 });
@@ -203,4 +203,64 @@ test('whiteboard: shapes, mind-map child, arrow follows drag, persistence', asyn
 	await page.getByTestId('whiteboard-block').waitFor();
 	await expect(page.getByTestId('wb-shape')).toHaveCount(2);
 	await expect(page.getByTestId('wb-arrow')).toHaveCount(1);
+});
+
+test('Backspace at the start of a block merges it into the previous one', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	const editor = page.getByTestId('block-editor');
+
+	// Two paragraphs: "hello " then "world".
+	const first = editor.locator('[data-block-type="paragraph"] .editable').first();
+	await first.click();
+	await first.pressSequentially('hello ');
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('world');
+	await expect(page.locator('[data-block-id]')).toHaveCount(2);
+
+	// Caret is at the start of "world"; Backspace merges into "hello ".
+	await page.keyboard.press('Home');
+	await page.keyboard.press('Backspace');
+
+	await expect(page.locator('[data-block-id]')).toHaveCount(1);
+	await expect(editor.locator('.editable').first()).toHaveText('hello world');
+});
+
+test('inline $…$ math renders when a paragraph is not being edited', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	const editor = page.getByTestId('block-editor');
+
+	const paragraph = editor.locator('[data-block-type="paragraph"] .editable').first();
+	await paragraph.click();
+	await paragraph.pressSequentially('energy is $E = mc^2$ exactly');
+
+	// Blur to another block: the inline math renders via KaTeX.
+	await page.getByTestId('append-block').click();
+	await expect(paragraph.locator('.katex')).toBeVisible();
+	// Re-focusing restores the raw source for editing.
+	await paragraph.click();
+	await expect(paragraph).toHaveText(/\$E = mc\^2\$/);
+});
+
+test('a table cell renders inline emphasis when not being edited', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+	await page.getByTestId('append-block').click();
+	await page.keyboard.type('/table');
+	await expect(page.getByTestId('slash-menu')).toBeVisible();
+	await page.keyboard.press('Enter');
+
+	const firstCell = page.getByTestId('table-block').locator('.cell .editable').first();
+	await firstCell.click();
+	await firstCell.pressSequentially('**Bold**');
+	// Blur elsewhere: the cell renders <strong>.
+	await page.getByTestId('table-block').locator('.cell .editable').nth(1).click();
+	await expect(firstCell.locator('strong')).toHaveText('Bold');
 });

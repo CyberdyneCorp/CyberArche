@@ -2,14 +2,18 @@
 	/** Caret-safe contenteditable: local DOM wins while focused; remote
 	 * values are applied only when unfocused (block-level LWW, see D-9). */
 
+	import { renderInline } from '$lib/editor/inline';
+
 	let {
 		value = '',
 		placeholder = '',
 		focused = false,
 		menuOpen = false,
+		rich = false,
 		onchange,
 		onenter,
 		onbackspaceempty,
+		onmergeback,
 		onfocus,
 		tag = 'div'
 	}: {
@@ -18,19 +22,41 @@
 		focused?: boolean;
 		/** While a menu (slash) owns navigation keys, yield them. */
 		menuOpen?: boolean;
+		/** Render inline math/emphasis when unfocused (display only). */
+		rich?: boolean;
 		onchange: (text: string) => void;
 		onenter?: (before: string, after: string) => void;
 		onbackspaceempty?: () => void;
+		/** Backspace at the very start of non-empty text: merge into previous. */
+		onmergeback?: () => void;
 		onfocus?: () => void;
 		tag?: string;
 	} = $props();
 
 	let element = $state<HTMLElement | null>(null);
 
+	// True between focus and blur. Drives the raw/rendered swap for `rich`
+	// fields, so a cell re-renders on blur even though the block-level `focused`
+	// prop doesn't flip per cell.
+	let editing = $state(false);
+
+	// Editing shows raw source (so the caret and typing work); when not editing
+	// and `rich`, we render inline math/emphasis. Never touch content while the
+	// element is the active input, or we'd drop the caret.
 	$effect(() => {
-		if (!element) return;
-		if (document.activeElement !== element && element.textContent !== value) {
-			element.textContent = value;
+		// Read every reactive dep up front: if we returned early at the guard
+		// below before reading them, Svelte would not subscribe, and a later
+		// blur (editing -> false) would never re-run this effect to render.
+		const current = value;
+		const isEditing = editing;
+		const isRich = rich;
+		if (!element || document.activeElement === element) return;
+		if (isEditing) {
+			if (element.textContent !== current) element.textContent = current;
+		} else if (isRich) {
+			element.innerHTML = renderInline(current);
+		} else if (element.textContent !== current) {
+			element.textContent = current;
 		}
 	});
 
@@ -69,6 +95,16 @@
 		if (event.key === 'Backspace' && text === '' && onbackspaceempty) {
 			event.preventDefault();
 			onbackspaceempty();
+		} else if (
+			event.key === 'Backspace' &&
+			text !== '' &&
+			caretOffset() === 0 &&
+			window.getSelection()?.isCollapsed &&
+			onmergeback
+		) {
+			// At the start of non-empty text: merge into the previous block.
+			event.preventDefault();
+			onmergeback();
 		}
 	}
 </script>
@@ -83,7 +119,17 @@
 	data-placeholder={placeholder}
 	oninput={() => onchange(element?.textContent ?? '')}
 	onkeydown={handleKeydown}
-	onfocus={() => onfocus?.()}
+	onfocus={() => {
+		editing = true;
+		// Native focus can precede the reactive `focused` prop; restore raw
+		// source immediately so a rich field is edited as source, not its
+		// rendered HTML.
+		if (rich && element && element.textContent !== value) {
+			element.textContent = value;
+		}
+		onfocus?.();
+	}}
+	onblur={() => (editing = false)}
 ></svelte:element>
 
 <style>

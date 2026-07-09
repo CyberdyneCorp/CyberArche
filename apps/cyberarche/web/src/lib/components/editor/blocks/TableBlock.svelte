@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { BlockComponentProps } from '$lib/editor/registry';
 	import type { EditorVM } from '$lib/viewmodels/editor.svelte';
+	import EditableText from '../EditableText.svelte';
 
 	let { block, editor }: BlockComponentProps = $props();
 	const vm = editor as EditorVM;
@@ -45,11 +46,14 @@
 			<tr>
 				{#each header as cell, column (column)}
 					<th>
-						<input
-							value={cell}
-							onfocus={() => vm.focus(block.id)}
-							oninput={(event) => setHeader(column, (event.target as HTMLInputElement).value)}
-						/>
+						<div class="cell">
+							<EditableText
+								value={cell}
+								rich
+								onchange={(next) => setHeader(column, next)}
+								onfocus={() => vm.focus(block.id)}
+							/>
+						</div>
 						<button
 							class="col-remove"
 							title="Remove column"
@@ -67,12 +71,14 @@
 				<tr>
 					{#each row as cell, column (column)}
 						<td>
-							<input
-								value={cell}
-								onfocus={() => vm.focus(block.id)}
-								oninput={(event) =>
-									setCell(rowIndex, column, (event.target as HTMLInputElement).value)}
-							/>
+							<div class="cell">
+								<EditableText
+									value={cell}
+									rich
+									onchange={(next) => setCell(rowIndex, column, next)}
+									onfocus={() => vm.focus(block.id)}
+								/>
+							</div>
 						</td>
 					{/each}
 					<td class="add-cell">
@@ -102,15 +108,13 @@
 	th {
 		background: var(--bg2);
 	}
-	input {
+	.cell :global(.editable) {
 		width: 100%;
-		border: none;
 		outline: none;
-		background: transparent;
 		padding: 7px 10px;
 		font-size: 13.5px;
 	}
-	th input {
+	th .cell :global(.editable) {
 		font-weight: 600;
 	}
 	.add-cell {

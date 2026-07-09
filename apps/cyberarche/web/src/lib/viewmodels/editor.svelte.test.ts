@@ -199,4 +199,30 @@ describe('editor ViewModel', () => {
 		expect(vm.blocks).toHaveLength(2);
 		expect(vm.blocks[1].data.text).toBe('delete me'); // recovered, not wiped
 	});
+
+	it('mergeWithPrevious joins text into the previous block, one undo step', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		vm.updateData(first, { text: 'hello ' });
+		const second = vm.insertAfter(first, 'paragraph');
+		vm.updateData(second, { text: 'world' });
+		expect(vm.blocks).toHaveLength(2);
+
+		const result = vm.mergeWithPrevious(second);
+		expect(result).toEqual({ previousId: first, caret: 'hello '.length });
+		expect(vm.blocks).toHaveLength(1);
+		expect(vm.blocks[0].data.text).toBe('hello world');
+
+		// One undo step restores both blocks and their original text.
+		vm.undo();
+		expect(vm.blocks.map((b) => b.data.text)).toEqual(['hello ', 'world']);
+	});
+
+	it('mergeWithPrevious is a no-op at the first block', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		vm.updateData(first, { text: 'alone' });
+		expect(vm.mergeWithPrevious(first)).toBeNull();
+		expect(vm.blocks).toHaveLength(1);
+	});
 });

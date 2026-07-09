@@ -32,16 +32,22 @@
 			vm.remove(block.id);
 		}
 	}
+	function onmergeback() {
+		// Backspace at the start of non-empty text: join into the previous block.
+		vm.mergeWithPrevious(block.id);
+	}
 	function listLike() {
 		return ['bulleted_list', 'numbered_list', 'todo'].includes(block.type);
 	}
 	const shared = $derived({
 		value: text,
 		focused,
+		rich: true, // render inline math ($…$) and emphasis when unfocused
 		menuOpen: vm.slashFor === block.id,
 		onchange,
 		onenter,
 		onbackspaceempty,
+		onmergeback,
 		onfocus: () => vm.focus(block.id)
 	});
 </script>

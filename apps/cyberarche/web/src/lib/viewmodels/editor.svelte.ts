@@ -157,6 +157,31 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			return { previousId: previous };
 		},
 
+		/** Merge a block's text into the end of the previous block, then remove
+		 * it (Backspace at block start). Returns the previous block's id and the
+		 * caret offset (the join point). One undo step. No-op at the first block. */
+		mergeWithPrevious(id: string): { previousId: string; caret: number } | null {
+			const index = indexOf(id);
+			if (index <= 0) return null;
+			const previous = yblocks.get(index - 1);
+			const current = yblocks.get(index);
+			const previousData = (previous.get('data') as { text?: string }) ?? {};
+			const currentData = (current.get('data') as { text?: string }) ?? {};
+			const joinAt = (previousData.text ?? '').length;
+			undoManager.stopCapturing();
+			transact(() => {
+				previous.set('data', {
+					...previousData,
+					text: (previousData.text ?? '') + (currentData.text ?? '')
+				});
+				yblocks.delete(index, 1);
+			});
+			undoManager.stopCapturing();
+			const previousId = previous.get('id') as string;
+			focusedId = previousId;
+			return { previousId, caret: joinAt };
+		},
+
 		move(id: string, direction: -1 | 1): void {
 			const index = indexOf(id);
 			const target = index + direction;
