@@ -117,33 +117,25 @@ change through the CRDT so collaborators see it live.
 - **THEN** it SHALL affect only the document the agent is scoped to
 
 ### Requirement: Every answer yields insertable blocks
-An agent answer SHALL be accompanied by blocks derived from it, so the user can
-insert the answer into the document without retyping it. The blocks SHALL be
-typed to match the answer's content: fenced code SHALL become `code` blocks,
-fenced Mermaid SHALL become `mermaid` blocks, display math SHALL become `latex`
-blocks, and prose SHALL become paragraph blocks. Inserting an answer SHALL apply
-the blocks to the open document immediately, whether or not the realtime
-connection is currently established.
+An agent answer that did not itself modify the document SHALL be accompanied by
+blocks derived from it, so the user can insert the answer without retyping it.
+When the agent already applied its change to the document during the run (via an
+editing tool), the answer SHALL NOT offer the same content for manual insertion,
+so it is not added twice. Blocks the agent inserts SHALL be normalized so a
+source-based block (code, latex, mermaid) is never left empty when its content
+was provided under a different field.
 
 #### Scenario: Insert a conversational answer
-- **WHEN** the agent answers a question
+- **WHEN** the agent answers a question without editing the document
 - **THEN** the response SHALL include blocks representing the answer
 - **AND** the user SHALL be able to insert them into the document
 
-#### Scenario: Math becomes a latex block
-- **WHEN** the agent's answer contains display math (`$$…$$` or `\[…\]`)
-- **THEN** that math SHALL be a `latex` block preserving the source
+#### Scenario: No duplicate insert after a live edit
+- **WHEN** the agent applies an edit to the document during its run
+- **THEN** the answer SHALL NOT carry insertable blocks for that content
 
-#### Scenario: A diagram becomes a mermaid block
-- **WHEN** the agent's answer contains a fenced ```mermaid block
-- **THEN** it SHALL become a `mermaid` block with that source
-
-#### Scenario: Code becomes a code block
-- **WHEN** the agent's answer contains a fenced code block with a language
-- **THEN** it SHALL become a `code` block with that language and source
-
-#### Scenario: Insert works while offline
-- **WHEN** the user inserts an answer while the realtime connection is down
-- **THEN** the blocks SHALL appear in the open document immediately
-- **AND** SHALL sync to the server when the connection is restored
+#### Scenario: An agent-inserted source block is never empty
+- **WHEN** the agent inserts a mermaid, latex, or code block with the content
+  under a field other than `source`
+- **THEN** the inserted block SHALL still render that content, not a placeholder
 
