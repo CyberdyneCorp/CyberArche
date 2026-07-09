@@ -132,14 +132,23 @@ trash, and SHALL require the `editor` role.
 - **AND** the document SHALL remain in the trash
 
 ### Requirement: Documents may belong to a teamspace
-A document SHALL optionally reference a teamspace of its own workspace, and the
-system SHALL list a workspace's documents by teamspace.
+A document SHALL optionally reference a teamspace it belongs to, and SHALL
+optionally reference a folder that groups it. A document with no teamspace is
+private to its creator. Placing a document in a folder SHALL set the document's
+teamspace to the folder's, so its access follows the container; removing it to
+the private space SHALL clear its teamspace. Listing a workspace SHALL surface a
+teamspace's documents to that teamspace's members, and a private document only
+to its creator.
 
-#### Scenario: Create a document in a teamspace
-- **WHEN** a document is created with a teamspace of the same workspace
-- **THEN** the document SHALL record that teamspace
+#### Scenario: A workspace lists teamspace documents to members
+- **WHEN** a member lists a teamspace's documents
+- **THEN** the documents belonging to that teamspace SHALL be returned
 
-#### Scenario: Documents without a teamspace remain workspace-level
-- **WHEN** a document is created without a teamspace
-- **THEN** it SHALL appear in the workspace's document tree, not under a teamspace
+#### Scenario: Private documents are listed only to their creator
+- **WHEN** a user lists their private documents
+- **THEN** only their own teamspace-less documents SHALL be returned
+
+#### Scenario: Placing a document in a folder adopts the folder's scope
+- **WHEN** a document is placed in a folder that belongs to a teamspace
+- **THEN** the document SHALL belong to that teamspace
 
