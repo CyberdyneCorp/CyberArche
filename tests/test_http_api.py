@@ -200,3 +200,28 @@ def test_folders_and_private_over_http(api):
     ts_docs = api.get(f"/api/v1/teamspaces/{ts['id']}/documents", headers=headers).json()
     by_id = {d["id"]: d for d in ts_docs}
     assert by_id[private_doc["id"]]["folder_id"] == folder["id"]
+
+
+def test_delete_teamspace_over_http_moves_documents_to_trash(api):
+    headers = auth("alice-token")
+    ws = api.post("/api/v1/workspaces", json={"name": "WS"}, headers=headers).json()
+    ts = api.post(
+        f"/api/v1/workspaces/{ws['id']}/teamspaces", json={"name": "Team"}, headers=headers
+    ).json()
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "In team", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+
+    resp = api.delete(f"/api/v1/teamspaces/{ts['id']}", headers=headers)
+    assert resp.status_code == 204
+
+    # Teamspace is gone; its document is in the trash, recoverable.
+    listed = api.get(f"/api/v1/workspaces/{ws['id']}/teamspaces", headers=headers).json()
+    assert listed == []
+    trash = api.get(f"/api/v1/workspaces/{ws['id']}/trash", headers=headers).json()
+    assert [d["id"] for d in trash] == [doc["id"]]
+    restored = api.post(f"/api/v1/documents/{doc['id']}/restore", headers=headers).json()
+    assert restored["trashed"] is False
+    assert restored["teamspace_id"] is None

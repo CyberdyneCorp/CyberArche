@@ -23,20 +23,21 @@ folder SHALL be visible only to its creator.
 
 ### Requirement: Folder lifecycle
 The system SHALL let an authorized user rename and delete a folder. Deleting a
-folder SHALL NOT delete its documents: they SHALL be detached (their folder
-reference cleared) rather than destroyed. Nested folders SHALL be removed with
-their parent.
+folder SHALL move the folder's documents — across the folder and its
+sub-folders — to Trash, where they remain recoverable rather than being purged.
+Nested folders SHALL be removed with their parent.
 
-#### Scenario: Deleting a folder keeps its documents
+#### Scenario: Deleting a folder moves its documents to Trash
 - **GIVEN** a folder containing a document
 - **WHEN** the folder is deleted
-- **THEN** the document SHALL still exist
-- **AND** it SHALL no longer reference the deleted folder
+- **THEN** the document SHALL be moved to Trash
+- **AND** the document SHALL still exist and be restorable
 
 #### Scenario: Deleting a folder removes its sub-folders
 - **GIVEN** a folder containing a sub-folder
 - **WHEN** the parent folder is deleted
 - **THEN** the sub-folder SHALL also be removed
+- **AND** documents in the sub-folder SHALL be moved to Trash
 
 ### Requirement: Reorganize documents by drag and drop
 The sidebar SHALL let a user drag a document onto a teamspace, a folder, or the

@@ -3,6 +3,8 @@ documents in a teamspace or the private space."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.folders import FolderRepository
@@ -86,15 +88,15 @@ class FolderUseCases:
 
     async def delete(self, caller: CallerContext, folder_id: FolderId) -> None:
         await self._require(caller, folder_id, edit=True)
-        # Detach documents in the folder and its sub-folders so deleting a
-        # container never destroys documents (D-4). Postgres' ON DELETE SET NULL
-        # would also do this; doing it here keeps the in-memory adapter in step.
+        # Move the folder's documents — across its sub-folders — to trash, so
+        # "delete folder" removes its documents (recoverably) rather than leaving
+        # them behind. They keep their teamspace but drop the (about-to-vanish)
+        # folder reference, so restoring returns them to the teamspace.
+        now = self._clock.now()
         for fid in await self._subtree_ids(caller, folder_id):
             for doc in await self._documents.list_for_folder(caller.tenant_id, fid):
-                from dataclasses import replace
-
                 await self._documents.update(
-                    replace(doc, folder_id=None, updated_at=self._clock.now())
+                    replace(doc, trashed=True, folder_id=None, updated_at=now)
                 )
         await self._folders.delete(caller.tenant_id, folder_id)
 

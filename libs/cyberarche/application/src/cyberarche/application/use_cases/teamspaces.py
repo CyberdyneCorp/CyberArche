@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
+from cyberarche.application.ports.folders import FolderRepository
 from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.teamspaces import (
     FavoriteRepository,
@@ -22,12 +25,14 @@ class TeamspaceUseCases:
         self,
         teamspaces: TeamspaceRepository,
         documents: DocumentRepository,
+        folders: FolderRepository,
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
     ) -> None:
         self._teamspaces = teamspaces
         self._documents = documents
+        self._folders = folders
         self._access = access
         self._clock = clock
         self._ids = ids
@@ -115,6 +120,33 @@ class TeamspaceUseCases:
     ) -> list[TeamspaceMembership]:
         await self._require(caller, teamspace_id, Role.VIEWER)
         return await self._teamspaces.members(teamspace_id)
+
+    async def delete(self, caller: CallerContext, teamspace_id: TeamspaceId) -> None:
+        """Delete a teamspace (owner only): move its documents — including those
+        under its folders — to trash, remove its folders, then remove it."""
+        await self._require(caller, teamspace_id, Role.OWNER)
+        now = self._clock.now()
+        docs = await self._documents.list_for_teamspace(caller.tenant_id, teamspace_id)
+        if docs:
+            # Trash and detach, so the docs survive in the caller's trash and hold
+            # no dangling teamspace/folder reference once the teamspace is gone.
+            await self._documents.update_many(
+                [
+                    replace(
+                        doc,
+                        trashed=True,
+                        teamspace_id=None,
+                        folder_id=None,
+                        updated_at=now,
+                    )
+                    for doc in docs
+                ]
+            )
+        for folder in await self._folders.list_for_teamspace(
+            caller.tenant_id, teamspace_id
+        ):
+            await self._folders.delete(caller.tenant_id, folder.id)
+        await self._teamspaces.delete(caller.tenant_id, teamspace_id)
 
     async def documents(
         self, caller: CallerContext, teamspace_id: TeamspaceId

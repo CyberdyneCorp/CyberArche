@@ -39,6 +39,11 @@ class TeamspaceRepository(Protocol):
         self, tenant_id: TenantId, workspace_id: WorkspaceId, user_id: UserId
     ) -> list[Teamspace]: ...
 
+    async def delete(self, tenant_id: TenantId, teamspace_id: TeamspaceId) -> None:
+        """Remove the teamspace and its memberships. Documents and folders are
+        handled by the use case (documents move to trash, folders are removed)."""
+        ...
+
 
 class FavoriteRepository(Protocol):
     async def add(self, user_id: UserId, document_id: DocumentId) -> None: ...

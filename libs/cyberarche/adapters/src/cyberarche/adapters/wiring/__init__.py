@@ -209,7 +209,7 @@ def _build_use_cases(
             documents, memberships, share_links, comments, access, clock, ids
         ),
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
-        teamspaces=TeamspaceUseCases(teamspaces, documents, access, clock, ids),
+        teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
         favorites=FavoriteUseCases(favorites, documents, access),
         folders=FolderUseCases(folders, documents, access, clock, ids),
     )

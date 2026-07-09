@@ -673,6 +673,14 @@ class InMemoryTeamspaceRepository:
             if t.id in mine
         ]
 
+    async def delete(self, tenant_id: TenantId, teamspace_id: TeamspaceId) -> None:
+        teamspace = self._items.get(teamspace_id)
+        if teamspace is None or teamspace.tenant_id != tenant_id:
+            return
+        del self._items[teamspace_id]
+        for key in [k for k in self._members if k[0] == teamspace_id]:
+            del self._members[key]
+
 
 class InMemoryFavoriteRepository:
     def __init__(self) -> None:

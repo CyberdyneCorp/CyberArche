@@ -59,7 +59,7 @@ async def test_folders_nest_and_inherit_scope(use_cases, alice):
     assert child.teamspace_id == teamspace.id  # inherited
 
 
-async def test_deleting_a_folder_detaches_its_documents(use_cases, alice):
+async def test_deleting_a_folder_trashes_its_documents(use_cases, alice):
     workspace = await use_cases.workspaces.create(alice, name="WS")
     teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
     folder = await use_cases.folders.create(
@@ -74,9 +74,79 @@ async def test_deleting_a_folder_detaches_its_documents(use_cases, alice):
 
     await use_cases.folders.delete(alice, folder.id)
 
-    # The document survives, detached from the deleted folder.
-    still = await use_cases.documents.get(alice, document.id)
-    assert still.folder_id is None
+    # The document is now in the trash (recoverable), not silently detached.
+    trashed = await use_cases.documents.list_trashed(alice, workspace_id=workspace.id)
+    assert [d.id for d in trashed] == [document.id]
+    # Restoring returns it to the teamspace, minus the deleted folder.
+    restored = await use_cases.documents.restore(alice, document.id)
+    assert restored.trashed is False
+    assert restored.folder_id is None
+    assert restored.teamspace_id == teamspace.id
+
+
+async def test_deleting_a_folder_trashes_documents_in_sub_folders(use_cases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    parent = await use_cases.folders.create(
+        alice, workspace.id, name="Parent", teamspace_id=teamspace.id
+    )
+    child = await use_cases.folders.create(
+        alice, workspace.id, name="Child", parent_folder_id=parent.id
+    )
+    doc = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Deep", teamspace_id=teamspace.id
+    )
+    await use_cases.documents.place_in_folder(alice, doc.id, child.id)
+
+    await use_cases.folders.delete(alice, parent.id)
+
+    trashed = await use_cases.documents.list_trashed(alice, workspace_id=workspace.id)
+    assert [d.id for d in trashed] == [doc.id]
+
+
+async def test_deleting_a_teamspace_trashes_its_documents_and_folders(use_cases, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    folder = await use_cases.folders.create(
+        alice, workspace.id, name="Box", teamspace_id=teamspace.id
+    )
+    loose = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Loose", teamspace_id=teamspace.id
+    )
+    foldered = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Foldered", teamspace_id=teamspace.id
+    )
+    await use_cases.documents.place_in_folder(alice, foldered.id, folder.id)
+
+    await use_cases.teamspaces.delete(alice, teamspace.id)
+
+    # The teamspace is gone, its folders too.
+    assert await use_cases.teamspaces.list(alice, workspace.id) == []
+    assert await use_cases.folders.list_for_workspace(alice, workspace.id) == []
+    # Both documents (loose and foldered) are recoverable from the trash.
+    trashed = await use_cases.documents.list_trashed(alice, workspace_id=workspace.id)
+    assert {d.id for d in trashed} == {loose.id, foldered.id}
+    # Restored docs are private (teamspace-less), since the teamspace is gone.
+    restored = await use_cases.documents.restore(alice, loose.id)
+    assert restored.teamspace_id is None
+    assert restored.folder_id is None
+
+
+async def test_non_owner_cannot_delete_a_teamspace(use_cases, memberships, clock, alice):
+    workspace = await use_cases.workspaces.create(alice, name="WS")
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    # Bob is a workspace editor but not a teamspace owner.
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=BOB.user_id,
+            role=Role.EDITOR, granted_at=clock.now(),
+        )
+    )
+    with pytest.raises(NotAuthorized):
+        await use_cases.teamspaces.delete(BOB, teamspace.id)
+    assert [t.id for t in await use_cases.teamspaces.list(alice, workspace.id)] == [
+        teamspace.id
+    ]
 
 
 async def test_place_in_private_folder_makes_document_private(use_cases, memberships, clock, alice):

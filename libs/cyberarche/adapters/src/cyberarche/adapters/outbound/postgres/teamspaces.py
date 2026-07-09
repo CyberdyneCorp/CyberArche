@@ -137,6 +137,16 @@ class PostgresTeamspaceRepository:
         )
         return [_teamspace_from_row(r) for r in rows]
 
+    async def delete(self, tenant_id: TenantId, teamspace_id: TeamspaceId) -> None:
+        # Memberships and folders cascade via ON DELETE CASCADE; documents keep
+        # existing (their teamspace_id is set NULL by ON DELETE SET NULL) — the
+        # use case has already moved them to trash before we get here.
+        await self._pool.execute(
+            "DELETE FROM teamspaces WHERE id = $1 AND tenant_id = $2",
+            teamspace_id,
+            tenant_id,
+        )
+
 
 class PostgresFavoriteRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:

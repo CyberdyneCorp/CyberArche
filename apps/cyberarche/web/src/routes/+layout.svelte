@@ -2,6 +2,8 @@
 	import '../app.css';
 	import { updated } from '$app/state';
 	import { session } from '$lib/viewmodels/session.svelte';
+	import Toasts from '$lib/components/Toasts.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let { children } = $props();
 
@@ -16,6 +18,9 @@
 </script>
 
 {@render children()}
+
+<Toasts />
+<ConfirmDialog />
 
 {#if updated.current}
 	<button class="update-banner" data-testid="update-banner" onclick={reload}>

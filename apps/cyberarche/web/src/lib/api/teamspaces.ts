@@ -25,6 +25,10 @@ export const createTeamspace = (workspaceId: string, name: string, icon = 'T') =
 export const teamspaceDocuments = (teamspaceId: string) =>
 	get<Document[]>(`/api/v1/teamspaces/${teamspaceId}/documents`);
 
+/** Delete a teamspace; its documents move to Trash and its folders are removed. */
+export const deleteTeamspace = (teamspaceId: string) =>
+	del<void>(`/api/v1/teamspaces/${teamspaceId}`);
+
 export const teamspaceMembers = (teamspaceId: string) =>
 	get<TeamspaceMember[]>(`/api/v1/teamspaces/${teamspaceId}/members`);
 

@@ -205,13 +205,14 @@ test('a trashed document can be permanently deleted', async ({ page, request }) 
 	await row.getByLabel('Move to trash').click();
 	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Doomed' })).toHaveCount(1);
 
-	// Permanently delete it — the confirm dialog must be accepted.
-	page.once('dialog', (dialog) => dialog.accept());
+	// Permanently delete it — the in-app confirm dialog must be accepted.
 	await page
 		.getByTestId('trash-doc')
 		.filter({ hasText: 'Doomed' })
 		.getByTestId('trash-purge')
 		.click();
+	await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+	await page.getByTestId('dialog-confirm').click();
 	await expect(page.getByTestId('trash-doc').filter({ hasText: 'Doomed' })).toHaveCount(0);
 
 	// The backend agrees it is gone: it cannot be restored.
@@ -268,11 +269,12 @@ test('folders live under a teamspace and the Private section holds loose docs', 
 		page.getByTestId('teamspace-name-label').filter({ hasText: 'Eng' })
 	).toHaveCount(1);
 
-	// Create a folder in the teamspace (prompt-driven).
+	// Create a folder in the teamspace (in-app prompt dialog).
 	const row = page.getByTestId('teamspace-row').filter({ hasText: 'Eng' });
 	await row.hover();
-	page.once('dialog', (d) => d.accept('Specs'));
 	await row.getByTestId('teamspace-add-folder').click();
+	await page.getByTestId('dialog-input').fill('Specs');
+	await page.getByTestId('dialog-confirm').click();
 	await expect(page.getByTestId('folder-name').filter({ hasText: 'Specs' })).toHaveCount(1);
 
 	// Add a page inside the folder -> it lands under the folder (not the tree root).
@@ -354,8 +356,9 @@ test('dragging a doc into a folder places it once and keeps the teamspace open',
 	await page.getByTestId('teamspace-name').press('Enter');
 	const teamspace = page.getByTestId('teamspace-row').filter({ hasText: 'Docs' });
 	await teamspace.hover();
-	page.once('dialog', (d) => d.accept('Bucket'));
 	await teamspace.getByTestId('teamspace-add-folder').click();
+	await page.getByTestId('dialog-input').fill('Bucket');
+	await page.getByTestId('dialog-confirm').click();
 	const folder = page.getByTestId('folder-row').filter({ hasText: 'Bucket' });
 	await expect(folder).toHaveCount(1);
 	await folder.getByLabel('Expand').click();
@@ -373,4 +376,57 @@ test('dragging a doc into a folder places it once and keeps the teamspace open',
 	await expect(page.getByTestId('folder-doc').filter({ hasText: 'ToFolder' })).toHaveCount(1);
 	await expect(page.getByTestId('teamspace-doc').filter({ hasText: 'ToFolder' })).toHaveCount(0);
 	await expect(folder).toHaveCount(1);
+});
+
+test('delete a folder then its teamspace from the sidebar, moving docs to Trash', async ({
+	page,
+	request
+}) => {
+	await openDocument(page, request);
+
+	// A teamspace, a folder in it, and a page inside the folder.
+	await page.getByTestId('new-teamspace').click();
+	await page.getByTestId('teamspace-name').fill('Doomed');
+	await page.getByTestId('teamspace-name').press('Enter');
+	const teamspace = page.getByTestId('teamspace-row').filter({ hasText: 'Doomed' });
+	await teamspace.hover();
+	await teamspace.getByTestId('teamspace-add-folder').click();
+	await page.getByTestId('dialog-input').fill('Trashme');
+	await page.getByTestId('dialog-confirm').click();
+	const folder = page.getByTestId('folder-row').filter({ hasText: 'Trashme' });
+	await expect(folder).toHaveCount(1);
+	// We're already on a /d/ page (openDocument navigated there), so wait for the
+	// URL to change to the newly created folder page rather than matching /d/.
+	const prevUrl = page.url();
+	await folder.hover();
+	await folder.getByTestId('folder-add-page').click();
+	await expect.poll(() => page.url()).not.toBe(prevUrl);
+	const folderedDocId = page.url().split('/d/')[1];
+
+	// Delete the folder via its kebab (⋯) menu -> in-app confirm dialog.
+	await folder.hover();
+	await folder.getByTestId('folder-menu').click();
+	await expect(page.getByTestId('context-menu')).toBeVisible();
+	await page.getByTestId('folder-delete').click();
+	await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+	await page.getByTestId('dialog-confirm').click();
+
+	// Toast confirms it and the folder is gone.
+	await expect(page.getByTestId('toast').filter({ hasText: 'Deleted' })).toHaveCount(1);
+	await expect(page.getByTestId('folder-row').filter({ hasText: 'Trashme' })).toHaveCount(0);
+	// The folder's page is now in the workspace trash (recoverable).
+	const trash = await (
+		await request.get(`${API}/api/v1/workspaces/${workspaceId}/trash`, {
+			headers: { Authorization: `Bearer ${session.access}` }
+		})
+	).json();
+	expect(trash.map((d: { id: string }) => d.id)).toContain(folderedDocId);
+
+	// Delete the (now empty) teamspace via right-click context menu.
+	await teamspace.click({ button: 'right' });
+	await expect(page.getByTestId('context-menu')).toBeVisible();
+	await page.getByTestId('teamspace-delete').click();
+	await expect(page.getByTestId('confirm-dialog')).toBeVisible();
+	await page.getByTestId('dialog-confirm').click();
+	await expect(page.getByTestId('teamspace-row').filter({ hasText: 'Doomed' })).toHaveCount(0);
 });

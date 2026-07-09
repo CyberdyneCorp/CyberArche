@@ -199,7 +199,9 @@ def use_cases(
         ),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
-        teamspaces=TeamspaceUseCases(teamspace_repo, documents, access, clock, ids),
+        teamspaces=TeamspaceUseCases(
+            teamspace_repo, documents, folder_repo, access, clock, ids
+        ),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
         folders=FolderUseCases(folder_repo, documents, access, clock, ids),
     )

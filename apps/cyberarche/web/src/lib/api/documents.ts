@@ -29,6 +29,10 @@ export const createDocument = (
 
 export const getDocument = (id: string) => get<Document>(`/api/v1/documents/${id}`);
 
+/** Documents in the workspace's trash (soft-deleted, restorable). */
+export const listTrashed = (workspaceId: string) =>
+	get<Document[]>(`/api/v1/workspaces/${workspaceId}/trash`);
+
 export const listChildren = (workspaceId: string, parentId?: string) => {
 	const params = new URLSearchParams({ workspace_id: workspaceId });
 	if (parentId) params.set('parent_id', parentId);

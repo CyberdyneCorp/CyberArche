@@ -74,6 +74,8 @@ describe('document tree ViewModel', () => {
 			'fetch',
 			vi.fn(async (url: string, init?: RequestInit) => {
 				const method = init?.method ?? 'GET';
+				if (method === 'GET' && url.endsWith('/trash'))
+					return { ok: true, status: 200, json: async () => [] };
 				if (method === 'GET') return { ok: true, status: 200, json: async () => [DOC('d-1', 'Doomed')] };
 				if (method === 'DELETE' && url === '/api/v1/documents/d-1')
 					return { ok: true, status: 200, json: async () => ({ ...DOC('d-1', 'Doomed'), trashed: true }) };
@@ -92,5 +94,25 @@ describe('document tree ViewModel', () => {
 		await tree.purge('d-1');
 		expect(tree.trash).toEqual([]);
 		expect(tree.roots).toEqual([]);
+	});
+
+	it('open() loads the trash from the server', async () => {
+		// So a document trashed elsewhere (e.g. by deleting its teamspace/folder)
+		// shows in the Trash section after a refresh, not only within this session.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				const method = init?.method ?? 'GET';
+				if (method === 'GET' && url.endsWith('/trash'))
+					return { ok: true, status: 200, json: async () => [DOC('t-1', 'Gone')] };
+				return { ok: true, status: 200, json: async () => [DOC('d-1', 'Live')] };
+			}) as unknown as typeof fetch
+		);
+
+		const tree = createDocumentTree();
+		await tree.open('ws-1');
+
+		expect(tree.roots.map((n) => n.document.id)).toEqual(['d-1']);
+		expect(tree.trash.map((d) => d.id)).toEqual(['t-1']);
 	});
 });

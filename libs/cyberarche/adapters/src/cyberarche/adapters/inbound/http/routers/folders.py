@@ -125,3 +125,13 @@ async def list_private(
         caller, workspace_id=WorkspaceId(workspace_id)
     )
     return [DocumentResponse.from_domain(d) for d in documents]
+
+
+@router.get("/api/v1/workspaces/{workspace_id}/trash")
+async def list_trash(
+    workspace_id: str, cases: Cases, caller: Caller
+) -> list[DocumentResponse]:
+    documents = await cases.documents.list_trashed(
+        caller, workspace_id=WorkspaceId(workspace_id)
+    )
+    return [DocumentResponse.from_domain(d) for d in documents]

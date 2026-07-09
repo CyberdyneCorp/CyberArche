@@ -107,6 +107,13 @@ async def remove_teamspace_member(
     )
 
 
+@router.delete("/api/v1/teamspaces/{teamspace_id}", status_code=204)
+async def delete_teamspace(
+    teamspace_id: str, cases: Cases, caller: Caller
+) -> None:
+    await cases.teamspaces.delete(caller, TeamspaceId(teamspace_id))
+
+
 # ---- favourites -------------------------------------------------------------
 
 

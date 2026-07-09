@@ -2,9 +2,12 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { dialogs } from '$lib/viewmodels/dialogs.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
-	import type { TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
+	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
+	import { toasts } from '$lib/viewmodels/toasts.svelte';
+	import ContextMenu from './ContextMenu.svelte';
 	import TreeItem from './TreeItem.svelte';
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 
@@ -24,8 +27,17 @@
 
 	async function newFolder(teamspaceId: string | null) {
 		if (!teamspaces) return;
-		const name = prompt('Folder name')?.trim();
-		if (name) await teamspaces.createFolder(name, teamspaceId);
+		const name = (
+			await dialogs.prompt({
+				title: 'New folder',
+				placeholder: 'Folder name',
+				confirmLabel: 'Create'
+			})
+		)?.trim();
+		if (!name) return;
+		const folder = await teamspaces.createFolder(name, teamspaceId);
+		if (folder) toasts.success(`Created folder “${name}”`);
+		else toasts.error(teamspaces.error ?? "Couldn't create folder");
 	}
 
 	async function newDocumentInFolder(folder: {
@@ -55,10 +67,15 @@
 
 	async function confirmPurge(id: string, title: string) {
 		// Permanent and unrecoverable — confirm before purging.
-		if (!confirm(`Permanently delete "${title || 'Untitled'}"? This cannot be undone.`)) {
-			return;
-		}
+		const ok = await dialogs.confirm({
+			title: 'Delete permanently',
+			message: `Permanently delete “${title || 'Untitled'}”? This cannot be undone.`,
+			confirmLabel: 'Delete forever',
+			danger: true
+		});
+		if (!ok) return;
 		await documentTree.purge(id);
+		toasts.success('Deleted permanently');
 	}
 
 	async function signOut() {
@@ -73,6 +90,98 @@
 
 	async function refresh() {
 		await Promise.all([teamspaces?.load(), documentTree.open(workspaceId)]);
+	}
+
+	// --- context menu + delete flows ------------------------------------------
+	interface MenuItem {
+		label: string;
+		danger?: boolean;
+		testid?: string;
+		onSelect: () => void;
+	}
+	let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+	function onKebab(event: MouseEvent, items: MenuItem[]) {
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		menu = { x: rect.left, y: rect.bottom + 4, items };
+	}
+
+	function onContext(event: MouseEvent, items: MenuItem[]) {
+		event.preventDefault();
+		menu = { x: event.clientX, y: event.clientY, items };
+	}
+
+	const teamspaceMenu = (node: TeamspaceNode): MenuItem[] => [
+		{
+			label: 'Delete teamspace',
+			danger: true,
+			testid: 'teamspace-delete',
+			onSelect: () => deleteTeamspaceFlow(node)
+		}
+	];
+
+	const folderMenu = (fn: FolderNode): MenuItem[] => [
+		{
+			label: 'Delete folder',
+			danger: true,
+			testid: 'folder-delete',
+			onSelect: () => deleteFolderFlow(fn)
+		}
+	];
+
+	function docsPhrase(count: number): string {
+		if (count <= 0) return 'no documents';
+		return count === 1 ? 'its 1 document' : `its ${count} documents`;
+	}
+
+	async function deleteTeamspaceFlow(node: TeamspaceNode) {
+		const ts = node.teamspace;
+		let count = node.documents.length;
+		const { teamspaceDocuments, deleteTeamspace } = await import('$lib/api/teamspaces');
+		try {
+			count = (await teamspaceDocuments(ts.id)).length;
+		} catch {
+			/* fall back to the loaded count */
+		}
+		const ok = await dialogs.confirm({
+			title: 'Delete teamspace',
+			message: `Delete “${ts.name}” and move ${docsPhrase(count)} to Trash? Its folders will be removed.`,
+			confirmLabel: 'Delete',
+			danger: true
+		});
+		if (!ok) return;
+		try {
+			await deleteTeamspace(ts.id);
+			toasts.success(`Deleted “${ts.name}”`);
+			await refresh();
+		} catch {
+			toasts.error(`Couldn't delete “${ts.name}”`);
+		}
+	}
+
+	async function deleteFolderFlow(fn: FolderNode) {
+		const folder = fn.folder;
+		const { folderDocuments, deleteFolder } = await import('$lib/api/folders');
+		let count = fn.documents.length;
+		try {
+			count = (await folderDocuments(folder.id)).length;
+		} catch {
+			/* fall back to the loaded count */
+		}
+		const ok = await dialogs.confirm({
+			title: 'Delete folder',
+			message: `Delete folder “${folder.name}” and move ${docsPhrase(count)} to Trash?`,
+			confirmLabel: 'Delete',
+			danger: true
+		});
+		if (!ok) return;
+		try {
+			await deleteFolder(folder.id);
+			toasts.success(`Deleted “${folder.name}”`);
+			await refresh();
+		} catch {
+			toasts.error(`Couldn't delete “${folder.name}”`);
+		}
 	}
 
 	function onDragStart(event: DragEvent, docId: string) {
@@ -199,6 +308,7 @@
 					ondragover={(e) => allowDrop(e, `ts:${node.teamspace.id}`)}
 					ondragleave={() => (dropTarget = null)}
 					ondrop={(e) => onDrop(e, { teamspaceId: node.teamspace.id })}
+					oncontextmenu={(e) => onContext(e, teamspaceMenu(node))}
 				>
 					<button
 						class="disclosure"
@@ -221,6 +331,13 @@
 						aria-label="Add a page"
 						data-testid="teamspace-add-page"
 						onclick={() => newDocument(node.teamspace.id)}>＋</button
+					>
+					<button
+						class="row-add"
+						title="Teamspace actions"
+						aria-label="Teamspace actions"
+						data-testid="teamspace-menu"
+						onclick={(e) => onKebab(e, teamspaceMenu(node))}>⋯</button
 					>
 				</div>
 				{#if node.expanded}
@@ -285,6 +402,7 @@
 			ondragover={(e) => allowDrop(e, `folder:${fn.folder.id}`)}
 			ondragleave={() => (dropTarget = null)}
 			ondrop={(e) => onDrop(e, { folderId: fn.folder.id })}
+			oncontextmenu={(e) => onContext(e, folderMenu(fn))}
 		>
 			<button
 				class="disclosure"
@@ -300,6 +418,13 @@
 				aria-label="Add a page to folder"
 				data-testid="folder-add-page"
 				onclick={() => newDocumentInFolder(fn.folder)}>＋</button
+			>
+			<button
+				class="row-add"
+				title="Folder actions"
+				aria-label="Folder actions"
+				data-testid="folder-menu"
+				onclick={(e) => onKebab(e, folderMenu(fn))}>⋯</button
 			>
 		</div>
 		{#if fn.expanded}
@@ -398,6 +523,10 @@
 		<button class="foot-btn" onclick={signOut} data-testid="sign-out">↩ Sign out</button>
 	</footer>
 </aside>
+
+{#if menu}
+	<ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
 
 <style>
 	.sidebar {

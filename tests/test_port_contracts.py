@@ -260,6 +260,15 @@ async def test_teamspace_repository_contract(adapters):
     await repo.remove_member(TeamspaceId("ts-1"), UserId("bob"))
     assert await repo.member_role(TeamspaceId("ts-1"), UserId("bob")) is None
 
+    # delete() removes the teamspace and (by cascade) its memberships.
+    await repo.add_member(TeamspaceMembership(
+        teamspace_id=TeamspaceId("ts-1"), user_id=UserId("alice"),
+        role=Role.OWNER, granted_at=NOW))
+    await repo.delete(TenantId("acme"), TeamspaceId("ts-1"))
+    assert await repo.get(TenantId("acme"), TeamspaceId("ts-1")) is None
+    assert await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1")) == []
+    assert await repo.member_role(TeamspaceId("ts-1"), UserId("alice")) is None
+
 
 async def test_document_teamspace_listing_contract(adapters):
     ws_repo, doc_repo, ts_repo = adapters["workspaces"], adapters["documents"], adapters["teamspaces"]

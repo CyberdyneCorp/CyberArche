@@ -4,6 +4,7 @@
 import {
 	createDocument,
 	listChildren,
+	listTrashed,
 	purgeDocument,
 	restoreDocument,
 	retitleDocument,
@@ -66,9 +67,12 @@ export function createDocumentTree() {
 		async open(workspace: string) {
 			workspaceId = workspace;
 			loading = (async () => {
-				const documents = await listChildren(workspace);
+				const [documents, trashed] = await Promise.all([
+					listChildren(workspace),
+					listTrashed(workspace)
+				]);
 				roots = documents.map(node);
-				trash = [];
+				trash = trashed;
 			})();
 			try {
 				await loading;
