@@ -129,3 +129,37 @@ async def test_client_credentials_token_is_cached(rsa_key):
 
     assert first == second == "svc-token"
     assert calls["token"] == 1  # cached until near expiry
+
+
+async def test_alg_none_token_is_rejected(rsa_key):
+    """An unsigned `alg=none` token must never verify. Guards the verifier's
+    cryptographic check (RS256 signature against the asymmetric JWKS): if
+    signature verification were ever disabled, this would start passing."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    unsigned = jwt.encode(
+        {"sub": "attacker", "exp": time.time() + 300},
+        key="",
+        algorithm="none",
+        headers={"kid": KID},
+    )
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(unsigned)
+
+
+async def test_hs256_token_is_rejected(rsa_key):
+    """RS/HS algorithm-confusion regression: a symmetric HS256 token must never
+    verify against the asymmetric JWKS, whatever HMAC secret the attacker chose
+    (the verifier only validates RS256 signatures against the RSA key)."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    forged = jwt.encode(
+        {"sub": "attacker", "exp": time.time() + 300},
+        key="attacker-chosen-secret",
+        algorithm="HS256",
+        headers={"kid": KID},
+    )
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(forged)

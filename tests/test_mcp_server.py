@@ -192,3 +192,97 @@ async def test_parity_all_surfaces_deny_the_same_edit(mcp_setup):
     # But reading is allowed on every surface (viewer role).
     read = data(await client.call_tool("read_document", {"document_id": document.id}))
     assert read["title"] == "Locked"
+
+
+# ---- the REAL HTTP caller resolver (mcp-server / auth-integration) ----------
+#
+# Every test above injects a fake resolver, so the production auth path — parse
+# the Bearer header, verify it through container.token_port — was never run.
+# These exercise the real _http_caller_resolver with a synthetic HTTP request,
+# including an API key flowing through the composite verifier.
+
+
+def _request_with_auth(header_value: str | None):
+    from starlette.requests import Request
+
+    headers = [(b"authorization", header_value.encode())] if header_value else []
+    return Request(
+        {"type": "http", "http_version": "1.1", "method": "POST", "scheme": "http",
+         "path": "/mcp", "raw_path": b"/mcp", "query_string": b"",
+         "headers": headers, "client": None, "server": None, "root_path": ""}
+    )
+
+
+async def _resolve_with(container, header_value: str | None):
+    """Run the real resolver as if an HTTP request with this header were active."""
+    from cyberarche.adapters.inbound.mcp.server import _http_caller_resolver
+    from fastmcp.server import dependencies as dep
+
+    resolve = _http_caller_resolver(container)
+    token = dep._current_http_request.set(_request_with_auth(header_value))
+    try:
+        return await resolve()
+    finally:
+        dep._current_http_request.reset(token)
+
+
+async def test_real_resolver_verifies_a_bearer_token_through_the_token_port():
+    from cyberarche.application.ports.identity import Claims
+
+    inner = StaticTokenPort(
+        {"good-jwt": Claims(subject="alice", tenant_id="acme", email="a@acme.test")}
+    )
+    container = await build_container(WiringConfig(backend="memory"), token_port=inner)
+    try:
+        caller = await _resolve_with(container, "Bearer good-jwt")
+        assert caller.user_id == "alice"
+        assert caller.tenant_id == "acme"
+    finally:
+        await container.aclose()
+
+
+async def test_real_resolver_rejects_missing_and_malformed_headers():
+    container = await build_container(
+        WiringConfig(backend="memory"), token_port=StaticTokenPort({})
+    )
+    try:
+        for header in (None, "", "good-jwt", "Basic good-jwt", "Bearer   "):
+            with pytest.raises(NotAuthenticated):
+                await _resolve_with(container, header)
+    finally:
+        await container.aclose()
+
+
+async def test_real_resolver_rejects_an_unknown_token():
+    container = await build_container(
+        WiringConfig(backend="memory"), token_port=StaticTokenPort({})
+    )
+    try:
+        with pytest.raises(NotAuthenticated):
+            await _resolve_with(container, "Bearer not-a-real-token")
+    finally:
+        await container.aclose()
+
+
+async def test_real_resolver_accepts_an_api_key_and_rejects_it_once_revoked():
+    # Mint through the container's own use case so the key lands in the repo the
+    # container's CompositeTokenVerifier actually checks (build_container wraps
+    # any injected token_port in its own composite over its own key repo).
+    from tests.conftest import caller
+
+    container = await build_container(
+        WiringConfig(backend="memory"), token_port=StaticTokenPort({})
+    )
+    try:
+        alice = caller("alice", "acme")
+        created = await container.use_cases.api_keys.create(alice, name="claude-desktop")
+        secret = created.secret  # shown once
+
+        caller_ctx = await _resolve_with(container, f"Bearer {secret}")
+        assert caller_ctx.user_id == "alice"  # authenticates as the key's owner
+
+        await container.use_cases.api_keys.revoke(alice, created.key.id)
+        with pytest.raises(NotAuthenticated):
+            await _resolve_with(container, f"Bearer {secret}")
+    finally:
+        await container.aclose()
