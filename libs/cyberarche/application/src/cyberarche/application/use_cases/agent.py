@@ -738,8 +738,10 @@ def _python_tool_spec() -> ToolSpec:
             "the result value, and errors are returned to you to explain. Prefer "
             "this over an insert_blocks code block whenever the user wants to SEE a "
             "plot or result — a code block only shows source, it does not run. Each "
-            "call is isolated (no variables/imports persist). Use raw strings for "
-            "LaTeX in matplotlib labels/titles, e.g. r'$\\frac{1}{x}$'."
+            "call is isolated (no variables/imports persist). Figures are captured "
+            "and inserted automatically — just create the plot, do NOT call "
+            "plt.savefig. Use raw strings for LaTeX in matplotlib labels/titles, "
+            "e.g. r'$\\frac{1}{x}$'."
         ),
         parameters={
             "type": "object",

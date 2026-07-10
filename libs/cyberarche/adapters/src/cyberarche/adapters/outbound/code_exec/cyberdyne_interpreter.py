@@ -2,15 +2,16 @@
 
 Flow (see the service OpenAPI): POST /sessions to get a workspace, POST /execute
 to run code, then GET /files/{session_id}/{name} to download any figure the run
-produced. Matplotlib under the headless Agg backend writes nothing on show(), so
-we append a savefig epilogue when the code plots but does not save — mirroring
-the interpreter's own auto-capture. Authenticated with a CyberdyneAuth bearer
-from the shared service-token source (same seam as the RAG adapter).
+produced. The interpreter itself auto-captures open matplotlib figures (its
+worker saves every `plt.get_fignums()` figure), so we send the user's code
+unmodified — appending our own savefig would double-insert the same plot.
+Authenticated with a CyberdyneAuth bearer from the service-token source (same
+seam as the RAG adapter).
 """
 
 from __future__ import annotations
 
-import textwrap
+import hashlib
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -22,29 +23,18 @@ TokenSource = Callable[[], Awaitable[str]]
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 _TEXT_MIME_PREFIXES = ("text/", "application/json")
 
-# NOTE: RestrictedPython (the interpreter's default `restricted` layer) rejects
-# leading-underscore identifiers, so the capture variables use a `cyb_` prefix
-# (never `_plt`/`_fig`), and iterate by index rather than the iterator protocol.
-_CAPTURE_EPILOGUE = textwrap.dedent(
-    """
-    try:
-        import matplotlib.pyplot as cyb_plt
-        cyb_fignums = cyb_plt.get_fignums()
-        for cyb_idx in range(len(cyb_fignums)):
-            cyb_plt.figure(cyb_fignums[cyb_idx]).savefig("figure_%d.png" % (cyb_idx + 1))
-    except Exception:
-        pass
-    """
-)
 
-
-def _with_figure_capture(code: str) -> str:
-    """Append a savefig epilogue for matplotlib code that doesn't save itself."""
-    lowered = code.lower()
-    plots = "matplotlib" in lowered or "pyplot" in lowered or "plt." in lowered
-    if not plots or "savefig" in lowered:
-        return code
-    return f"{code}\n{_CAPTURE_EPILOGUE}"
+def _dedupe_images(images: list[CodeImage]) -> list[CodeImage]:
+    """Drop byte-identical duplicates (e.g. a figure listed under two names)."""
+    seen: set[str] = set()
+    unique: list[CodeImage] = []
+    for image in images:
+        digest = hashlib.sha256(image.content).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        unique.append(image)
+    return unique
 
 
 class CyberdyneInterpreterAdapter:
@@ -69,7 +59,8 @@ class CyberdyneInterpreterAdapter:
         exec_resp = await self._http.post(
             f"{self._base}/execute",
             json={
-                "code": _with_figure_capture(code),
+                # Unmodified: the interpreter auto-captures open figures itself.
+                "code": code,
                 "session_id": session_id,
                 "restricted": True,
             },
@@ -78,7 +69,9 @@ class CyberdyneInterpreterAdapter:
         exec_resp.raise_for_status()
         body = exec_resp.json()
 
-        images = await self._download_images(session_id, body, headers)
+        images = _dedupe_images(
+            await self._download_images(session_id, body, headers)
+        )
         tables = [
             str(ro.get("text"))
             for ro in body.get("rich_outputs", []) or []

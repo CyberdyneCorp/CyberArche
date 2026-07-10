@@ -451,25 +451,53 @@ async def test_run_python_reports_unavailable_when_unconfigured(use_cases, alice
     assert "not configured" in result
 
 
-def test_figure_capture_epilogue_only_for_unsaved_matplotlib():
+async def test_interpreter_adapter_sends_code_unmodified_and_dedupes_figures():
+    """Regression: the interpreter auto-captures figures, so we must NOT append a
+    savefig epilogue (it produced a second file → the plot was inserted twice)."""
+    import httpx
+
     from cyberarche.adapters.outbound.code_exec.cyberdyne_interpreter import (
-        _with_figure_capture,
+        CyberdyneInterpreterAdapter,
     )
 
-    assert _with_figure_capture("print(1)") == "print(1)"  # no plotting -> unchanged
-    saved = "import matplotlib.pyplot as plt\nplt.plot([1])\nplt.savefig('x.png')"
-    assert _with_figure_capture(saved) == saved  # already saves -> unchanged
-    plot = "import matplotlib.pyplot as plt\nplt.plot([1, 2])"
-    captured = _with_figure_capture(plot)
-    assert captured.startswith(plot) and "savefig" in captured
-    # Regression: the injected epilogue must be RestrictedPython-safe — no
-    # leading-underscore identifiers (the interpreter rejects them). The bug was
-    # `_plt`/`_fig_num` causing a SyntaxError inside the sandbox.
-    epilogue = captured[len(plot):]
-    import re
+    original = "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\nplt.show()"
+    sent = {}
 
-    assert not re.search(r"(?<![A-Za-z0-9_])_[A-Za-z]", epilogue)
-    assert "cyb_plt" in epilogue
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/sessions":
+            return httpx.Response(200, json={"session_id": "s1"})
+        if path == "/execute":
+            import json as _json
+
+            sent["code"] = _json.loads(request.content)["code"]
+            # Same figure listed under two names → must collapse to one image.
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "stdout": "",
+                    "stderr": "",
+                    "result": None,
+                    "rich_outputs": [{"mime_type": "image/png", "artifact": "fig-1.png"}],
+                    "artifacts": [{"name": "figure_1.png", "size_bytes": 3, "modified_at": 0}],
+                },
+            )
+        if path.startswith("/files/"):
+            return httpx.Response(200, content=b"PNGBYTES", headers={"content-type": "image/png"})
+        return httpx.Response(404)
+
+    async def token() -> str:
+        return "t"
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = CyberdyneInterpreterAdapter("https://interp", client, token)
+    outcome = await adapter.run(original)
+    await client.aclose()
+
+    assert sent["code"] == original  # no epilogue appended
+    assert outcome.success
+    assert len(outcome.images) == 1  # byte-identical duplicate collapsed
 
 
 async def test_generate_image_reports_unavailable_when_unconfigured(use_cases, alice):
