@@ -129,6 +129,18 @@ class InMemoryDocumentRepository:
             if d.tenant_id == tenant_id and d.workspace_id == workspace_id and d.trashed
         ]
 
+    async def list_in_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Document]:
+        matches = [
+            d
+            for d in self._items.values()
+            if d.tenant_id == tenant_id
+            and d.workspace_id == workspace_id
+            and not d.trashed
+        ]
+        return sorted(matches, key=lambda d: d.title.lower())
+
     async def update(self, document: Document) -> None:
         self._items[document.id] = document
 

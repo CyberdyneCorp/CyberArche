@@ -193,6 +193,21 @@ textarea {
 	color: var(--ai);
 }
 
+/* Wikilinks ([[Document]]) rendered inline by the editor. */
+.wikilink {
+	color: var(--acc-strong);
+	text-decoration: none;
+	border-bottom: 1px solid color-mix(in srgb, var(--acc-strong) 35%, transparent);
+	cursor: pointer;
+}
+.wikilink:hover {
+	background: var(--accbg);
+}
+.wikilink.broken {
+	color: var(--rose);
+	border-bottom: 1px dashed color-mix(in srgb, var(--rose) 45%, transparent);
+}
+
 /* PDF export = browser print: show only the document canvas (title + blocks),
  * hiding the sidebar, top bar, agent panel, dialogs, and toasts. Math, mermaid,
  * and images print as rendered on screen. */

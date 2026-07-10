@@ -135,3 +135,15 @@ async def list_trash(
         caller, workspace_id=WorkspaceId(workspace_id)
     )
     return [DocumentResponse.from_domain(d) for d in documents]
+
+
+@router.get("/api/v1/workspaces/{workspace_id}/search")
+async def search_documents(
+    workspace_id: str, cases: Cases, caller: Caller, q: str = "", limit: int = 50
+) -> list[DocumentResponse]:
+    """Title search within the workspace (empty q returns all accessible docs).
+    Backs the command palette and the wikilink title index."""
+    documents = await cases.documents.search_in_workspace(
+        caller, WorkspaceId(workspace_id), query=q, limit=limit
+    )
+    return [DocumentResponse.from_domain(d) for d in documents]

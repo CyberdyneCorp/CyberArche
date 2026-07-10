@@ -183,6 +183,20 @@ class PostgresDocumentRepository:
         )
         return [_document_from_row(r) for r in rows]
 
+    async def list_in_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Document]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM documents
+            WHERE tenant_id = $1 AND workspace_id = $2 AND trashed = FALSE
+            ORDER BY lower(title)
+            """,
+            tenant_id,
+            workspace_id,
+        )
+        return [_document_from_row(r) for r in rows]
+
     async def list_for_teamspace(
         self, tenant_id: TenantId, teamspace_id: TeamspaceId
     ) -> list[Document]:

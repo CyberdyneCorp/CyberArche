@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { getDocument, type Document } from '$lib/api/documents';
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
+	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
 	import ExportDialog from '$lib/components/ExportDialog.svelte';
@@ -143,6 +144,7 @@
 			{#if editor}
 				<BlockEditor {editor} {sharing} />
 			{/if}
+			<BacklinksPanel documentId={doc.id} />
 		</div>
 	</article>
 	{#if agentOpen && agent}

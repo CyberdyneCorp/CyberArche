@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import { createTeamspaces, type TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
@@ -11,6 +13,7 @@
 	const workspaceId = $derived(page.params.workspaceId!);
 
 	let teamspaces = $state<TeamspacesVM | null>(null);
+	let paletteOpen = $state(false);
 
 	$effect(() => {
 		if (!session.isAuthenticated) {
@@ -23,12 +26,23 @@
 			if (documentTree.workspaceId !== workspaceId) {
 				await documentTree.open(workspaceId);
 			}
+			// Index the workspace's documents for wikilink resolution + Cmd+K.
+			linkIndex.load(workspaceId);
 			const vm = createTeamspaces(workspaceId);
 			teamspaces = vm;
 			await vm.load();
 		})();
 	});
+
+	function onWindowKeydown(event: KeyboardEvent) {
+		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+			event.preventDefault();
+			paletteOpen = !paletteOpen;
+		}
+	}
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 {#if workspaceId === 'new'}
 	<main class="first-run">
@@ -56,6 +70,9 @@
 			{@render children()}
 		</main>
 	</div>
+	{#if paletteOpen}
+		<CommandPalette {workspaceId} onclose={() => (paletteOpen = false)} />
+	{/if}
 {/if}
 
 <style>

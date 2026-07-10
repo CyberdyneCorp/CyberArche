@@ -29,6 +29,16 @@ export const createDocument = (
 
 export const getDocument = (id: string) => get<Document>(`/api/v1/documents/${id}`);
 
+/** Title search within a workspace (empty query returns all accessible docs). */
+export const searchDocuments = (workspaceId: string, q = '', limit = 50) =>
+	get<Document[]>(
+		`/api/v1/workspaces/${workspaceId}/search?${new URLSearchParams({ q, limit: String(limit) })}`
+	);
+
+/** Documents that reference this one via a [[title]] wikilink. */
+export const backlinks = (documentId: string) =>
+	get<Document[]>(`/api/v1/documents/${documentId}/backlinks`);
+
 /** Documents in the workspace's trash (soft-deleted, restorable). */
 export const listTrashed = (workspaceId: string) =>
 	get<Document[]>(`/api/v1/workspaces/${workspaceId}/trash`);

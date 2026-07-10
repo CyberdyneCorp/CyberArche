@@ -40,6 +40,15 @@ async def get_document(document_id: str, cases: Cases, caller: Caller) -> Docume
     return DocumentResponse.from_domain(document)
 
 
+@router.get("/{document_id}/backlinks")
+async def document_backlinks(
+    document_id: str, cases: Cases, caller: Caller
+) -> list[DocumentResponse]:
+    """Documents that reference this one via a `[[title]]` wikilink."""
+    documents = await cases.links.backlinks(caller, DocumentId(document_id))
+    return [DocumentResponse.from_domain(d) for d in documents]
+
+
 @router.get("")
 async def list_children(
     workspace_id: str,

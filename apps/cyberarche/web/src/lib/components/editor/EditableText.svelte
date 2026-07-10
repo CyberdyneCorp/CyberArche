@@ -3,6 +3,7 @@
 	 * values are applied only when unfocused (block-level LWW, see D-9). */
 
 	import { renderInline } from '$lib/editor/inline';
+	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 
 	let {
 		value = '',
@@ -58,7 +59,7 @@
 		if (isEditing) {
 			if (element.textContent !== current) element.textContent = current;
 		} else if (isRich) {
-			element.innerHTML = renderInline(current);
+			element.innerHTML = renderInline(current, linkIndex.hrefFor);
 		} else if (element.textContent !== current) {
 			element.textContent = current;
 		}
@@ -76,7 +77,7 @@
 		if (!element || signal === lastSyncSignal) return;
 		lastSyncSignal = signal;
 		if (!editing && rich) {
-			element.innerHTML = renderInline(current);
+			element.innerHTML = renderInline(current, linkIndex.hrefFor);
 			return;
 		}
 		if (element.textContent === current) return;

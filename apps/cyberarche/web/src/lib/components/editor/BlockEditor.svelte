@@ -1,14 +1,35 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import CommentThread from '$lib/components/CommentThread.svelte';
 	import { blockDefinition } from '$lib/editor/registry';
 	import { colorFor, type EditorVM } from '$lib/viewmodels/editor.svelte';
+	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 	import type { SharingVM } from '$lib/viewmodels/sharing.svelte';
+	import LinkMenu from './LinkMenu.svelte';
 	import SlashMenu from './SlashMenu.svelte';
 
 	let { editor, sharing = null }: { editor: EditorVM; sharing?: SharingVM | null } =
 		$props();
 
 	let commentsFor = $state<string | null>(null);
+
+	// Wikilink clicks: navigate to a resolved doc, or create one for a broken link.
+	async function onEditorClick(event: MouseEvent) {
+		const el = (event.target as HTMLElement).closest('.wikilink');
+		if (!el) return;
+		event.preventDefault();
+		const href = el.getAttribute('href');
+		if (href) {
+			goto(href);
+			return;
+		}
+		const title = el.getAttribute('data-wikilink');
+		if (!title) return;
+		const created = await documentTree.create(title);
+		await linkIndex.refresh();
+		goto(`/w/${created.workspace_id}/d/${created.id}`);
+	}
 
 	function peerOn(blockId: string) {
 		return editor.peers.find((peer) => peer.block_id === blockId) ?? null;
@@ -30,7 +51,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="editor" data-testid="block-editor">
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+<div class="editor" data-testid="block-editor" onclick={onEditorClick}>
 	{#each editor.blocks as block (block.id)}
 		{@const definition = blockDefinition(block.type)}
 		{@const peer = peerOn(block.id)}
@@ -90,6 +112,9 @@
 				{/if}
 				{#if editor.slashFor === block.id}
 					<SlashMenu {editor} />
+				{/if}
+				{#if editor.linkFor === block.id}
+					<LinkMenu {editor} />
 				{/if}
 				{#if sharing && commentsFor === block.id}
 					<CommentThread {sharing} blockId={block.id} onclose={() => (commentsFor = null)} />

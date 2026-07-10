@@ -54,6 +54,13 @@ class DocumentRepository(Protocol):
         self, tenant_id: TenantId, workspace_id: WorkspaceId
     ) -> list[Document]: ...
 
+    async def list_in_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Document]:
+        """Every non-trashed document in the workspace (any teamspace/folder or
+        private), for workspace-wide search and backlink scanning."""
+        ...
+
     async def list_for_teamspace(
         self, tenant_id: TenantId, teamspace_id: TeamspaceId
     ) -> list[Document]:

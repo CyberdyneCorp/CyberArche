@@ -57,6 +57,7 @@ from cyberarche.application.use_cases.api_keys import (
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
+from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -228,6 +229,7 @@ def _build_use_cases(
         favorites=FavoriteUseCases(favorites, documents, access),
         folders=FolderUseCases(folders, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
+        links=LinksUseCases(documents, realtime, crdt_engine, access),
     )
 
 

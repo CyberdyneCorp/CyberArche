@@ -17,6 +17,7 @@ import {
 	type BlockData,
 	type BlockDefinition
 } from '$lib/editor/registry';
+import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 
 const LOCAL_ORIGIN = 'local';
 const PEER_COLORS = ['var(--rose)', 'var(--teal)', 'var(--blue)', 'var(--ok)'];
@@ -47,6 +48,8 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 	let readOnly = $state(false);
 	let slashFor = $state<string | null>(null); // block id with an open slash menu
 	let slashQuery = $state('');
+	let linkFor = $state<string | null>(null); // block id with an open [[ menu
+	let linkQuery = $state('');
 
 	function mirror(): void {
 		blocks = yblocks.toArray().map((item) => item.toJSON() as BlockData);
@@ -229,7 +232,35 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		focus(id: string | null): void {
 			focusedId = id;
 			if (id !== slashFor) vm.closeSlash();
+			if (id !== linkFor) vm.closeLink();
 			provider.broadcastPresence(id, userId, colorFor(userId));
+		},
+
+		// ---- wikilink autocomplete (document-links spec) --------------------
+
+		get linkFor() {
+			return linkFor;
+		},
+		get linkQuery() {
+			return linkQuery;
+		},
+		get linkMatches() {
+			return linkIndex.matches(linkQuery);
+		},
+		closeLink(): void {
+			linkFor = null;
+			linkQuery = '';
+		},
+		/** Replace the in-progress `[[query` with `[[Title]]` and close the menu. */
+		applyLink(title: string): void {
+			const id = linkFor;
+			if (!id) return;
+			const block = blocks.find((b) => b.id === id);
+			const text = String((block?.data as { text?: string })?.text ?? '');
+			vm.updateData(id, { text: text.replace(/\[\[([^[\]]*)$/, `[[${title}]]`) });
+			vm.closeLink();
+			focusedId = id;
+			historyRevision++; // force the focused field to re-sync from the model
 		},
 
 		// ---- slash menu + markdown shortcuts (block-editor spec 5.2) --------
@@ -261,6 +292,16 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		/** Route text input from paragraph-like blocks: opens the slash menu
 		 * on "/", applies markdown-style prefixes, otherwise stores text. */
 		handleTextInput(id: string, text: string): void {
+			// Wikilink autocomplete: an unclosed `[[` at the caret (end of text).
+			const linkOpen = /\[\[([^[\]]*)$/.exec(text);
+			if (linkOpen) {
+				linkFor = id;
+				linkQuery = linkOpen[1];
+				vm.closeSlash();
+				vm.updateData(id, { text });
+				return;
+			}
+			vm.closeLink();
 			if (text.startsWith('/')) {
 				slashFor = id;
 				slashQuery = text.slice(1);

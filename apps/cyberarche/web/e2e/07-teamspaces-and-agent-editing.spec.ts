@@ -466,3 +466,50 @@ test('restore all, then empty the trash from the sidebar', async ({ page, reques
 	await page.getByTestId('dialog-confirm').click();
 	await expect(page.getByTestId('trash-doc')).toHaveCount(0);
 });
+
+test('wikilink resolves, navigates, and shows as a backlink on the target', async ({
+	page,
+	request
+}) => {
+	const headers = { Authorization: `Bearer ${session.access}` };
+	const TARGET = `WikiTarget ${Date.now()}`;
+	await request.post(`${API}/api/v1/documents`, {
+		data: { workspace_id: workspaceId, title: TARGET },
+		headers
+	});
+
+	await openDocument(page, request); // a fresh source doc, workspace index loads
+	const paragraph = page
+		.getByTestId('block-editor')
+		.locator('[data-block-type="paragraph"] .editable')
+		.first();
+	await paragraph.click();
+	await paragraph.pressSequentially(`See [[${TARGET}]] now`);
+	await page.getByTestId('append-block').click(); // blur -> rich render
+
+	// The wikilink resolves to a clickable link (retries until the index loads).
+	const link = paragraph.locator('a.wikilink', { hasText: TARGET });
+	await expect(link).toHaveCount(1);
+	await expect(page.getByTestId('sync-status')).toHaveText('Synced'); // edit persisted
+
+	await link.click();
+	await expect(page.getByTestId('doc-title')).toHaveValue(TARGET);
+	// The source document appears in the target's backlinks.
+	await expect(page.getByTestId('backlink')).toHaveCount(1);
+});
+
+test('Cmd+K palette jumps to a document', async ({ page, request }) => {
+	const headers = { Authorization: `Bearer ${session.access}` };
+	const TARGET = `PaletteTarget ${Date.now()}`;
+	await request.post(`${API}/api/v1/documents`, {
+		data: { workspace_id: workspaceId, title: TARGET },
+		headers
+	});
+
+	await openDocument(page, request);
+	await page.keyboard.press('ControlOrMeta+k');
+	await expect(page.getByTestId('command-palette')).toBeVisible();
+	await page.getByTestId('palette-input').fill(TARGET);
+	await page.getByTestId('palette-result').first().click();
+	await expect(page.getByTestId('doc-title')).toHaveValue(TARGET);
+});

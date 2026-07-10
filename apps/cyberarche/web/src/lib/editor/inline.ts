@@ -35,17 +35,43 @@ function renderEmphasis(escaped: string): string {
 		.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
 }
 
+function escapeAttr(text: string): string {
+	return escapeHtml(text).replace(/"/g, '&quot;');
+}
+
+/** Resolve a wikilink title to an href, or null if no document matches. */
+export type LinkResolver = (title: string) => string | null;
+
+/** Render a plain-text segment: `[[Title]]` wikilinks become links (resolved or
+ * a distinct broken link); the rest gets HTML-escaped emphasis. */
+function renderTextSegment(text: string, resolve?: LinkResolver): string {
+	return text
+		.split(/(\[\[[^[\]]+\]\])/g)
+		.map((part) => {
+			const link = /^\[\[([^[\]]+)\]\]$/.exec(part);
+			if (!link) return renderEmphasis(escapeHtml(part));
+			const title = link[1].trim();
+			const label = escapeHtml(title);
+			const href = resolve?.(title) ?? null;
+			const attr = `data-wikilink="${escapeAttr(title)}" contenteditable="false"`;
+			return href
+				? `<a class="wikilink" href="${escapeAttr(href)}" ${attr}>${label}</a>`
+				: `<span class="wikilink broken" ${attr}>${label}</span>`;
+		})
+		.join('');
+}
+
 /** Render `text` to display HTML. `$` is the math delimiter; `\$` is a literal.
- * TeX `\(…\)` and `\[…\]` delimiters are accepted too, so content the agent (or
- * a paste) wrote in that form still typesets. */
-export function renderInline(text: string): string {
+ * TeX `\(…\)` and `\[…\]` delimiters are accepted too. `[[Title]]` renders as a
+ * wikilink via `resolve`. */
+export function renderInline(text: string, resolve?: LinkResolver): string {
 	if (!text) return '';
 	text = normalizeTexDelimiters(text);
 	return tokenizeMath(text)
 		.map((token) => {
 			if (token.type === 'inline') return renderMath(token.value, false);
 			if (token.type === 'display') return renderMath(token.value, true);
-			return renderEmphasis(escapeHtml(token.value));
+			return renderTextSegment(token.value, resolve);
 		})
 		.join('')
 		.replace(/\\\$/g, '$'); // unescape literal dollars in the plain segments

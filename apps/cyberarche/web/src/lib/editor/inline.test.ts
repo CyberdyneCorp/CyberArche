@@ -83,6 +83,22 @@ describe('renderInline', () => {
 		expect(html).toContain('katex-display');
 	});
 
+	it('renders resolved and broken [[wikilinks]]', () => {
+		const resolve = (t: string) =>
+			t.toLowerCase() === 'calculus introduction' ? '/w/ws/d/doc1' : null;
+		const html = renderInline('See [[Calculus Introduction]] and [[Missing]]', resolve);
+		expect(html).toContain('<a class="wikilink" href="/w/ws/d/doc1"');
+		expect(html).toContain('>Calculus Introduction</a>');
+		expect(html).toContain('class="wikilink broken"');
+		expect(html).toContain('data-wikilink="Missing"');
+	});
+
+	it('escapes wikilink titles so they cannot inject HTML', () => {
+		const html = renderInline('[[<script>evil</script>]]', () => null);
+		expect(html).not.toContain('<script>');
+		expect(html).toContain('&lt;script&gt;');
+	});
+
 	it('still renders single-dollar math inline (no display block)', () => {
 		const html = renderInline('mass is $E = mc^2$ today');
 		expect(html).toContain('katex');

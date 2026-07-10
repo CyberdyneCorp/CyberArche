@@ -273,6 +273,26 @@ class DocumentUseCases:
                 break
         return visible
 
+    async def search_in_workspace(
+        self, caller: CallerContext, workspace_id: WorkspaceId, *, query: str, limit: int = 50
+    ) -> list[Document]:
+        """Title search within one workspace (an empty query returns all), scoped
+        to documents the caller may at least view. Backs the command palette and
+        the wikilink title index."""
+        await self._access.require_workspace(caller, workspace_id, Role.VIEWER)
+        needle = query.strip().lower()
+        visible: list[Document] = []
+        for document in await self._documents.list_in_workspace(
+            caller.tenant_id, workspace_id
+        ):
+            if needle and needle not in document.title.lower():
+                continue
+            if await self._access.document_role(caller, document) is not None:
+                visible.append(document)
+            if len(visible) >= limit:
+                break
+        return visible
+
     async def _get_or_raise(
         self,
         caller: CallerContext,
