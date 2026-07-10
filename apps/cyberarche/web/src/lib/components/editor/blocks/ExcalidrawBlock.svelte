@@ -1,14 +1,16 @@
 <script lang="ts">
 	/** Native Excalidraw block (native-excalidraw-canvas spec).
 	 *
-	 * Wraps the headless `@cyberdynecorp/excalidraw-svelte` `EditorStore` in a
-	 * canvas host (render loop + pointer/pan/zoom) and a toolbar, and binds it to
-	 * the document's shared Y.Doc via `@cyberdynecorp/excalidraw-yjs` — elements
-	 * live in a per-block root map `excalidraw:<blockId>`, so they co-edit live
-	 * and persist through the existing realtime transport with no backend change.
+	 * Wraps the headless `@cyberdynecorp/excalidraw-svelte` `EditorStore` (0.7.x)
+	 * in a canvas host (render loop + pointer/pan/zoom, hover-driven
+	 * click-to-connect, double-click bound labels) and an excalidraw-style
+	 * floating toolbar island, bound to the document's shared Y.Doc via
+	 * `@cyberdynecorp/excalidraw-yjs` (per-block root map `excalidraw:<blockId>`)
+	 * for element-level collaborative merge over the existing realtime transport.
 	 * The scene JSON is mirrored (debounced) into `data.scene` for export/agent. */
 	import type { BlockComponentProps } from '$lib/editor/registry';
 	import type { EditorVM } from '$lib/viewmodels/editor.svelte';
+	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { EditorStore } from '@cyberdynecorp/excalidraw-svelte';
 	import { Point } from '@cyberdynecorp/excalidraw-svelte/math';
 	import type { PointerType, Tool } from '@cyberdynecorp/excalidraw-svelte/editor';
@@ -31,11 +33,11 @@
 			/* malformed scene: fall back to whatever the doc holds */
 		}
 	}
-
-	// The whiteboard always renders on a light/white canvas (Excalidraw's default),
-	// independent of the app's light/dark theme, so drawings read consistently.
-	store.setTheme('light');
 	collab.start();
+
+	// Follow the app's light/dark theme (0.7 remaps element colours so dark mode
+	// is legible; files/exports keep canonical colours).
+	$effect(() => store.setTheme(theme.mode));
 
 	// Mirror local edits into `data.scene` (debounced) for export/agent/snapshot.
 	// onChange fires on local edits only (not on applied remote elements), so
@@ -76,18 +78,19 @@
 		collab.stop();
 	});
 
-	// ---- Canvas host (ported from the excalidraw-native demo) ----
+	// ---- Canvas host ----
 	let canvas = $state<HTMLCanvasElement | null>(null);
 	let wrapper = $state<HTMLDivElement | null>(null);
 	let width = $state(800);
-	let height = $state(420);
+	let height = $state(460);
 	let expanded = $state(false);
+	let hovered = $state(false);
+	let moreOpen = $state(false);
 	let down = false;
 	let panning = false;
 	let lastPanX = 0;
 	let lastPanY = 0;
 
-	// Bitmap cache: the pure renderer delegates image drawing to the host.
 	const imageCache = new Map<string, HTMLImageElement>();
 	function imageFor(fileId: string): CanvasImageSource | null {
 		const cached = imageCache.get(fileId);
@@ -118,6 +121,7 @@
 		void rev;
 		void width;
 		void height;
+		void theme.mode;
 		draw();
 	});
 
@@ -167,6 +171,7 @@
 		canvas!.setPointerCapture(e.pointerId);
 	}
 	function onPointerDown(e: PointerEvent): void {
+		moreOpen = false;
 		if (e.button === 1 || vm.readOnly) {
 			e.preventDefault();
 			startPan(e);
@@ -184,6 +189,8 @@
 			lastPanY = e.clientY;
 			return;
 		}
+		// Hover tracking drives the binding highlight + click-to-connect preview.
+		store.trackPointer(toScene(e));
 		if (!down) return;
 		store.pointer('move', toScene(e), opts(e));
 	}
@@ -212,6 +219,7 @@
 		store.zoomAtScreenPoint(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1);
 	}
 
+	let fileInput = $state<HTMLInputElement | null>(null);
 	function importImage(e: Event): void {
 		const file = (e.currentTarget as HTMLInputElement).files?.[0];
 		(e.currentTarget as HTMLInputElement).value = '';
@@ -225,63 +233,117 @@
 		};
 		reader.readAsDataURL(file);
 	}
-
-	let fileInput = $state<HTMLInputElement | null>(null);
 	const MERMAID_SAMPLE = 'flowchart TD\n  A[Start] --> B{OK?}\n  B -->|Yes| C[Ship]\n  B -->|No| D[Fix]';
 
-	const TOOLS: { tool: Tool; icon: string; title: string }[] = [
-		{ tool: 'selection', icon: '⇱', title: 'Select' },
-		{ tool: 'rectangle', icon: '▭', title: 'Rectangle' },
-		{ tool: 'diamond', icon: '◇', title: 'Diamond' },
-		{ tool: 'ellipse', icon: '◯', title: 'Ellipse' },
-		{ tool: 'arrow', icon: '→', title: 'Arrow' },
-		{ tool: 'line', icon: '／', title: 'Line' },
-		{ tool: 'freedraw', icon: '✎', title: 'Draw' },
-		{ tool: 'text', icon: 'T', title: 'Text' },
-		{ tool: 'eraser', icon: '⌫', title: 'Erase' },
-		{ tool: 'hand', icon: '✋', title: 'Pan' }
+	// ---- Keyboard shortcuts (scoped to hover so typing in other blocks is safe) ----
+	const toolKeys: Record<string, Tool> = {
+		v: 'selection', r: 'rectangle', d: 'diamond', o: 'ellipse', a: 'arrow',
+		l: 'line', p: 'freedraw', t: 'text', e: 'eraser', h: 'hand', f: 'frame', k: 'laser',
+		'1': 'selection', '2': 'rectangle', '3': 'diamond', '4': 'ellipse', '5': 'arrow',
+		'6': 'line', '7': 'freedraw', '8': 'text', '0': 'eraser'
+	};
+	function handleModifierKey(e: KeyboardEvent, key: string): boolean {
+		if (key === 'z') {
+			e.preventDefault();
+			e.shiftKey ? store.redo() : store.undo();
+			return true;
+		}
+		if (key === 'd') {
+			e.preventDefault();
+			store.duplicate();
+			return true;
+		}
+		if (key === 'a') {
+			e.preventDefault();
+			store.selectAll();
+			return true;
+		}
+		return true; // swallow other Cmd/Ctrl combos so they don't switch tools
+	}
+	function onKeydown(e: KeyboardEvent): void {
+		if (!hovered || vm.readOnly) return;
+		if (e.key === 'Escape') {
+			if (moreOpen) moreOpen = false;
+			else if (view.editing !== null) store.commitText();
+			else store.cancelPendingArrow();
+			return;
+		}
+		if (view.editing !== null) return; // the text editor owns every other key
+		const tag = (e.target as HTMLElement | null)?.tagName ?? '';
+		if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+		if (e.metaKey || e.ctrlKey) {
+			handleModifierKey(e, e.key.toLowerCase());
+			return;
+		}
+		if (e.key === 'Backspace' || e.key === 'Delete') {
+			store.deleteSelected();
+			return;
+		}
+		if (e.key === '9') {
+			fileInput?.click();
+			return;
+		}
+		const tool = toolKeys[e.key.toLowerCase()];
+		if (tool !== undefined) store.selectTool(tool);
+	}
+
+	// ---- Toolbar ----
+	const svg = (body: string) =>
+		`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+	const icons: Record<string, string> = {
+		hand: svg('<path d="M8 11.5V5.7a1.45 1.45 0 0 1 2.9 0V10"/><path d="M10.9 10V4.2a1.45 1.45 0 0 1 2.9 0V10"/><path d="M13.8 10.3V5.4a1.45 1.45 0 0 1 2.9 0v6.1"/><path d="M16.7 9.9a1.45 1.45 0 0 1 2.9 0v4.6a7 7 0 0 1-7 7h-1.1c-1.9 0-3.4-.6-4.6-1.8l-3.3-3.4a1.55 1.55 0 0 1 2.2-2.2L8 16.2v-4.7"/>'),
+		selection: svg('<path d="M6 3.5 18.5 12l-6 1.3L10 19.5z"/>'),
+		rectangle: svg('<rect x="4" y="5" width="16" height="14" rx="2"/>'),
+		diamond: svg('<path d="M12 3l8.5 9-8.5 9-8.5-9z"/>'),
+		ellipse: svg('<circle cx="12" cy="12" r="8.5"/>'),
+		arrow: svg('<path d="M5 19 19 5"/><path d="M11.5 5H19v7.5"/>'),
+		line: svg('<path d="M5 17h14"/>'),
+		freedraw: svg('<path d="M4.5 19.5l1-4L16.7 4.3a2 2 0 0 1 2.9 3L8.5 18.5l-4 1z"/>'),
+		text: svg('<path d="M5.5 6V4.5h13V6"/><path d="M12 4.5v15"/><path d="M9.5 19.5h5"/>'),
+		image: svg('<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9.2" cy="10" r="1.4"/><path d="M5 17l4.5-4.5 3.5 3.5 2.3-2.3L19 17"/>'),
+		eraser: svg('<path d="M7.5 20h11"/><path d="M5 14.5 12.8 6.7a2 2 0 0 1 2.8 0l2.7 2.7a2 2 0 0 1 0 2.8L13.5 17H9.8z"/>'),
+		frame: svg('<path d="M4.5 8h15M4.5 16h15M8 4.5v15M16 4.5v15"/>'),
+		laser: svg('<circle cx="12" cy="12" r="2.6"/><path d="M12 4.5V6M12 18v1.5M4.5 12H6M18 12h1.5M6.7 6.7l1.1 1.1M16.2 16.2l1.1 1.1M17.3 6.7l-1.1 1.1M7.8 16.2l-1.1 1.1"/>'),
+		note: svg('<path d="M5 4.5h14v9.5l-4.5 5.5H5z"/><path d="M14.5 19.5V14H19"/>'),
+		table: svg('<rect x="4" y="5" width="16" height="14" rx="1.5"/><path d="M4 10h16M10 10v9M15 10v9"/>'),
+		chart: svg('<path d="M4.5 4.5v15h15"/><path d="M8 16v-4M12 16V8M16 16v-6"/>'),
+		mermaid: svg('<rect x="4" y="4" width="7.5" height="5" rx="1"/><rect x="12.5" y="15" width="7.5" height="5" rx="1"/><path d="M7.75 9v4.5a2 2 0 0 0 2 2h2.75M16.25 15v-3"/>'),
+		shapes: svg('<rect x="4" y="4" width="8.5" height="8.5" rx="1.5"/><circle cx="16" cy="16" r="4.5"/><path d="M16 4.5v6M13 7.5h6"/>'),
+		undo: svg('<path d="M9 7 4.5 11.5 9 16"/><path d="M4.5 11.5H14a5.5 5.5 0 0 1 0 11h-2"/>'),
+		redo: svg('<path d="M15 7l4.5 4.5L15 16"/><path d="M19.5 11.5H10a5.5 5.5 0 0 0 0 11h2"/>'),
+		trash: svg('<path d="M5 6.5h14M9.5 6.5V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M7 6.5l.8 12a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9l.8-12"/>'),
+		expand: svg('<path d="M9 4.5H4.5V9M15 4.5h4.5V9M9 19.5H4.5V15M15 19.5h4.5V15"/>'),
+		collapse: svg('<path d="M4.5 9H9V4.5M19.5 9H15V4.5M4.5 15H9v4.5M19.5 15H15v4.5"/>')
+	};
+	const toolDefs: { tool: Tool; badge: string; title: string }[] = [
+		{ tool: 'hand', badge: 'H', title: 'Hand (pan) — H' },
+		{ tool: 'selection', badge: '1', title: 'Select — 1 or V' },
+		{ tool: 'rectangle', badge: '2', title: 'Rectangle — 2 or R' },
+		{ tool: 'diamond', badge: '3', title: 'Diamond — 3 or D' },
+		{ tool: 'ellipse', badge: '4', title: 'Ellipse — 4 or O' },
+		{ tool: 'arrow', badge: '5', title: 'Arrow — 5 or A' },
+		{ tool: 'line', badge: '6', title: 'Line — 6 or L' },
+		{ tool: 'freedraw', badge: '7', title: 'Draw — 7 or P' },
+		{ tool: 'text', badge: '8', title: 'Text — 8 or T' },
+		{ tool: 'eraser', badge: '0', title: 'Eraser — 0 or E' }
 	];
+	function pick(tool: Tool): void {
+		store.selectTool(tool);
+		moreOpen = false;
+	}
 </script>
 
-<div class="excali" class:expanded data-testid="excalidraw-block">
-	{#if !vm.readOnly}
-		<header class="bar">
-			<div class="tools" role="toolbar">
-				{#each TOOLS as t (t.tool)}
-					<button
-						class:active={view.tool === t.tool}
-						title={t.title}
-						aria-label={t.title}
-						data-testid={`ex-tool-${t.tool}`}
-						onclick={() => store.selectTool(t.tool)}>{t.icon}</button
-					>
-				{/each}
-			</div>
-			<div class="actions">
-				<button class="mini" title="Sticky note" onclick={() => store.insertStickyNote()}>▤</button>
-				<button class="mini" title="Table" onclick={() => store.insertTable()}>▦</button>
-				<button class="mini" title="Mermaid diagram" onclick={() => store.insertMermaid(MERMAID_SAMPLE)}>⿻</button>
-				<button class="mini" title="Insert image" onclick={() => fileInput?.click()}>🖼</button>
-				<input bind:this={fileInput} type="file" accept="image/*" hidden onchange={importImage} />
-				<span class="sep"></span>
-				<button class="mini" title="Undo" disabled={!view.canUndo} onclick={() => store.undo()}>↶</button>
-				<button class="mini" title="Redo" disabled={!view.canRedo} onclick={() => store.redo()}>↷</button>
-				<button class="mini" title="Duplicate" disabled={!view.selectedCount} onclick={() => store.duplicate()}>⧉</button>
-				<button class="mini" title="Delete" disabled={!view.selectedCount} onclick={() => store.deleteSelected()}>🗑</button>
-				<span class="sep"></span>
-				<button class="mini" title="Zoom out" onclick={() => store.zoomOut()}>−</button>
-				<button class="mini" title="Reset zoom" onclick={() => store.resetZoom()}>{view.zoom}%</button>
-				<button class="mini" title="Zoom in" onclick={() => store.zoomIn()}>＋</button>
-				<button
-					class="mini"
-					data-testid="ex-expand"
-					title={expanded ? 'Collapse' : 'Expand'}
-					onclick={() => (expanded = !expanded)}>{expanded ? '⤡' : '⤢'}</button
-				>
-			</div>
-		</header>
-	{/if}
+<svelte:window onkeydown={onKeydown} />
 
+<div
+	class="excali"
+	class:expanded
+	data-theme={theme.mode}
+	data-testid="excalidraw-block"
+	role="group"
+	onpointerenter={() => (hovered = true)}
+	onpointerleave={() => (hovered = false)}
+>
 	<div bind:this={wrapper} class="stage">
 		<canvas
 			bind:this={canvas}
@@ -294,6 +356,7 @@
 			ondblclick={onDblClick}
 			onwheel={onWheel}
 		></canvas>
+
 		{#if view.editing !== null}
 			<!-- svelte-ignore a11y_autofocus -->
 			<textarea
@@ -314,6 +377,92 @@
 				}}
 			></textarea>
 		{/if}
+
+		{#if !vm.readOnly}
+			<!-- Floating tool island (excalidraw-style) -->
+			<div class="top-center">
+				<div class="island toolbar" role="toolbar" aria-label="Drawing tools">
+					{#each toolDefs as t (t.tool)}
+						<button
+							class="tool"
+							class:active={view.tool === t.tool}
+							title={t.title}
+							aria-label={t.title}
+							data-testid={`ex-tool-${t.tool}`}
+							onclick={() => pick(t.tool)}
+						>
+							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+							{@html icons[t.tool]}
+							<span class="badge">{t.badge}</span>
+						</button>
+					{/each}
+					<span class="divider"></span>
+					<button
+						class="tool"
+						title="Insert image — 9"
+						aria-label="Insert image — 9"
+						data-testid="ex-gen-image"
+						onclick={() => fileInput?.click()}
+					>
+						{@html icons.image}<span class="badge">9</span>
+					</button>
+					<button
+						class="tool"
+						title="More tools"
+						aria-label="More tools"
+						aria-expanded={moreOpen}
+						data-testid="ex-more"
+						class:active={moreOpen || view.tool === 'frame' || view.tool === 'laser'}
+						onclick={() => (moreOpen = !moreOpen)}
+					>
+						{@html icons.shapes}
+					</button>
+					{#if moreOpen}
+						<div class="island more-menu" role="menu">
+							<button class="menu-item" class:active={view.tool === 'frame'} onclick={() => pick('frame')}>
+								<span class="mi-icon">{@html icons.frame}</span>Frame<kbd>F</kbd>
+							</button>
+							<button class="menu-item" class:active={view.tool === 'laser'} onclick={() => pick('laser')}>
+								<span class="mi-icon">{@html icons.laser}</span>Laser pointer<kbd>K</kbd>
+							</button>
+							<div class="menu-head">Generate</div>
+							<button class="menu-item" onclick={() => { store.insertStickyNote(); moreOpen = false; }}>
+								<span class="mi-icon">{@html icons.note}</span>Sticky note
+							</button>
+							<button class="menu-item" onclick={() => { store.insertTable(); moreOpen = false; }}>
+								<span class="mi-icon">{@html icons.table}</span>Table
+							</button>
+							<button class="menu-item" onclick={() => { store.insertChart([10, 20, 15, 30]); moreOpen = false; }}>
+								<span class="mi-icon">{@html icons.chart}</span>Chart
+							</button>
+							<button class="menu-item" onclick={() => { store.insertMermaid(MERMAID_SAMPLE); moreOpen = false; }}>
+								<span class="mi-icon">{@html icons.mermaid}</span>Mermaid diagram
+							</button>
+						</div>
+					{/if}
+				</div>
+				<p class="hint">
+					To pan, hold <kbd>Middle mouse</kbd> or use the hand tool. Double-click a shape to label it.
+				</p>
+			</div>
+			<input bind:this={fileInput} type="file" accept="image/*" hidden onchange={importImage} />
+
+			<!-- Bottom-left: zoom + history island -->
+			<div class="island corner bottom-left">
+				<button class="mini" title="Zoom out" aria-label="Zoom out" onclick={() => store.zoomOut()}>−</button>
+				<button class="mini zoom" title="Reset zoom" aria-label="Reset zoom" onclick={() => store.resetZoom()}>{view.zoom}%</button>
+				<button class="mini" title="Zoom in" aria-label="Zoom in" onclick={() => store.zoomIn()}>+</button>
+				<span class="divider"></span>
+				<button class="mini icon" title="Undo" aria-label="Undo" disabled={!view.canUndo} onclick={() => store.undo()}>{@html icons.undo}</button>
+				<button class="mini icon" title="Redo" aria-label="Redo" disabled={!view.canRedo} onclick={() => store.redo()}>{@html icons.redo}</button>
+			</div>
+
+			<!-- Bottom-right: selection + expand island -->
+			<div class="island corner bottom-right">
+				<button class="mini icon" title="Delete" aria-label="Delete" disabled={!view.selectedCount} onclick={() => store.deleteSelected()}>{@html icons.trash}</button>
+				<button class="mini icon" title={expanded ? 'Collapse' : 'Expand'} aria-label={expanded ? 'Collapse' : 'Expand'} data-testid="ex-expand" onclick={() => (expanded = !expanded)}>{@html expanded ? icons.collapse : icons.expand}</button>
+			</div>
+		{/if}
 	</div>
 </div>
 
@@ -330,65 +479,201 @@
 		z-index: 60;
 		box-shadow: var(--sh3);
 	}
-	.bar {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 8px;
-		padding: 6px 10px;
-		border-bottom: 1px solid var(--line);
-		flex-wrap: wrap;
-	}
-	.tools,
-	.actions {
-		display: flex;
-		gap: 2px;
-		align-items: center;
-	}
-	.tools button,
-	.mini {
-		padding: 3px 8px;
-		border-radius: var(--r-control);
-		color: var(--tx2);
-		font-size: 12px;
-	}
-	.tools button:hover:not(:disabled),
-	.mini:hover:not(:disabled) {
-		background: var(--bg3);
-		color: var(--tx);
-	}
-	.tools button.active {
-		background: var(--accbg2);
-		color: var(--acc-strong);
-	}
-	.mini:disabled {
-		opacity: 0.4;
-		cursor: default;
-	}
-	.sep {
-		width: 1px;
-		align-self: stretch;
-		background: var(--line);
-		margin: 0 4px;
-	}
 	.stage {
 		position: relative;
+		height: 460px;
+	}
+	.excali.expanded .stage {
+		height: 100%;
 	}
 	canvas {
 		display: block;
 		width: 100%;
-		height: 420px;
-		/* The engine paints a white scene background; match it so no dark app
-		   background shows through before the first frame. */
+		height: 100%;
+		/* The engine paints the scene background from the theme; match it so no
+		   app background shows through before the first frame. */
 		background: #ffffff;
 		touch-action: none;
 	}
-	.expanded .stage {
-		height: calc(100% - 45px);
+	.excali[data-theme='dark'] canvas {
+		background: #121212;
 	}
-	.expanded canvas {
-		height: 100%;
+
+	/* Floating islands — excalidraw-style rounded chrome. */
+	.island {
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		box-shadow: var(--sh2, 0 2px 10px rgba(0, 0, 0, 0.12));
+		padding: 4px;
 	}
+	.top-center {
+		position: absolute;
+		top: 12px;
+		left: 50%;
+		transform: translateX(-50%);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		max-width: calc(100% - 24px);
+		z-index: 5;
+	}
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		flex-wrap: wrap;
+		justify-content: center;
+		position: relative;
+	}
+	.tool {
+		position: relative;
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border-radius: 9px;
+		color: var(--tx2);
+	}
+	.tool :global(svg) {
+		width: 19px;
+		height: 19px;
+	}
+	.tool:hover {
+		background: var(--bg3);
+		color: var(--tx);
+	}
+	.tool.active {
+		background: var(--accbg2);
+		color: var(--acc-strong);
+	}
+	.badge {
+		position: absolute;
+		right: 3px;
+		bottom: 1px;
+		font-size: 9px;
+		line-height: 1;
+		color: var(--tx3, var(--tx2));
+		pointer-events: none;
+	}
+	.divider {
+		width: 1px;
+		align-self: stretch;
+		margin: 3px 3px;
+		background: var(--line);
+	}
+	.hint {
+		font-size: 11.5px;
+		color: var(--tx2);
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		padding: 3px 10px;
+		text-align: center;
+		opacity: 0.92;
+	}
+	.hint kbd {
+		font-size: 10.5px;
+		padding: 1px 4px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		background: var(--bg2);
+	}
+
+	.more-menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		display: flex;
+		flex-direction: column;
+		min-width: 190px;
+		padding: 5px;
+		z-index: 6;
+	}
+	.menu-item {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		padding: 7px 9px;
+		border-radius: 8px;
+		color: var(--tx);
+		font-size: 13px;
+		text-align: left;
+	}
+	.menu-item:hover {
+		background: var(--bg3);
+	}
+	.menu-item.active {
+		background: var(--accbg2);
+		color: var(--acc-strong);
+	}
+	.mi-icon {
+		display: grid;
+		place-items: center;
+		color: var(--tx2);
+	}
+	.mi-icon :global(svg) {
+		width: 17px;
+		height: 17px;
+	}
+	.menu-item kbd {
+		margin-left: auto;
+		font-size: 10.5px;
+		color: var(--tx2);
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		padding: 1px 5px;
+	}
+	.menu-head {
+		font-size: 10.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--tx2);
+		padding: 6px 9px 3px;
+	}
+
+	.corner {
+		position: absolute;
+		bottom: 12px;
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		z-index: 5;
+	}
+	.bottom-left {
+		left: 12px;
+	}
+	.bottom-right {
+		right: 12px;
+	}
+	.mini {
+		min-width: 30px;
+		height: 30px;
+		padding: 0 6px;
+		display: grid;
+		place-items: center;
+		border-radius: 8px;
+		color: var(--tx2);
+		font-size: 13px;
+	}
+	.mini.zoom {
+		min-width: 46px;
+		font-variant-numeric: tabular-nums;
+	}
+	.mini.icon :global(svg) {
+		width: 18px;
+		height: 18px;
+	}
+	.mini:hover:not(:disabled) {
+		background: var(--bg3);
+		color: var(--tx);
+	}
+	.mini:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+
 	.text-editor {
 		position: absolute;
 		min-width: 120px;
@@ -400,5 +685,6 @@
 		resize: none;
 		outline: none;
 		padding: 0;
+		z-index: 7;
 	}
 </style>
