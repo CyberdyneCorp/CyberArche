@@ -32,13 +32,9 @@
 		}
 	}
 
-	function prefersDark(): boolean {
-		if (typeof window === 'undefined') return false;
-		if (document.documentElement.dataset.theme === 'dark') return true;
-		if (document.documentElement.dataset.theme === 'light') return false;
-		return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-	}
-	store.setTheme(prefersDark() ? 'dark' : 'light');
+	// The whiteboard always renders on a light/white canvas (Excalidraw's default),
+	// independent of the app's light/dark theme, so drawings read consistently.
+	store.setTheme('light');
 	collab.start();
 
 	// Mirror local edits into `data.scene` (debounced) for export/agent/snapshot.
@@ -382,7 +378,9 @@
 		display: block;
 		width: 100%;
 		height: 420px;
-		background: var(--bg1);
+		/* The engine paints a white scene background; match it so no dark app
+		   background shows through before the first frame. */
+		background: #ffffff;
 		touch-action: none;
 	}
 	.expanded .stage {
