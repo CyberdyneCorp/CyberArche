@@ -94,6 +94,8 @@ async def test_unknown_block_type_is_rejected():
     with pytest.raises(ValidationFailed):
         validate_block_type("hologram")
     assert validate_block_type("latex") == "latex"
+    # Native Excalidraw canvas block is whitelisted.
+    assert validate_block_type("excalidraw") == "excalidraw"
 
 
 # ---- purge (permanent delete from trash) -----------------------------------

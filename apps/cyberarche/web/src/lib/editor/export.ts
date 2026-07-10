@@ -96,6 +96,7 @@ export function toMarkdown(
 				out.push(tableToMarkdown(d), '');
 				break;
 			case 'whiteboard':
+			case 'excalidraw':
 				out.push('_(whiteboard — open in CyberArche to view)_', '');
 				break;
 			default:

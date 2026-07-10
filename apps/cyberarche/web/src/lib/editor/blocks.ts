@@ -3,6 +3,7 @@
 import DividerBlock from '$lib/components/editor/blocks/DividerBlock.svelte';
 import CodeBlock from '$lib/components/editor/blocks/CodeBlock.svelte';
 import EmbedBlock from '$lib/components/editor/blocks/EmbedBlock.svelte';
+import ExcalidrawBlock from '$lib/components/editor/blocks/ExcalidrawBlock.svelte';
 import ImageBlock from '$lib/components/editor/blocks/ImageBlock.svelte';
 import LatexBlock from '$lib/components/editor/blocks/LatexBlock.svelte';
 import MermaidBlock from '$lib/components/editor/blocks/MermaidBlock.svelte';
@@ -127,11 +128,23 @@ export function registerBuiltinBlocks(): void {
 		component: MermaidBlock
 	});
 	registerBlock({
-		type: 'whiteboard',
+		type: 'excalidraw',
 		label: 'Whiteboard',
 		icon: '✦',
 		group: 'media',
-		hint: 'Canvas + mind maps',
+		hint: 'Excalidraw canvas + mind maps',
+		create: () => ({ scene: '' }),
+		component: ExcalidrawBlock
+	});
+	// Legacy hand-rolled canvas — kept registered (hidden from the slash menu) so
+	// documents authored before the native Excalidraw block still render.
+	registerBlock({
+		type: 'whiteboard',
+		label: 'Whiteboard (legacy)',
+		icon: '✦',
+		group: 'media',
+		hint: 'Legacy canvas',
+		hidden: true,
 		create: () => ({ elements: {} }),
 		component: WhiteboardBlock
 	});

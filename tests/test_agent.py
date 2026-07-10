@@ -340,8 +340,87 @@ def test_classify_tool_distinguishes_mcp_editing_builtin():
 
     assert _classify_tool("insert_blocks") == ("editing", None)
     assert _classify_tool("generate_image") == ("editing", None)
+    assert _classify_tool("create_mindmap") == ("editing", None)
     assert _classify_tool("rag_query") == ("builtin", None)
     assert _classify_tool("github__create_issue") == ("mcp", "github")
+
+
+def test_build_mindmap_is_a_valid_excalidraw_scene():
+    from cyberarche.application.use_cases.excalidraw_scene import (
+        build_mindmap,
+        describe_scene,
+    )
+
+    scene = build_mindmap(
+        "AI", [{"label": "ML", "children": ["DL", "RL"]}, "NLP", "Vision"]
+    )
+    assert scene["type"] == "excalidraw" and scene["version"] == 2
+    # centre (rect+text) + 3 branches (rect+text+arrow) + 2 children (rect+text+arrow)
+    assert len(scene["elements"]) == 2 + 3 * 3 + 2 * 3
+    ids = [e["id"] for e in scene["elements"]]
+    assert len(ids) == len(set(ids))  # unique ids
+    for element in scene["elements"]:  # every element carries the full base fields
+        for field in ("id", "x", "y", "width", "height", "seed", "version", "isDeleted"):
+            assert field in element
+    described = describe_scene(scene)
+    assert "AI" in described and "ML → DL" in described and "AI → NLP" in described
+
+
+def test_describe_scene_tolerates_bad_input():
+    from cyberarche.application.use_cases.excalidraw_scene import describe_scene
+
+    assert describe_scene("") == "(empty canvas)"
+    assert describe_scene("{not json") == "(unreadable canvas)"
+    assert describe_scene({"elements": []}) == "(empty canvas)"
+
+
+async def test_agent_create_mindmap_inserts_an_excalidraw_block(use_cases, llm, alice):
+    import json
+
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="create_mindmap",
+                    arguments={
+                        "central": "Roadmap",
+                        "branches": [{"label": "Q1", "children": ["Auth"]}, "Q2"],
+                    },
+                ),
+            ),
+        ),
+        LLMResponse(text="Here is your mind map.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="map the roadmap")
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    blocks = use_cases.agent._engine.read_blocks(state)
+    excalidraw = [b for b in blocks if b["type"] == "excalidraw"]
+    assert len(excalidraw) == 1
+    scene = json.loads(excalidraw[0]["data"]["scene"])
+    assert scene["type"] == "excalidraw"
+    labels = {e.get("text") for e in scene["elements"] if e.get("type") == "text"}
+    assert {"Roadmap", "Q1", "Q2", "Auth"} <= labels
+    # The edit is surfaced to the chat as a tool call.
+    assert any(c.name == "create_mindmap" for c in answer.tool_calls)
+
+
+async def test_render_block_describes_an_excalidraw_scene(use_cases, alice):
+    import json
+
+    from cyberarche.application.use_cases.agent import _render_block
+    from cyberarche.application.use_cases.excalidraw_scene import build_mindmap
+
+    scene = build_mindmap("Topic", ["Idea A", "Idea B"])
+    rendered = _render_block(
+        {"id": "b1", "type": "excalidraw", "data": {"scene": json.dumps(scene)}}
+    )
+    assert "(excalidraw)" in rendered
+    assert "Topic" in rendered and "Idea A" in rendered
 
 
 async def test_ask_returns_tool_calls_for_the_chat(use_cases, llm, alice):

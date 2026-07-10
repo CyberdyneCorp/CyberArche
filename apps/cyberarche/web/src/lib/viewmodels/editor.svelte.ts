@@ -274,7 +274,9 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		get slashMatches(): BlockDefinition[] {
 			const query = slashQuery.toLowerCase();
 			return allBlockDefinitions().filter(
-				(d) => d.label.toLowerCase().includes(query) || d.type.includes(query)
+				(d) =>
+					!d.hidden &&
+					(d.label.toLowerCase().includes(query) || d.type.includes(query))
 			);
 		},
 		closeSlash(): void {

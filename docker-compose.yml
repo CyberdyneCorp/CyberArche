@@ -116,6 +116,7 @@ services:
       context: ./apps/cyberarche/web
       args:
         VITE_API_URL: ${VITE_API_URL:-https://cyberarche.backend.coolify.cyberdynecorp.ai}
+        NPM_GITHUB_TOKEN: ${NPM_GITHUB_TOKEN:-}
     restart: unless-stopped
     expose:
       - "80"

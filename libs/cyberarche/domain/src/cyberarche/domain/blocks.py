@@ -32,6 +32,7 @@ BLOCK_TYPES: frozenset[str] = frozenset(
         "latex",
         "mermaid",
         "whiteboard",
+        "excalidraw",
         "image",
         "file",
         "embed",

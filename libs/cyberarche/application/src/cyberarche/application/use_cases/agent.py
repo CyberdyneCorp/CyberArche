@@ -10,6 +10,7 @@ server tools and external connectors into the same registry.
 
 from __future__ import annotations
 
+import json
 import re
 
 from collections.abc import Awaitable, Callable
@@ -36,6 +37,10 @@ from cyberarche.application.ports.llm import (
 from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
+from cyberarche.application.use_cases.excalidraw_scene import (
+    build_mindmap,
+    describe_scene,
+)
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.domain.blocks import validate_block_type
@@ -435,7 +440,11 @@ class AgentUseCases:
     ) -> list[ToolSpec]:
         """Document-bound editing tools, the built-in tools, and the external
         MCP tools active for this document + session (namespaced by connector)."""
-        tools = [spec for spec, _ in _editing_tools()] + self._tools.specs()
+        tools = (
+            [spec for spec, _ in _editing_tools()]
+            + [_mindmap_tool_spec()]
+            + self._tools.specs()
+        )
         if self._images is not None and self._blobs is not None:
             tools = tools + [_image_tool_spec()]
         if self._code is not None:
@@ -467,6 +476,8 @@ class AgentUseCases:
             return await self._run_python(
                 caller, workspace_id, document_id, call.arguments
             )
+        if call.name == "create_mindmap":
+            return await self._run_create_mindmap(caller, document_id, call.arguments)
         for spec, operation in _editing_tools():
             if spec.name == call.name:
                 return await self._run_editing_tool(
@@ -555,6 +566,34 @@ class AgentUseCases:
             }
             await self.apply_blocks(caller, document_id, [block])
             return f"generated and inserted an image for: {prompt}"
+        except NotAuthorized:
+            return "error: you do not have permission to edit this document"
+        except Exception as error:
+            return f"error: {error}"
+
+    async def _run_create_mindmap(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        arguments: dict,
+    ) -> str:
+        central = str(arguments.get("central", "")).strip()
+        branches = arguments.get("branches") or []
+        if not central:
+            return "error: central topic required"
+        if not isinstance(branches, list) or not branches:
+            return "error: at least one branch required"
+        try:
+            document = await self._get_document(caller, document_id)
+            await self._access.require_document(caller, document, Role.EDITOR)
+            scene = build_mindmap(central, branches)
+            block = {
+                "id": self._ids.new_id(),
+                "type": "excalidraw",
+                "data": {"scene": json.dumps(scene)},
+            }
+            await self.apply_blocks(caller, document_id, [block])
+            return f"created a mind map for '{central}' with {len(branches)} branch(es)"
         except NotAuthorized:
             return "error: you do not have permission to edit this document"
         except Exception as error:
@@ -696,6 +735,7 @@ _EDITING_TOOL_NAMES = {
     "update_block",
     "delete_block",
     "generate_image",
+    "create_mindmap",
 }
 
 
@@ -749,6 +789,44 @@ def _python_tool_spec() -> ToolSpec:
                 "code": {"type": "string", "description": "Python source to run."}
             },
             "required": ["code"],
+        },
+    )
+
+
+def _mindmap_tool_spec() -> ToolSpec:
+    return ToolSpec(
+        name="create_mindmap",
+        description=(
+            "Draw a mind map on an Excalidraw whiteboard and insert it into the "
+            "open document. Use this when the user asks to 'create a mind map', "
+            "'map out', or 'draw a diagram' of a topic and its ideas — it renders "
+            "as an editable diagram, not text. Provide the central topic and its "
+            "branches; a branch may carry its own sub-items."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "central": {
+                    "type": "string",
+                    "description": "The central topic at the centre of the map.",
+                },
+                "branches": {
+                    "type": "array",
+                    "description": "The main branches radiating from the centre.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "children": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["label"],
+                    },
+                },
+            },
+            "required": ["central", "branches"],
         },
     )
 
@@ -848,9 +926,15 @@ def _editing_tools() -> list[tuple[ToolSpec, str]]:
 
 
 def _render_block(block: dict) -> str:
-    data = block.get("data", {})
-    text = data.get("text", "") if isinstance(data, dict) else ""
-    return f"[block:{block.get('id', '?')}] ({block.get('type', '?')}) {text}"
+    block_type = block.get("type", "?")
+    data = block.get("data", {}) if isinstance(block.get("data"), dict) else {}
+    if block_type == "excalidraw":
+        body = describe_scene(data.get("scene", ""))
+    elif block_type in _SOURCE_BLOCKS:
+        body = (data.get("source") or "").strip()
+    else:
+        body = data.get("text", "")
+    return f"[block:{block.get('id', '?')}] ({block_type}) {body}"
 
 
 def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | None:

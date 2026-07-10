@@ -48,10 +48,20 @@ describe('block registry (12.1)', () => {
 			'code',
 			'latex',
 			'mermaid',
-			'table'
+			'table',
+			'excalidraw'
 		]) {
 			expect(types).toContain(expected);
 		}
+	});
+
+	it('hides the legacy whiteboard from the slash menu but keeps excalidraw', () => {
+		const vm = editor();
+		const slashTypes = vm.slashMatches.map((d) => d.type);
+		expect(slashTypes).toContain('excalidraw');
+		expect(slashTypes).not.toContain('whiteboard');
+		// …while the legacy block stays registered so old documents still render.
+		expect(allBlockDefinitions().map((d) => d.type)).toContain('whiteboard');
 	});
 
 	it('rejects duplicate registration and unknown types', () => {

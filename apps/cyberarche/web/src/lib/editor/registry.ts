@@ -22,6 +22,9 @@ export interface BlockDefinition {
 	hint: string;
 	create(): Record<string, unknown>;
 	component: Component<BlockComponentProps>;
+	/** Hidden from the slash menu but still rendered (e.g. a legacy block kept
+	 * only so existing documents open). */
+	hidden?: boolean;
 	/** Markdown-style input prefix that transforms a paragraph, e.g. "# ". */
 	markdownPrefix?: RegExp;
 	/** Derive block data from the matched prefix, when the prefix carries

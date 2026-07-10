@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@cyberdynecorp/excalidraw-svelte':
+        specifier: ^0.6.0
+        version: 0.6.0
+      '@cyberdynecorp/excalidraw-yjs':
+        specifier: ^0.6.0
+        version: 0.6.0(@cyberdynecorp/excalidraw-svelte@0.6.0)(yjs@13.6.31)
       '@fontsource/ibm-plex-mono':
         specifier: ^5.1.0
         version: 5.2.7
@@ -123,6 +129,15 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@cyberdynecorp/excalidraw-svelte@0.6.0':
+    resolution: {integrity: sha512-nyOB0XhvqvKTqmicUw/iSV97LBagXApKzj+TRdqSqSKsdM7XBCcqk44TAMdDMzfRKSrV6LK1mgiAfDP+iBMJZg==, tarball: https://npm.pkg.github.com/download/@cyberdynecorp/excalidraw-svelte/0.6.0/d4bb64ff2fab7f82e5682f214a19d56b3ab9af5a}
+
+  '@cyberdynecorp/excalidraw-yjs@0.6.0':
+    resolution: {integrity: sha512-DhnQKROq7UReT2+F3irclDvxtb1MeFnAOhZ7feilTubdJq/B073z6rkSIwZbXPAdNBsxyyxd5iVpraepu1PyUA==, tarball: https://npm.pkg.github.com/download/@cyberdynecorp/excalidraw-yjs/0.6.0/b8fe496e1684eff3877dc13f2868fcf330903ebc}
+    peerDependencies:
+      '@cyberdynecorp/excalidraw-svelte': '>=0.2.0'
+      yjs: ^13.6.0
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -1094,6 +1109,9 @@ packages:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
 
+  perfect-freehand@1.2.3:
+    resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -1435,6 +1453,16 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@cyberdynecorp/excalidraw-svelte@0.6.0':
+    dependencies:
+      perfect-freehand: 1.2.3
+      roughjs: 4.6.6
+
+  '@cyberdynecorp/excalidraw-yjs@0.6.0(@cyberdynecorp/excalidraw-svelte@0.6.0)(yjs@13.6.31)':
+    dependencies:
+      '@cyberdynecorp/excalidraw-svelte': 0.6.0
+      yjs: 13.6.31
 
   '@esbuild/aix-ppc64@0.25.12':
     optional: true
@@ -2319,6 +2347,8 @@ snapshots:
   pathe@2.0.3: {}
 
   pathval@2.0.1: {}
+
+  perfect-freehand@1.2.3: {}
 
   picocolors@1.1.1: {}
 

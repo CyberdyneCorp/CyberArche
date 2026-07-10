@@ -9,7 +9,13 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 
-COPY package.json pnpm-lock.yaml ./
+# Auth for the private @cyberdynecorp GitHub Packages registry. .npmrc references
+# ${NPM_GITHUB_TOKEN}; the token is a BUILD arg (Coolify build-time env) and lives
+# only in this build stage — the nginx production stage never sees it.
+ARG NPM_GITHUB_TOKEN
+ENV NPM_GITHUB_TOKEN=${NPM_GITHUB_TOKEN}
+
+COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 
 # VITE_ vars are baked at BUILD time (Coolify: pass via compose build args).
