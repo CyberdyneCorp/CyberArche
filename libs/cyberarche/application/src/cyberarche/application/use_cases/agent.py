@@ -105,6 +105,10 @@ class AgentAnswer:
     tool_calls: list[ToolCallLog] = field(default_factory=list)
 
 
+_MAX_HISTORY_TURNS = 10
+_HISTORY_CHARS = 4000
+
+
 _SYSTEM_PROMPT = (
     "You are CyberArche's document agent. You help create, summarize, "
     "restructure, and EDIT the open document. Ground answers in the provided "
@@ -117,8 +121,14 @@ _SYSTEM_PROMPT = (
     "editor renders your answer: write math as $inline$ or $$display$$, "
     "diagrams as ```mermaid fenced blocks, and code as ```language fenced "
     "blocks — do not use \\[ \\] or \\( \\) delimiters. To compute, analyze "
-    "data, simulate, or plot, call run_python; its figures are inserted into the "
-    "document for you and its output comes back for you to explain."
+    "data, simulate, or plot, call run_python: it EXECUTES the code and inserts "
+    "the resulting figure into the document, then returns its output for you to "
+    "explain. When the user asks to create/plot/compute/run something, or to "
+    "'insert'/'run' a plot or result, call run_python — do NOT paste the code as "
+    "a code block unless they explicitly ask to see the source. In matplotlib "
+    "use raw strings for LaTeX in labels/titles, e.g. r'$\\frac{1}{x}$', so "
+    "backslashes are not mangled. Follow-up messages continue the same "
+    "conversation — 'the plot' / 'the code' refer to what was just discussed."
 )
 
 
@@ -169,24 +179,35 @@ class AgentUseCases:
         *,
         instruction: str,
         session_connectors: set[str] | None = None,
+        history: list[tuple[str, str]] | None = None,
     ) -> AgentAnswer:
         """Answer/act grounded in the document, with tool use.
 
         The reply always carries insertable blocks so the UI can offer
         'Insert as block' on any answer (ai-agent spec). `session_connectors`,
         if given, restricts external MCP tools to that opt-in set for this run.
+        `history` is recent (role, content) turns so follow-ups like 'insert the
+        plot' resolve against the conversation, not just the document.
         """
         document, context = await self._document_context(caller, document_id)
-        messages = [
-            LLMMessage(role="system", content=_SYSTEM_PROMPT),
+        messages = [LLMMessage(role="system", content=_SYSTEM_PROMPT)]
+        for role, content in (history or [])[-_MAX_HISTORY_TURNS:]:
+            text = (content or "").strip()
+            if not text:
+                continue
+            normalized = "assistant" if role in ("assistant", "agent") else "user"
+            messages.append(
+                LLMMessage(role=normalized, content=text[:_HISTORY_CHARS])
+            )
+        messages.append(
             LLMMessage(
                 role="user",
                 content=(
                     f"Open document '{document.title}' (id: {document.id}).\n"
                     f"Its blocks:\n{context}\n\n{instruction}"
                 ),
-            ),
-        ]
+            )
+        )
         text, edited, tool_calls = await self._run_loop(
             caller,
             document_id,
@@ -712,11 +733,13 @@ def _python_tool_spec() -> ToolSpec:
         name="run_python",
         description=(
             "Run Python to compute, analyze data (pandas/numpy), run or simulate "
-            "code, and make plots (matplotlib). Any figures the code creates are "
-            "inserted into the open document as images automatically; stdout, the "
-            "result value, and errors are returned to you to explain. Each call is "
-            "isolated — no variables or imports persist between calls. Show the "
-            "code you ran to the user."
+            "code, and make plots (matplotlib). This EXECUTES the code: any figures "
+            "it creates are inserted into the open document as images, and stdout, "
+            "the result value, and errors are returned to you to explain. Prefer "
+            "this over an insert_blocks code block whenever the user wants to SEE a "
+            "plot or result — a code block only shows source, it does not run. Each "
+            "call is isolated (no variables/imports persist). Use raw strings for "
+            "LaTeX in matplotlib labels/titles, e.g. r'$\\frac{1}{x}$'."
         ),
         parameters={
             "type": "object",

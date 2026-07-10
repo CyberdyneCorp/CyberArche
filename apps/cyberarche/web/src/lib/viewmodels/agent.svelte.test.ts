@@ -46,4 +46,30 @@ describe('agent panel ViewModel', () => {
 		]);
 		expect(last.toolCalls?.[0].arguments).toEqual({ query: 'specs' });
 	});
+
+	it('sends recent conversation history so follow-ups have context', async () => {
+		const bodies: Array<{ instruction: string; history: unknown }> = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init?: RequestInit) => {
+				bodies.push(JSON.parse(String(init?.body)));
+				return {
+					ok: true,
+					status: 200,
+					json: async () => ({ answer: 'A', blocks: [], tool_calls: [] })
+				};
+			}) as unknown as typeof fetch
+		);
+
+		const vm = createAgentPanel('doc-1');
+		await vm.ask('create a plot');
+		await vm.ask('insert the plot');
+
+		// The second turn carries the first (user + agent) as history.
+		expect(bodies[1].instruction).toBe('insert the plot');
+		expect(bodies[1].history).toEqual([
+			{ role: 'user', content: 'create a plot' },
+			{ role: 'agent', content: 'A' }
+		]);
+	});
 });

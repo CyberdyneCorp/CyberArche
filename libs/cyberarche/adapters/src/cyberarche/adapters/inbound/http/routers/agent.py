@@ -14,11 +14,18 @@ from cyberarche.domain.ids import DocumentId
 router = APIRouter(prefix="/api/v1/documents/{document_id}/agent", tags=["agent"])
 
 
+class HistoryTurn(BaseModel):
+    role: str  # "user" | "agent"
+    content: str
+
+
 class AskRequest(BaseModel):
     instruction: str
     # Optional per-session opt-in: restrict external MCP tools to these
     # connector ids. Omit for no restriction (all enabled connectors).
     enabled_connectors: list[str] | None = None
+    # Recent conversation turns so follow-ups ('insert the plot') have context.
+    history: list[HistoryTurn] | None = None
 
 
 class ToolCallResponse(BaseModel):
@@ -87,6 +94,7 @@ async def ask(
         session_connectors=set(body.enabled_connectors)
         if body.enabled_connectors is not None
         else None,
+        history=[(h.role, h.content) for h in (body.history or [])],
     )
     return AskResponse(
         answer=answer.text,

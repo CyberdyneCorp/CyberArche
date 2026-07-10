@@ -49,6 +49,29 @@ async def test_answer_is_grounded_in_document_blocks(use_cases, llm, alice):
     assert "[block:b1]" in prompt
 
 
+async def test_ask_includes_recent_conversation_history(use_cases, llm, alice):
+    """Follow-ups like 'insert the plot' need the prior turns — the agent was
+    stateless, so the model had no idea what 'the plot' referred to."""
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="ok", model="m")]
+
+    await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="insert the plot",
+        history=[
+            ("user", "create a plot of 1/x"),
+            ("agent", "here is the plot code"),
+        ],
+    )
+
+    sent = llm.requests[0]
+    assert [m.role for m in sent] == ["system", "user", "assistant", "user"]
+    assert "create a plot of 1/x" in sent[1].content
+    assert "here is the plot code" in sent[2].content
+    assert "insert the plot" in sent[-1].content
+
+
 async def test_tool_loop_executes_rag_query_and_feeds_result_back(
     use_cases, llm, alice
 ):

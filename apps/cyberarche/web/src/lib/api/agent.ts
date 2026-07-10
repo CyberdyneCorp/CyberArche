@@ -32,8 +32,13 @@ export interface AskResult {
 	tool_calls: AgentToolCall[];
 }
 
-export const askAgent = (documentId: string, instruction: string) =>
-	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, { instruction });
+export interface HistoryTurn {
+	role: 'user' | 'agent';
+	content: string;
+}
+
+export const askAgent = (documentId: string, instruction: string, history: HistoryTurn[] = []) =>
+	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, { instruction, history });
 
 export const summarizeDocument = (documentId: string, blockIds?: string[]) =>
 	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/summarize`, {
