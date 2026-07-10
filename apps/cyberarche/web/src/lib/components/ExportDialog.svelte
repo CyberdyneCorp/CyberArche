@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { getBlob } from '$lib/api/http';
 	import type { BlockData } from '$lib/editor/registry';
 	import {
+		blobToDataUrl,
 		downloadTextFile,
 		hasTables,
+		internalImageUrls,
 		safeFilename,
 		tablesToCsv,
 		toMarkdown,
@@ -17,6 +20,21 @@
 	}: { title: string; blocks: BlockData[]; onclose: () => void } = $props();
 
 	let format = $state<ExportFormat>('pdf');
+	let busy = $state(false);
+
+	/** Fetch our served images and encode them as data URIs so exported
+	 * Markdown is self-contained (auth-gated URLs won't work outside the app). */
+	async function inlineImages(): Promise<Map<string, string>> {
+		const map = new Map<string, string>();
+		for (const url of internalImageUrls(blocks)) {
+			try {
+				map.set(url, await blobToDataUrl(await getBlob(url)));
+			} catch {
+				/* fall back to the URL if the image can't be fetched */
+			}
+		}
+		return map;
+	}
 
 	const FORMATS: { value: ExportFormat; label: string; hint: string }[] = [
 		{ value: 'pdf', label: 'PDF', hint: 'Print-ready, as shown on screen' },
@@ -24,12 +42,18 @@
 		{ value: 'csv', label: 'CSV', hint: 'This document’s tables' }
 	];
 
-	function run() {
+	async function run() {
 		const name = safeFilename(title);
 		if (format === 'markdown') {
-			downloadTextFile(`${name}.md`, toMarkdown(title, blocks), 'text/markdown');
-			toasts.success('Exported Markdown');
-			onclose();
+			busy = true;
+			try {
+				const images = await inlineImages();
+				downloadTextFile(`${name}.md`, toMarkdown(title, blocks, images), 'text/markdown');
+				toasts.success('Exported Markdown');
+				onclose();
+			} finally {
+				busy = false;
+			}
 		} else if (format === 'csv') {
 			if (!hasTables(blocks)) {
 				toasts.error('No tables in this document to export as CSV');
@@ -79,7 +103,9 @@
 
 		<div class="actions">
 			<button class="btn ghost" data-testid="export-cancel" onclick={onclose}>Cancel</button>
-			<button class="btn" data-testid="export-run" onclick={run}>Export</button>
+			<button class="btn" data-testid="export-run" disabled={busy} onclick={run}>
+				{busy ? 'Exporting…' : 'Export'}
+			</button>
 		</div>
 	</div>
 </div>
@@ -184,6 +210,11 @@
 	}
 	.btn:hover {
 		filter: brightness(1.08);
+	}
+	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+		filter: none;
 	}
 	.btn.ghost {
 		background: transparent;

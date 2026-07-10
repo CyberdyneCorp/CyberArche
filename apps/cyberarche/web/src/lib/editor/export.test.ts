@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasTables, safeFilename, tablesToCsv, toMarkdown } from './export';
+import { hasTables, internalImageUrls, safeFilename, tablesToCsv, toMarkdown } from './export';
 import type { BlockData } from './registry';
 
 const block = (type: string, data: Record<string, unknown>): BlockData => ({
@@ -41,6 +41,18 @@ describe('toMarkdown', () => {
 		expect(md).toContain('$$\n\\frac{1}{x}\n$$');
 		expect(md).toContain('![plot](/api/v1/x)');
 		expect(md).toContain('[https://youtu.be/abc](https://youtu.be/abc)');
+	});
+
+	it('inlines internal images as data URIs when provided; keeps external URLs', () => {
+		const blocks = [
+			block('image', { url: '/api/v1/workspaces/w/files/1', alt: 'mine' }),
+			block('image', { url: 'https://example.com/x.png', alt: 'ext' })
+		];
+		expect(internalImageUrls(blocks)).toEqual(['/api/v1/workspaces/w/files/1']);
+		const images = new Map([['/api/v1/workspaces/w/files/1', 'data:image/png;base64,AAA']]);
+		const md = toMarkdown('', blocks, images);
+		expect(md).toContain('![mine](data:image/png;base64,AAA)');
+		expect(md).toContain('![ext](https://example.com/x.png)'); // external untouched
 	});
 
 	it('renders a table block as a markdown table', () => {

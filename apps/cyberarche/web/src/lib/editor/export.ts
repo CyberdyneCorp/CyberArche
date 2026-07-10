@@ -20,8 +20,35 @@ function tableToMarkdown(data: Record<string, unknown>): string {
 	return [head, sep, body].filter(Boolean).join('\n');
 }
 
-/** Serialize the document (title + blocks) to Markdown. */
-export function toMarkdown(title: string, blocks: BlockData[]): string {
+/** Internal (served, membership-gated) image URLs referenced by image blocks. */
+export function internalImageUrls(blocks: BlockData[]): string[] {
+	const urls = new Set<string>();
+	for (const b of blocks) {
+		if (b.type === 'image') {
+			const url = str((b.data ?? {}).url);
+			if (url.startsWith('/api/')) urls.add(url);
+		}
+	}
+	return [...urls];
+}
+
+/** Read a Blob as a base64 data URI (for inlining images into Markdown). */
+export function blobToDataUrl(blob: Blob): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(String(reader.result));
+		reader.onerror = () => reject(reader.error);
+		reader.readAsDataURL(blob);
+	});
+}
+
+/** Serialize the document (title + blocks) to Markdown. When `images` maps an
+ * image URL to a data URI, that image is inlined so the file is self-contained. */
+export function toMarkdown(
+	title: string,
+	blocks: BlockData[],
+	images?: Map<string, string>
+): string {
 	const out: string[] = [];
 	if (title.trim()) out.push(`# ${title.trim()}`, '');
 	for (const block of blocks) {
@@ -55,9 +82,13 @@ export function toMarkdown(title: string, blocks: BlockData[]): string {
 			case 'mermaid':
 				out.push('```mermaid', str(d.source), '```', '');
 				break;
-			case 'image':
-				out.push(`![${str(d.alt)}](${str(d.url)})`, '');
+			case 'image': {
+				const url = str(d.url);
+				// Inline our served images as data URIs when resolved, so the
+				// exported Markdown renders them outside CyberArche.
+				out.push(`![${str(d.alt)}](${images?.get(url) ?? url})`, '');
 				break;
+			}
 			case 'embed':
 				out.push(`[${str(d.url)}](${str(d.url)})`, '');
 				break;
