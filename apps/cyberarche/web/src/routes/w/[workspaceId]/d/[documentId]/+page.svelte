@@ -4,6 +4,7 @@
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
+	import ExportDialog from '$lib/components/ExportDialog.svelte';
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import { createAgentPanel, type AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import { createConnectors, type ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
@@ -24,6 +25,7 @@
 	let agentOpen = $state(false);
 	let sharing = $state<SharingVM | null>(null);
 	let shareOpen = $state(false);
+	let exportOpen = $state(false);
 
 	let connectors = $state<ConnectorsVM | null>(null);
 
@@ -109,6 +111,12 @@
 					data-testid="sync-status">{statusLabel}</span
 				>
 				<button
+					class="btn btn-secondary export"
+					data-testid="export-open"
+					title="Export document"
+					onclick={() => (exportOpen = true)}>Export</button
+				>
+				<button
 					class="btn btn-primary share"
 					data-testid="share-open"
 					onclick={() => (shareOpen = true)}>Share</button
@@ -149,6 +157,13 @@
 	{#if shareOpen && sharing}
 		<ShareDialog {sharing} onclose={() => (shareOpen = false)} />
 	{/if}
+	{#if exportOpen}
+		<ExportDialog
+			title={doc.title}
+			blocks={editor?.blocks ?? []}
+			onclose={() => (exportOpen = false)}
+		/>
+	{/if}
 	</div>
 {:else}
 	<div class="loading">Loading…</div>
@@ -168,6 +183,10 @@
 		overflow-y: auto;
 	}
 	.share {
+		padding: 4px 12px;
+		font-size: 12px;
+	}
+	.export {
 		padding: 4px 12px;
 		font-size: 12px;
 	}

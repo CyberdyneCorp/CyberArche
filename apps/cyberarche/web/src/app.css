@@ -192,3 +192,24 @@ textarea {
 	background: var(--aibg);
 	color: var(--ai);
 }
+
+/* PDF export = browser print: show only the document canvas (title + blocks),
+ * hiding the sidebar, top bar, agent panel, dialogs, and toasts. Math, mermaid,
+ * and images print as rendered on screen. */
+@media print {
+	body * {
+		visibility: hidden;
+	}
+	.canvas,
+	.canvas * {
+		visibility: visible;
+	}
+	.canvas {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		padding: 0;
+		margin: 0;
+	}
+}

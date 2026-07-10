@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { expect, test, type Page } from '@playwright/test';
 
 import { loadSession, type Session } from './session';
@@ -103,6 +105,28 @@ test('a paragraph with $$…$$ renders display math when unfocused', async ({ pa
 	await page.getByTestId('append-block').click();
 	await expect(paragraph.locator('.katex-display')).toHaveCount(1);
 	await expect(paragraph).toContainText('Divergence:');
+});
+
+test('export the document as Markdown downloads a .md file', async ({ page, request }) => {
+	await openDocument(page, request);
+	const paragraph = page
+		.getByTestId('block-editor')
+		.locator('[data-block-type="paragraph"] .editable')
+		.first();
+	await paragraph.click();
+	await paragraph.pressSequentially('Exportable content here');
+
+	await page.getByTestId('export-open').click();
+	await expect(page.getByTestId('export-dialog')).toBeVisible();
+	await page.locator('input[value="markdown"]').check();
+
+	const [download] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByTestId('export-run').click()
+	]);
+	expect(download.suggestedFilename()).toMatch(/\.md$/);
+	const text = readFileSync(await download.path(), 'utf-8');
+	expect(text).toContain('Exportable content here');
 });
 
 test('image block embeds an external URL', async ({ page, request }) => {

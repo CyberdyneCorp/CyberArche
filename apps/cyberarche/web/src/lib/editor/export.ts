@@ -1,0 +1,116 @@
+/** Client-side document export: serialize the block tree to Markdown, table
+ * blocks to CSV, and trigger a file download. PDF uses the browser's print
+ * (a print stylesheet shows only the document), so math/mermaid/images render
+ * exactly as on screen without a server round-trip. */
+
+import type { BlockData } from './registry';
+
+export type ExportFormat = 'pdf' | 'markdown' | 'csv';
+
+const str = (v: unknown): string => (v == null ? '' : String(v));
+
+function tableToMarkdown(data: Record<string, unknown>): string {
+	const header = (data.header as unknown[]) ?? [];
+	const rows = (data.rows as unknown[][]) ?? [];
+	const esc = (c: unknown) => str(c).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+	if (header.length === 0) return '';
+	const head = `| ${header.map(esc).join(' | ')} |`;
+	const sep = `| ${header.map(() => '---').join(' | ')} |`;
+	const body = rows.map((r) => `| ${r.map(esc).join(' | ')} |`).join('\n');
+	return [head, sep, body].filter(Boolean).join('\n');
+}
+
+/** Serialize the document (title + blocks) to Markdown. */
+export function toMarkdown(title: string, blocks: BlockData[]): string {
+	const out: string[] = [];
+	if (title.trim()) out.push(`# ${title.trim()}`, '');
+	for (const block of blocks) {
+		const d = block.data ?? {};
+		switch (block.type) {
+			case 'heading':
+				out.push(`${'#'.repeat(Math.min(Number(d.level) || 1, 6))} ${str(d.text)}`, '');
+				break;
+			case 'bulleted_list':
+				out.push(`- ${str(d.text)}`, '');
+				break;
+			case 'numbered_list':
+				out.push(`1. ${str(d.text)}`, '');
+				break;
+			case 'todo':
+				out.push(`- [${d.checked ? 'x' : ' '}] ${str(d.text)}`, '');
+				break;
+			case 'quote':
+			case 'callout':
+				out.push(`> ${str(d.text)}`, '');
+				break;
+			case 'divider':
+				out.push('---', '');
+				break;
+			case 'code':
+				out.push('```' + str(d.language), str(d.source), '```', '');
+				break;
+			case 'latex':
+				out.push('$$', str(d.source), '$$', '');
+				break;
+			case 'mermaid':
+				out.push('```mermaid', str(d.source), '```', '');
+				break;
+			case 'image':
+				out.push(`![${str(d.alt)}](${str(d.url)})`, '');
+				break;
+			case 'embed':
+				out.push(`[${str(d.url)}](${str(d.url)})`, '');
+				break;
+			case 'table':
+				out.push(tableToMarkdown(d), '');
+				break;
+			case 'whiteboard':
+				out.push('_(whiteboard — open in CyberArche to view)_', '');
+				break;
+			default:
+				if (d.text) out.push(str(d.text), '');
+		}
+	}
+	return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+function csvCell(value: unknown): string {
+	const s = str(value);
+	return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Serialize the document's table blocks to CSV (multiple tables blank-separated).
+ * Returns '' when the document has no tables. */
+export function tablesToCsv(blocks: BlockData[]): string {
+	const tables = blocks.filter((b) => b.type === 'table');
+	return tables
+		.map((b) => {
+			const d = b.data ?? {};
+			const rows = [(d.header as unknown[]) ?? [], ...((d.rows as unknown[][]) ?? [])];
+			return rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+		})
+		.filter(Boolean)
+		.join('\r\n\r\n');
+}
+
+export function hasTables(blocks: BlockData[]): boolean {
+	return blocks.some((b) => b.type === 'table');
+}
+
+/** Trigger a browser download of text content. */
+export function downloadTextFile(filename: string, content: string, mime: string): void {
+	const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement('a');
+	link.href = url;
+	link.download = filename;
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(url);
+}
+
+export function safeFilename(title: string): string {
+	const base = title.trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+	return base || 'document';
+}
