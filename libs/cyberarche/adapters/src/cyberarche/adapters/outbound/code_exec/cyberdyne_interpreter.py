@@ -22,12 +22,16 @@ TokenSource = Callable[[], Awaitable[str]]
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 _TEXT_MIME_PREFIXES = ("text/", "application/json")
 
+# NOTE: RestrictedPython (the interpreter's default `restricted` layer) rejects
+# leading-underscore identifiers, so the capture variables use a `cyb_` prefix
+# (never `_plt`/`_fig`), and iterate by index rather than the iterator protocol.
 _CAPTURE_EPILOGUE = textwrap.dedent(
     """
     try:
-        import matplotlib.pyplot as _plt
-        for _fig_num in _plt.get_fignums():
-            _plt.figure(_fig_num).savefig(f"figure_{_fig_num}.png", bbox_inches="tight")
+        import matplotlib.pyplot as cyb_plt
+        cyb_fignums = cyb_plt.get_fignums()
+        for cyb_idx in range(len(cyb_fignums)):
+            cyb_plt.figure(cyb_fignums[cyb_idx]).savefig("figure_%d.png" % (cyb_idx + 1))
     except Exception:
         pass
     """

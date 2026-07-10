@@ -439,6 +439,14 @@ def test_figure_capture_epilogue_only_for_unsaved_matplotlib():
     plot = "import matplotlib.pyplot as plt\nplt.plot([1, 2])"
     captured = _with_figure_capture(plot)
     assert captured.startswith(plot) and "savefig" in captured
+    # Regression: the injected epilogue must be RestrictedPython-safe — no
+    # leading-underscore identifiers (the interpreter rejects them). The bug was
+    # `_plt`/`_fig_num` causing a SyntaxError inside the sandbox.
+    epilogue = captured[len(plot):]
+    import re
+
+    assert not re.search(r"(?<![A-Za-z0-9_])_[A-Za-z]", epilogue)
+    assert "cyb_plt" in epilogue
 
 
 async def test_generate_image_reports_unavailable_when_unconfigured(use_cases, alice):
