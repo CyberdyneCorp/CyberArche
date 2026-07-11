@@ -58,6 +58,39 @@
 	let inferring = $state(false);
 	const graphCache = new Map<string, LinkGraph>();
 
+	// Density controls for inferred links: the model returns several relationship
+	// types per pair, so we collapse parallel edges (keep the strongest per pair)
+	// and let the user hide noisy types / raise the confidence floor.
+	let rawGraph = $state<LinkGraph | null>(null);
+	let minConfidence = $state(70);
+	const INFERRED_TYPES = ['depends_on', 'explains', 'cites', 'similar', 'contradicts', 'mentions'];
+	let hiddenTypes = $state<Set<string>>(new Set(['similar', 'mentions']));
+	let filtersOpen = $state(false);
+
+	function filterGraph(raw: LinkGraph): LinkGraph {
+		const explicit = raw.edges.filter((e) => !e.inferred);
+		// One inferred edge per ordered pair — the highest-confidence relationship.
+		const best = new Map<string, GraphEdge>();
+		for (const e of raw.edges) {
+			if (!e.inferred) continue;
+			if (hiddenTypes.has(e.type) || e.confidence < minConfidence) continue;
+			const key = `${e.source}|${e.target}`;
+			const cur = best.get(key);
+			if (!cur || e.confidence > cur.confidence) best.set(key, e);
+		}
+		return { nodes: raw.nodes, edges: [...explicit, ...best.values()] };
+	}
+	function rebuild(): void {
+		if (rawGraph) build(filterGraph(rawGraph));
+	}
+	function toggleType(type: string): void {
+		const next = new Set(hiddenTypes);
+		if (next.has(type)) next.delete(type);
+		else next.add(type);
+		hiddenTypes = next;
+		rebuild();
+	}
+
 	const EDGE_STYLE: Record<string, { color: string; dash: string; label: string }> = {
 		links_to: { color: 'var(--tx3)', dash: '', label: 'Links to' },
 		depends_on: { color: '#ef4444', dash: '6 4', label: 'Depends on' },
@@ -259,7 +292,8 @@
 						: await folderGraph(id);
 				graphCache.set(cacheKey, graph);
 			}
-			build(graph);
+			rawGraph = graph;
+			build(filterGraph(graph));
 			empty = sim.nodes.length === 0;
 		} catch {
 			error = 'Could not load the graph.';
@@ -698,6 +732,43 @@
 						aria-pressed={aiLinks}
 						onclick={() => (aiLinks = !aiLinks)}>✦ AI links</button
 					>
+					{#if aiLinks}
+						<div class="filters-wrap">
+							<button
+								class="tbtn"
+								class:on={filtersOpen}
+								data-testid="graph-filters"
+								title="Filter inferred relationships"
+								onclick={() => (filtersOpen = !filtersOpen)}>⚑ Filters</button
+							>
+							{#if filtersOpen}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div class="filters-pop" onclick={(e) => e.stopPropagation()}>
+									<div class="fp-row">
+										<span>Min confidence</span>
+										<span class="fp-val">{minConfidence}%</span>
+									</div>
+									<input
+										type="range"
+										min="50"
+										max="95"
+										step="5"
+										bind:value={minConfidence}
+										onchange={rebuild}
+										data-testid="graph-min-confidence"
+									/>
+									<div class="fp-head">Relationship types</div>
+									{#each INFERRED_TYPES as t (t)}
+										<label class="fp-type">
+											<input type="checkbox" checked={!hiddenTypes.has(t)} onchange={() => toggleType(t)} />
+											<span class="dot" style={`background:${edgeStyle(t).color}`}></span>
+											{edgeStyle(t).label}
+										</label>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
 					<button class="tbtn" title="Fit to view" data-testid="graph-fit" onclick={fitView}>⤢ Fit</button>
 					<button class="close" aria-label="Close" onclick={() => graphView.close()}>✕</button>
 				</div>
@@ -963,6 +1034,53 @@
 		border-color: var(--acc);
 		color: var(--acc-strong);
 		font-weight: 600;
+	}
+	.filters-wrap {
+		position: relative;
+	}
+	.filters-pop {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		z-index: 10;
+		width: 210px;
+		padding: 12px;
+		background: var(--bg2);
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		box-shadow: var(--sh3);
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.fp-row {
+		display: flex;
+		justify-content: space-between;
+		font-size: 12px;
+		color: var(--tx2);
+	}
+	.fp-val {
+		color: var(--tx);
+		font-variant-numeric: tabular-nums;
+	}
+	.filters-pop input[type='range'] {
+		width: 100%;
+		margin: 0 0 4px;
+	}
+	.fp-head {
+		font-size: 10.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--tx3);
+		margin-top: 4px;
+	}
+	.fp-type {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 12.5px;
+		color: var(--tx);
+		cursor: pointer;
 	}
 	.relations {
 		display: flex;
