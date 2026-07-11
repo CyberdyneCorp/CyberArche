@@ -70,13 +70,18 @@ export function createAgentPanel(documentId: string, options: AgentPanelOptions 
 
 		/** Conversational ask. The reply carries insertable blocks, so every
 		 * answer offers Insert / Replace / Copy (ai-agent spec). */
-		async ask(instruction: string) {
+		async ask(instruction: string, reasoning = false) {
 			// Send recent turns so follow-ups ('insert the plot') keep context.
 			const history = messages
 				.slice(-10)
 				.map((m) => ({ role: m.role, content: m.text }));
 			await perform(instruction, async () => {
-				const { answer, blocks, tool_calls } = await askAgent(documentId, instruction, history);
+				const { answer, blocks, tool_calls } = await askAgent(
+					documentId,
+					instruction,
+					history,
+					reasoning
+				);
 				return { role: 'agent', text: answer, blocks, toolCalls: tool_calls };
 			});
 		},

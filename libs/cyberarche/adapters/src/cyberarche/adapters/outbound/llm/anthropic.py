@@ -65,7 +65,11 @@ class AnthropicLLM:
         self._base = (config.base_url or _DEFAULT_BASE).rstrip("/")
 
     async def complete(
-        self, messages: list[LLMMessage], *, tools: list[ToolSpec] | None = None
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[ToolSpec] | None = None,
+        reasoning_effort: str | None = None,  # noqa: ARG002 — OpenAI-only knob
     ) -> LLMResponse:
         system, mapped = _to_anthropic_messages(messages)
         body: dict[str, Any] = {

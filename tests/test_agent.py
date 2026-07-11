@@ -335,6 +335,18 @@ async def test_agent_inserts_and_deletes_blocks_via_tools(use_cases, llm, alice)
     assert blocks[0]["data"]["text"] == "keep"
 
 
+async def test_ask_maps_reasoning_toggle_to_effort(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+
+    llm._responses = [LLMResponse(text="off", model="m")]
+    await use_cases.agent.ask(alice, document.id, instruction="hi", reasoning=False)
+    assert llm.reasoning_seen[-1] == "minimal"  # fast by default
+
+    llm._responses = [LLMResponse(text="on", model="m")]
+    await use_cases.agent.ask(alice, document.id, instruction="hi", reasoning=True)
+    assert llm.reasoning_seen[-1] == "medium"  # deeper when toggled on
+
+
 def test_classify_tool_distinguishes_mcp_editing_builtin():
     from cyberarche.application.use_cases.agent import _classify_tool
 

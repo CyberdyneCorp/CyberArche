@@ -7,6 +7,7 @@ llama.cpp server) via `base_url` — the "local" provider option.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -20,6 +21,13 @@ from cyberarche.application.ports.llm import (
 )
 
 _DEFAULT_BASE = "https://api.openai.com/v1"
+
+
+def _is_reasoning_model(model: str) -> bool:
+    """OpenAI reasoning models take `reasoning_effort`: the GPT-5 family and the
+    o-series (o1/o3/o4…). Everything else (gpt-4.1, gpt-4o) does not."""
+    name = model.lower()
+    return name.startswith("gpt-5") or bool(re.match(r"o[13-9](-|$)", name))
 
 
 def _to_openai_messages(messages: list[LLMMessage]) -> list[dict]:
@@ -63,13 +71,23 @@ class OpenAICompatibleLLM:
         self._base = (config.base_url or _DEFAULT_BASE).rstrip("/")
 
     async def complete(
-        self, messages: list[LLMMessage], *, tools: list[ToolSpec] | None = None
+        self,
+        messages: list[LLMMessage],
+        *,
+        tools: list[ToolSpec] | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
+        # `max_completion_tokens` is the current field: reasoning models (GPT-5,
+        # o-series) reject the legacy `max_tokens`, and earlier models accept it.
         body: dict[str, Any] = {
             "model": self._config.model,
-            "max_tokens": self._config.max_tokens,
+            "max_completion_tokens": self._config.max_tokens,
             "messages": _to_openai_messages(messages),
         }
+        # Only reasoning-capable models accept `reasoning_effort`; sending it to
+        # others is a 400, so gate on the model name.
+        if reasoning_effort and _is_reasoning_model(self._config.model):
+            body["reasoning_effort"] = reasoning_effort
         if tools:
             body["tools"] = [
                 {

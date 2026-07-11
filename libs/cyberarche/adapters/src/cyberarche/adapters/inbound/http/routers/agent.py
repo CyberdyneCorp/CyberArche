@@ -30,6 +30,8 @@ class AskRequest(BaseModel):
     enabled_connectors: list[str] | None = None
     # Recent conversation turns so follow-ups ('insert the plot') have context.
     history: list[HistoryTurn] | None = None
+    # The chat's Reasoning toggle: deeper thinking when on (reasoning models).
+    reasoning: bool = False
 
 
 class ToolCallResponse(BaseModel):
@@ -104,6 +106,7 @@ async def ask(
         else None,
         history=[(h.role, h.content) for h in (body.history or [])],
         access_token=access_token,
+        reasoning=body.reasoning,
     )
     return AskResponse(
         answer=answer.text,

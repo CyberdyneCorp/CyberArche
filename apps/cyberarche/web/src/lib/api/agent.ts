@@ -37,8 +37,17 @@ export interface HistoryTurn {
 	content: string;
 }
 
-export const askAgent = (documentId: string, instruction: string, history: HistoryTurn[] = []) =>
-	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, { instruction, history });
+export const askAgent = (
+	documentId: string,
+	instruction: string,
+	history: HistoryTurn[] = [],
+	reasoning = false
+) =>
+	post<AskResult>(`/api/v1/documents/${documentId}/agent/ask`, {
+		instruction,
+		history,
+		reasoning
+	});
 
 export const summarizeDocument = (documentId: string, blockIds?: string[]) =>
 	post<BlocksResponse>(`/api/v1/documents/${documentId}/agent/summarize`, {

@@ -193,6 +193,7 @@ class AgentUseCases:
         session_connectors: set[str] | None = None,
         history: list[tuple[str, str]] | None = None,
         access_token: str | None = None,
+        reasoning: bool = False,
     ) -> AgentAnswer:
         """Answer/act grounded in the document, with tool use.
 
@@ -229,6 +230,8 @@ class AgentUseCases:
             messages,
             session_connectors,
             access_token,
+            # The chat's Reasoning toggle: deeper thinking when on, fast when off.
+            reasoning_effort="medium" if reasoning else "minimal",
         )
         # If the agent already applied its edit live, don't offer to insert it
         # again (that produced a duplicate block); otherwise carry insertables.
@@ -387,13 +390,16 @@ class AgentUseCases:
         messages: list[LLMMessage],
         session_connectors: set[str] | None = None,
         access_token: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> tuple[str, bool, list[ToolCallLog]]:
         tools_used: list[str] = []
         call_log: list[ToolCallLog] = []
         tools = await self._available_tools(
             caller, workspace_id, document_id, session_connectors, access_token
         )
-        response = await self._llm.complete(messages, tools=tools)
+        response = await self._llm.complete(
+            messages, tools=tools, reasoning_effort=reasoning_effort
+        )
         for _ in range(MAX_TOOL_ROUNDS):
             if not response.wants_tools:
                 break
@@ -431,7 +437,9 @@ class AgentUseCases:
                         tool_result=ToolResult(call_id=call.id, content=result),
                     )
                 )
-            response = await self._llm.complete(messages, tools=tools)
+            response = await self._llm.complete(
+                messages, tools=tools, reasoning_effort=reasoning_effort
+            )
         await self._record(
             caller,
             document_id,

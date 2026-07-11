@@ -66,4 +66,8 @@ class LLMPort(Protocol):
         messages: list[LLMMessage],
         *,
         tools: list[ToolSpec] | None = None,
-    ) -> LLMResponse: ...
+        reasoning_effort: str | None = None,
+    ) -> LLMResponse:
+        """`reasoning_effort` (e.g. 'minimal' | 'low' | 'medium' | 'high') is a
+        hint for reasoning-capable models; adapters ignore it otherwise."""
+        ...

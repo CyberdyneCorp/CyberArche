@@ -121,3 +121,43 @@ async def test_openai_compatible_maps_history_and_normalizes_tool_calls():
     assert response.tool_calls == (
         ToolCall(id="c2", name="rag_query", arguments={"query": "more"}),
     )
+
+
+def _ok_response(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200, json={"model": "m", "choices": [{"message": {"content": "hi"}}]}
+    )
+
+
+async def test_openai_uses_max_completion_tokens_not_legacy_max_tokens():
+    handler, seen = capture(_ok_response)
+    llm = OpenAICompatibleLLM(
+        LLMConfig(model="gpt-4.1-mini", api_key="k", max_tokens=1234),
+        httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    await llm.complete([LLMMessage(role="user", content="hi")])
+
+    body = seen["body"]
+    # Forward-compatible: reasoning models reject `max_tokens`.
+    assert body["max_completion_tokens"] == 1234
+    assert "max_tokens" not in body
+
+
+async def test_openai_sends_reasoning_effort_only_for_reasoning_models():
+    # gpt-5 model → effort is passed through.
+    handler, seen = capture(_ok_response)
+    gpt5 = OpenAICompatibleLLM(
+        LLMConfig(model="gpt-5-mini", api_key="k"),
+        httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    await gpt5.complete([LLMMessage(role="user", content="hi")], reasoning_effort="medium")
+    assert seen["body"]["reasoning_effort"] == "medium"
+
+    # Non-reasoning model → the field is omitted (sending it 400s on gpt-4.1).
+    handler2, seen2 = capture(_ok_response)
+    gpt41 = OpenAICompatibleLLM(
+        LLMConfig(model="gpt-4.1-mini", api_key="k"),
+        httpx.AsyncClient(transport=httpx.MockTransport(handler2)),
+    )
+    await gpt41.complete([LLMMessage(role="user", content="hi")], reasoning_effort="medium")
+    assert "reasoning_effort" not in seen2["body"]

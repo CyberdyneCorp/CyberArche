@@ -47,13 +47,15 @@
 	let prompt = $state('');
 	let showRuns = $state(false);
 	let dragOver = $state(false);
+	// Reasoning toggle: off = fast/cheap, on = deeper thinking (reasoning models).
+	let reasoning = $state(false);
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		const text = prompt.trim();
 		if (!text || agent.busy) return;
 		prompt = '';
-		await agent.ask(text);
+		await agent.ask(text, reasoning);
 	}
 
 	function onDrop(event: DragEvent) {
@@ -256,6 +258,15 @@
 	{/if}
 
 	<form class="composer" onsubmit={submit}>
+		<button
+			type="button"
+			class="reason"
+			class:on={reasoning}
+			data-testid="agent-reasoning"
+			aria-pressed={reasoning}
+			title={reasoning ? 'Reasoning on — deeper, slower' : 'Reasoning off — fast'}
+			onclick={() => (reasoning = !reasoning)}>◇ Reason</button
+		>
 		<input
 			class="input ask"
 			placeholder="Ask, or describe an edit…"
@@ -565,6 +576,27 @@
 	}
 	.ask {
 		flex: 1;
+	}
+	.reason {
+		display: flex;
+		align-items: center;
+		padding: 0 9px;
+		border: 1px solid var(--line2);
+		border-radius: var(--r-pill);
+		background: var(--bg1);
+		color: var(--tx2);
+		font-size: 11.5px;
+		white-space: nowrap;
+	}
+	.reason:hover {
+		border-color: var(--ai);
+		color: var(--tx);
+	}
+	.reason.on {
+		background: var(--aibg);
+		border-color: var(--ai);
+		color: var(--ai);
+		font-weight: 600;
 	}
 	.send {
 		width: 32px;
