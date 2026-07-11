@@ -17,6 +17,18 @@
 	let svg = $state('');
 	let error = $state<string | null>(null);
 
+	// Mermaid's "no diagram type detected" error means line 1 isn't a valid
+	// diagram keyword (a common LLM slip: writing `roadmap` instead of `gantt`).
+	// Surface the valid keywords instead of the raw message.
+	const VALID_MERMAID_TYPES =
+		'flowchart, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, gantt, timeline, mindmap, pie, journey, gitGraph';
+	const hint = $derived(
+		error && /no diagram type detected/i.test(error)
+			? `The first line must be a valid diagram type — e.g. ${VALID_MERMAID_TYPES}. ` +
+				`For a roadmap or schedule, start with "gantt" or "timeline".`
+			: null
+	);
+
 	mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
 
 	// Depend ONLY on `source` (a value-memoized derived): the diagram re-renders
@@ -76,6 +88,9 @@
 	{/if}
 	{#if error}
 		<p class="error" data-testid="mermaid-error">{error}</p>
+		{#if hint}
+			<p class="hint" data-testid="mermaid-hint">{hint}</p>
+		{/if}
 	{:else if view === 'rendered' && svg}
 		<div class="render" data-testid="mermaid-render">{@html svg}</div>
 	{/if}
@@ -138,9 +153,16 @@
 	}
 	.error {
 		margin: 0;
-		padding: 10px 14px;
+		padding: 10px 14px 4px;
 		color: var(--rose);
 		font-family: var(--font-mono);
 		font-size: 12px;
+	}
+	.hint {
+		margin: 0;
+		padding: 0 14px 12px;
+		color: var(--tx2);
+		font-size: 12px;
+		line-height: 1.5;
 	}
 </style>

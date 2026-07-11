@@ -1027,7 +1027,11 @@ def _editing_tools() -> list[tuple[ToolSpec, str]]:
                     "table -> {header: [..], rows: [[..]]}; image -> {url, alt} "
                     "(an existing image URL); embed -> {url} (a YouTube/Vimeo/https "
                     "link). Put math in $…$/$$…$$, diagrams in a mermaid block, code "
-                    "in a code block. To CREATE a new image from a prompt, use the "
+                    "in a code block. A mermaid block's source MUST start with a "
+                    "valid diagram type (flowchart, sequenceDiagram, classDiagram, "
+                    "stateDiagram-v2, erDiagram, gantt, timeline, mindmap, pie) — for "
+                    "a roadmap or schedule use 'gantt' or 'timeline'; 'roadmap' is "
+                    "NOT valid. To CREATE a new image from a prompt, use the "
                     "generate_image tool instead of an image block."
                 ),
                 parameters={
