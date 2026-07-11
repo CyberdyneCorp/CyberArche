@@ -235,12 +235,23 @@
 	}
 	const MERMAID_SAMPLE = 'flowchart TD\n  A[Start] --> B{OK?}\n  B -->|Yes| C[Ship]\n  B -->|No| D[Fix]';
 
+	// ---- Toolbar composition ----
+	// The block hosts the editor in a document, so its chrome is trimmed to fit.
+	// The engine keeps every capability regardless; these flags only control what
+	// the toolbar exposes — flip one line to show/hide a group.
+	const SHOW_IMAGE = false; // image-insert button (badge 9)
+	const SHOW_MORE_TOOLS = false; // ⧉ menu: Frame, Laser + generators
+	const SHOW_HINT = false; // helper line under the toolbar
+	const SHOW_ZOOM_HISTORY = true; // bottom-left zoom + undo/redo island
+
 	// ---- Keyboard shortcuts (scoped to hover so typing in other blocks is safe) ----
 	const toolKeys: Record<string, Tool> = {
 		v: 'selection', r: 'rectangle', d: 'diamond', o: 'ellipse', a: 'arrow',
-		l: 'line', p: 'freedraw', t: 'text', e: 'eraser', h: 'hand', f: 'frame', k: 'laser',
+		l: 'line', p: 'freedraw', t: 'text', e: 'eraser', h: 'hand',
 		'1': 'selection', '2': 'rectangle', '3': 'diamond', '4': 'ellipse', '5': 'arrow',
-		'6': 'line', '7': 'freedraw', '8': 'text', '0': 'eraser'
+		'6': 'line', '7': 'freedraw', '8': 'text', '0': 'eraser',
+		// Frame/Laser are only reachable when their menu is shown.
+		...(SHOW_MORE_TOOLS ? { f: 'frame' as Tool, k: 'laser' as Tool } : {})
 	};
 	function handleModifierKey(e: KeyboardEvent, key: string): boolean {
 		if (key === 'z') {
@@ -279,7 +290,7 @@
 			store.deleteSelected();
 			return;
 		}
-		if (e.key === '9') {
+		if (SHOW_IMAGE && e.key === '9') {
 			fileInput?.click();
 			return;
 		}
@@ -396,58 +407,69 @@
 							<span class="badge">{t.badge}</span>
 						</button>
 					{/each}
-					<span class="divider"></span>
-					<button
-						class="tool"
-						title="Insert image — 9"
-						aria-label="Insert image — 9"
-						data-testid="ex-gen-image"
-						onclick={() => fileInput?.click()}
-					>
-						{@html icons.image}<span class="badge">9</span>
-					</button>
-					<button
-						class="tool"
-						title="More tools"
-						aria-label="More tools"
-						aria-expanded={moreOpen}
-						data-testid="ex-more"
-						class:active={moreOpen || view.tool === 'frame' || view.tool === 'laser'}
-						onclick={() => (moreOpen = !moreOpen)}
-					>
-						{@html icons.shapes}
-					</button>
-					{#if moreOpen}
-						<div class="island more-menu" role="menu">
-							<button class="menu-item" class:active={view.tool === 'frame'} onclick={() => pick('frame')}>
-								<span class="mi-icon">{@html icons.frame}</span>Frame<kbd>F</kbd>
-							</button>
-							<button class="menu-item" class:active={view.tool === 'laser'} onclick={() => pick('laser')}>
-								<span class="mi-icon">{@html icons.laser}</span>Laser pointer<kbd>K</kbd>
-							</button>
-							<div class="menu-head">Generate</div>
-							<button class="menu-item" onclick={() => { store.insertStickyNote(); moreOpen = false; }}>
-								<span class="mi-icon">{@html icons.note}</span>Sticky note
-							</button>
-							<button class="menu-item" onclick={() => { store.insertTable(); moreOpen = false; }}>
-								<span class="mi-icon">{@html icons.table}</span>Table
-							</button>
-							<button class="menu-item" onclick={() => { store.insertChart([10, 20, 15, 30]); moreOpen = false; }}>
-								<span class="mi-icon">{@html icons.chart}</span>Chart
-							</button>
-							<button class="menu-item" onclick={() => { store.insertMermaid(MERMAID_SAMPLE); moreOpen = false; }}>
-								<span class="mi-icon">{@html icons.mermaid}</span>Mermaid diagram
-							</button>
-						</div>
+					{#if SHOW_IMAGE || SHOW_MORE_TOOLS}
+						<span class="divider"></span>
+					{/if}
+					{#if SHOW_IMAGE}
+						<button
+							class="tool"
+							title="Insert image — 9"
+							aria-label="Insert image — 9"
+							data-testid="ex-gen-image"
+							onclick={() => fileInput?.click()}
+						>
+							{@html icons.image}<span class="badge">9</span>
+						</button>
+					{/if}
+					{#if SHOW_MORE_TOOLS}
+						<button
+							class="tool"
+							title="More tools"
+							aria-label="More tools"
+							aria-expanded={moreOpen}
+							data-testid="ex-more"
+							class:active={moreOpen || view.tool === 'frame' || view.tool === 'laser'}
+							onclick={() => (moreOpen = !moreOpen)}
+						>
+							{@html icons.shapes}
+						</button>
+						{#if moreOpen}
+							<div class="island more-menu" role="menu">
+								<button class="menu-item" class:active={view.tool === 'frame'} onclick={() => pick('frame')}>
+									<span class="mi-icon">{@html icons.frame}</span>Frame<kbd>F</kbd>
+								</button>
+								<button class="menu-item" class:active={view.tool === 'laser'} onclick={() => pick('laser')}>
+									<span class="mi-icon">{@html icons.laser}</span>Laser pointer<kbd>K</kbd>
+								</button>
+								<div class="menu-head">Generate</div>
+								<button class="menu-item" onclick={() => { store.insertStickyNote(); moreOpen = false; }}>
+									<span class="mi-icon">{@html icons.note}</span>Sticky note
+								</button>
+								<button class="menu-item" onclick={() => { store.insertTable(); moreOpen = false; }}>
+									<span class="mi-icon">{@html icons.table}</span>Table
+								</button>
+								<button class="menu-item" onclick={() => { store.insertChart([10, 20, 15, 30]); moreOpen = false; }}>
+									<span class="mi-icon">{@html icons.chart}</span>Chart
+								</button>
+								<button class="menu-item" onclick={() => { store.insertMermaid(MERMAID_SAMPLE); moreOpen = false; }}>
+									<span class="mi-icon">{@html icons.mermaid}</span>Mermaid diagram
+								</button>
+							</div>
+						{/if}
 					{/if}
 				</div>
-				<p class="hint">
-					To pan, hold <kbd>Middle mouse</kbd> or use the hand tool. Double-click a shape to label it.
-				</p>
+				{#if SHOW_HINT}
+					<p class="hint">
+						To pan, hold <kbd>Middle mouse</kbd> or use the hand tool. Double-click a shape to label it.
+					</p>
+				{/if}
 			</div>
-			<input bind:this={fileInput} type="file" accept="image/*" hidden onchange={importImage} />
+			{#if SHOW_IMAGE}
+				<input bind:this={fileInput} type="file" accept="image/*" hidden onchange={importImage} />
+			{/if}
 
 			<!-- Bottom-left: zoom + history island -->
+			{#if SHOW_ZOOM_HISTORY}
 			<div class="island corner bottom-left">
 				<button class="mini" title="Zoom out" aria-label="Zoom out" onclick={() => store.zoomOut()}>−</button>
 				<button class="mini zoom" title="Reset zoom" aria-label="Reset zoom" onclick={() => store.resetZoom()}>{view.zoom}%</button>
@@ -456,6 +478,7 @@
 				<button class="mini icon" title="Undo" aria-label="Undo" disabled={!view.canUndo} onclick={() => store.undo()}>{@html icons.undo}</button>
 				<button class="mini icon" title="Redo" aria-label="Redo" disabled={!view.canRedo} onclick={() => store.redo()}>{@html icons.redo}</button>
 			</div>
+			{/if}
 
 			<!-- Bottom-right: selection + expand island -->
 			<div class="island corner bottom-right">
