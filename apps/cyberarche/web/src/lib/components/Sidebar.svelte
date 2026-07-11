@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { dialogs } from '$lib/viewmodels/dialogs.svelte';
+	import { docTitles } from '$lib/viewmodels/doc-titles';
 	import { graphView } from '$lib/viewmodels/graph-view.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
@@ -308,7 +309,7 @@
 					data-testid="favorite-doc"
 				>
 					<span class="icon">★</span>
-					<span class="title">{doc.title}</span>
+					<span class="title">{docTitles.titleOf(doc)}</span>
 				</a>
 			{/each}
 		</nav>
@@ -488,7 +489,7 @@
 	>
 		<a class="doc-link" href={docHref(doc.id)} data-testid={testid}>
 			<span class="icon">▤</span>
-			<span class="title">{doc.title}</span>
+			<span class="title">{docTitles.titleOf(doc)}</span>
 		</a>
 		<button
 			class="row-add"
@@ -528,7 +529,7 @@
 					data-testid="shared-doc"
 				>
 					<span class="icon">👤</span>
-					<span class="title">{doc.title}</span>
+					<span class="title">{docTitles.titleOf(doc)}</span>
 				</a>
 			{/each}
 		</nav>

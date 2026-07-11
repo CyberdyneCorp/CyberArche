@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TreeNode } from '$lib/viewmodels/document-tree.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import { docTitles } from '$lib/viewmodels/doc-titles';
 	import type { TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { page } from '$app/state';
 	import TreeItem from './TreeItem.svelte';
@@ -34,7 +35,7 @@
 	</button>
 	<a class="doc" class:active {href} data-testid="tree-doc">
 		<span class="icon">▤</span>
-		<span class="title">{node.document.title}</span>
+		<span class="title">{docTitles.titleOf(node.document)}</span>
 	</a>
 	<span class="actions">
 		{#if teamspaces}

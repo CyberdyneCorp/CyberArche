@@ -11,6 +11,7 @@ import {
 	trashDocument,
 	type Document
 } from '$lib/api/documents';
+import { docTitles } from './doc-titles';
 
 export interface TreeNode {
 	document: Document;
@@ -127,6 +128,9 @@ export function createDocumentTree() {
 			const updated = await retitleDocument(id, title);
 			const item = findNode(roots, id);
 			if (item) item.document = updated;
+			// Publish the new title so other lists (sidebar teamspace/folder trees,
+			// favorites) that hold their own copy reflect it without reloading.
+			docTitles.set(id, updated.title);
 		},
 
 		async moveToTrash(id: string) {
