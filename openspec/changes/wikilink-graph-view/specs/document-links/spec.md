@@ -46,3 +46,26 @@ SHALL close the modal and open that document.
 - **WHEN** the user double-clicks a node in the graph
 - **THEN** the modal SHALL close
 - **AND** that node's document SHALL open
+
+### Requirement: Graph explorer interactions
+
+The graph view SHALL help the user read the structure, not only display it. It
+SHALL draw edges directed (source → target) with arrowheads, auto-fit the graph
+to the view on open (and offer a Fit control), and size a node by how connected
+it is. Selecting a node SHALL open an inspector showing its connection counts
+(incoming, outgoing, total) and its neighbours, dim the unrelated nodes, and
+offer to open the document. The view SHALL provide search to focus a document by
+title and report how many documents are isolated (no links).
+
+#### Scenario: Inspect a node
+
+- **WHEN** the user clicks a node
+- **THEN** an inspector SHALL show its incoming, outgoing, and total connection
+  counts and its neighbouring documents
+- **AND** the node's neighbours SHALL be highlighted while the rest are dimmed
+
+#### Scenario: Fit and orient the graph
+
+- **WHEN** the graph opens
+- **THEN** it SHALL be scaled and centred to fit the view
+- **AND** edges SHALL show direction with arrowheads
