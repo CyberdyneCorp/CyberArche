@@ -10,6 +10,7 @@
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
+	import TeamspaceMembersDialog from './TeamspaceMembersDialog.svelte';
 	import TreeItem from './TreeItem.svelte';
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 
@@ -149,6 +150,16 @@
 				})
 		},
 		{
+			label: 'Manage members',
+			testid: 'teamspace-members',
+			onSelect: () => (membersFor = node)
+		},
+		{
+			label: 'Export (ZIP)',
+			testid: 'teamspace-export',
+			onSelect: () => exportTeamspaceFlow(node)
+		},
+		{
 			label: 'Delete teamspace',
 			danger: true,
 			testid: 'teamspace-delete',
@@ -164,12 +175,47 @@
 				graphView.open({ kind: 'folder', id: fn.folder.id, name: fn.folder.name })
 		},
 		{
+			label: 'Export (ZIP)',
+			testid: 'folder-export',
+			onSelect: () => exportFolderFlow(fn)
+		},
+		{
 			label: 'Delete folder',
 			danger: true,
 			testid: 'folder-delete',
 			onSelect: () => deleteFolderFlow(fn)
 		}
 	];
+
+	let membersFor = $state<TeamspaceNode | null>(null);
+
+	async function exportTeamspaceFlow(node: TeamspaceNode) {
+		const { teamspaceDocuments } = await import('$lib/api/teamspaces');
+		const { exportScopeZip } = await import('$lib/editor/zip-export');
+		try {
+			const docs = await teamspaceDocuments(node.teamspace.id);
+			if (!docs.length) return toasts.error('No documents to export');
+			toasts.success(`Exporting ${docs.length} document${docs.length > 1 ? 's' : ''}…`);
+			const n = await exportScopeZip(node.teamspace.name, docs);
+			toasts.success(`Exported ${n} document${n === 1 ? '' : 's'}`);
+		} catch {
+			toasts.error(`Couldn't export “${node.teamspace.name}”`);
+		}
+	}
+
+	async function exportFolderFlow(fn: FolderNode) {
+		const { folderDocuments } = await import('$lib/api/folders');
+		const { exportScopeZip } = await import('$lib/editor/zip-export');
+		try {
+			const docs = await folderDocuments(fn.folder.id);
+			if (!docs.length) return toasts.error('No documents to export');
+			toasts.success(`Exporting ${docs.length} document${docs.length > 1 ? 's' : ''}…`);
+			const n = await exportScopeZip(fn.folder.name, docs);
+			toasts.success(`Exported ${n} document${n === 1 ? '' : 's'}`);
+		} catch {
+			toasts.error(`Couldn't export “${fn.folder.name}”`);
+		}
+	}
 
 	function docsPhrase(count: number): string {
 		if (count <= 0) return 'no documents';
@@ -583,6 +629,14 @@
 		<button class="foot-btn" onclick={signOut} data-testid="sign-out">↩ Sign out</button>
 	</footer>
 </aside>
+
+{#if membersFor}
+	<TeamspaceMembersDialog
+		teamspaceId={membersFor.teamspace.id}
+		teamspaceName={membersFor.teamspace.name}
+		onclose={() => (membersFor = null)}
+	/>
+{/if}
 
 {#if menu}
 	<ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />

@@ -49,6 +49,14 @@ async def document_backlinks(
     return [DocumentResponse.from_domain(d) for d in documents]
 
 
+@router.get("/{document_id}/blocks")
+async def document_blocks(document_id: str, cases: Cases, caller: Caller) -> dict:
+    """The document's current block tree, for reading its content outside the
+    editor (e.g. exporting a whole teamspace/folder)."""
+    blocks = await cases.realtime.read_blocks(caller, DocumentId(document_id))
+    return {"blocks": blocks}
+
+
 @router.get("")
 async def list_children(
     workspace_id: str,

@@ -29,6 +29,13 @@ export const createDocument = (
 
 export const getDocument = (id: string) => get<Document>(`/api/v1/documents/${id}`);
 
+/** A document's current block tree (for reading content outside the editor,
+ * e.g. exporting a whole teamspace/folder). */
+export const documentBlocks = (id: string) =>
+	get<{ blocks: import('$lib/editor/registry').BlockData[] }>(
+		`/api/v1/documents/${id}/blocks`
+	);
+
 /** Title search within a workspace (empty query returns all accessible docs). */
 export const searchDocuments = (workspaceId: string, q = '', limit = 50) =>
 	get<Document[]>(

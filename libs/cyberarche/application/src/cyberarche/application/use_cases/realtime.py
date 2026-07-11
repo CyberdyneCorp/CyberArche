@@ -99,6 +99,13 @@ class RealtimeUseCases:
         await self._require(caller, document_id, Role.VIEWER)
         return await self._current_state(document_id)
 
+    async def read_blocks(
+        self, caller: CallerContext, document_id: DocumentId
+    ) -> list[dict]:
+        """The document's current block tree — for reading content outside the
+        editor (e.g. exporting a whole teamspace/folder)."""
+        return self._engine.read_blocks(await self.current_state(caller, document_id))
+
     async def _current_state(self, document_id: DocumentId) -> bytes:
         """Reconstruct from the persisted log — survives relay restarts."""
         updates = await self._update_log.list_for_document(document_id)

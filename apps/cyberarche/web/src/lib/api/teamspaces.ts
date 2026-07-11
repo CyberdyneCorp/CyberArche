@@ -38,6 +38,9 @@ export const addTeamspaceMember = (teamspaceId: string, userId: string, role: Sh
 		role
 	});
 
+export const removeTeamspaceMember = (teamspaceId: string, userId: string) =>
+	del<void>(`/api/v1/teamspaces/${teamspaceId}/members/${userId}`);
+
 // ---- favourites ------------------------------------------------------------
 
 export const listFavorites = () => get<Document[]>('/api/v1/favorites');

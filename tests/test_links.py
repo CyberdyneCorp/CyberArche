@@ -159,3 +159,13 @@ async def test_only_changed_documents_are_reinferred(use_cases: UseCases, llm, a
     llm._responses = [LLMResponse(text="[]")]
     await use_cases.links.inferred_graph(alice, teamspace_id=TeamspaceId(team.id))
     assert len(llm.requests) == calls + 1  # exactly one document re-inferred
+
+
+async def test_realtime_read_blocks_returns_document_content(use_cases: UseCases, alice):
+    ws = await use_cases.workspaces.create(alice, name="WS")
+    doc = await use_cases.documents.create(alice, workspace_id=ws.id, title="Notes")
+    await use_cases.agent.apply_blocks(
+        alice, doc.id, [para("Hello world"), para("Second", bid="b2")]
+    )
+    blocks = await use_cases.realtime.read_blocks(alice, doc.id)
+    assert [b["data"]["text"] for b in blocks] == ["Hello world", "Second"]
