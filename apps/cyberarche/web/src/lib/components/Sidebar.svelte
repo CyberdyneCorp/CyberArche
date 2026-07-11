@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { dialogs } from '$lib/viewmodels/dialogs.svelte';
+	import { graphView } from '$lib/viewmodels/graph-view.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
@@ -137,6 +138,16 @@
 
 	const teamspaceMenu = (node: TeamspaceNode): MenuItem[] => [
 		{
+			label: 'Open graph',
+			testid: 'teamspace-graph',
+			onSelect: () =>
+				graphView.open({
+					kind: 'teamspace',
+					id: node.teamspace.id,
+					name: node.teamspace.name
+				})
+		},
+		{
 			label: 'Delete teamspace',
 			danger: true,
 			testid: 'teamspace-delete',
@@ -145,6 +156,12 @@
 	];
 
 	const folderMenu = (fn: FolderNode): MenuItem[] => [
+		{
+			label: 'Open graph',
+			testid: 'folder-graph',
+			onSelect: () =>
+				graphView.open({ kind: 'folder', id: fn.folder.id, name: fn.folder.name })
+		},
 		{
 			label: 'Delete folder',
 			danger: true,

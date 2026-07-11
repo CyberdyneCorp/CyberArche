@@ -47,3 +47,55 @@ async def test_backlinks_are_case_insensitive_and_exclude_self(use_cases: UseCas
 
     back = await use_cases.links.backlinks(alice, target.id)
     assert [d.id for d in back] == [linker.id]
+
+
+async def test_teamspace_graph_links_only_in_scope_documents(use_cases: UseCases, alice):
+    from cyberarche.domain.ids import TeamspaceId
+
+    ws = await use_cases.workspaces.create(alice, name="WS")
+    team = await use_cases.teamspaces.create(alice, ws.id, name="Team")
+    other = await use_cases.teamspaces.create(alice, ws.id, name="Other")
+    a = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Alpha", teamspace_id=team.id
+    )
+    b = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Beta", teamspace_id=team.id
+    )
+    outside = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Gamma", teamspace_id=other.id
+    )
+    # Alpha links Beta (in scope, case-insensitive) and Gamma (out of scope).
+    await use_cases.agent.apply_blocks(alice, a.id, [para("see [[beta]] and [[Gamma]]")])
+    await use_cases.agent.apply_blocks(alice, b.id, [para("back to [[Alpha]]")])
+
+    graph = await use_cases.links.graph(alice, teamspace_id=TeamspaceId(team.id))
+
+    assert {n.id for n in graph.nodes} == {a.id, b.id}  # Gamma is not in scope
+    edges = {(e.source, e.target) for e in graph.edges}
+    assert (a.id, b.id) in edges and (b.id, a.id) in edges
+    # The out-of-scope link (Gamma) is not an edge.
+    assert all(outside.id not in (e.source, e.target) for e in graph.edges)
+
+
+async def test_folder_graph_scopes_to_the_folder(use_cases: UseCases, alice):
+    from cyberarche.domain.ids import FolderId
+
+    ws = await use_cases.workspaces.create(alice, name="WS")
+    team = await use_cases.teamspaces.create(alice, ws.id, name="Team")
+    folder = await use_cases.folders.create(
+        alice, ws.id, name="Notes", teamspace_id=team.id
+    )
+    a = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="One", teamspace_id=team.id
+    )
+    b = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Two", teamspace_id=team.id
+    )
+    await use_cases.documents.place_in_folder(alice, a.id, folder.id)
+    await use_cases.documents.place_in_folder(alice, b.id, folder.id)
+    await use_cases.agent.apply_blocks(alice, a.id, [para("linking [[Two]]")])
+
+    graph = await use_cases.links.graph(alice, folder_id=FolderId(folder.id))
+
+    assert {n.id for n in graph.nodes} == {a.id, b.id}
+    assert {(e.source, e.target) for e in graph.edges} == {(a.id, b.id)}

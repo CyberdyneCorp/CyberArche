@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import GraphModal from '$lib/components/GraphModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
@@ -73,6 +74,7 @@
 	{#if paletteOpen}
 		<CommandPalette {workspaceId} onclose={() => (paletteOpen = false)} />
 	{/if}
+	<GraphModal {workspaceId} />
 {/if}
 
 <style>

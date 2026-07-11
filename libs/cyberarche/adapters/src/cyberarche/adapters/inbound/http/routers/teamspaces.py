@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -78,6 +79,13 @@ async def teamspace_documents(
 ) -> list[DocumentResponse]:
     documents = await cases.teamspaces.documents(caller, TeamspaceId(teamspace_id))
     return [DocumentResponse.from_domain(d) for d in documents]
+
+
+@router.get("/api/v1/teamspaces/{teamspace_id}/graph")
+async def teamspace_graph(teamspace_id: str, cases: Cases, caller: Caller) -> dict:
+    """The `[[wikilink]]` graph of this teamspace's documents ({nodes, edges})."""
+    graph = await cases.links.graph(caller, teamspace_id=TeamspaceId(teamspace_id))
+    return asdict(graph)
 
 
 @router.get("/api/v1/teamspaces/{teamspace_id}/members")

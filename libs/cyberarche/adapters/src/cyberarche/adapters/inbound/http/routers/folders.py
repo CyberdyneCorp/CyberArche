@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -90,6 +91,13 @@ async def folder_documents(
 ) -> list[DocumentResponse]:
     documents = await cases.documents.list_for_folder(caller, FolderId(folder_id))
     return [DocumentResponse.from_domain(d) for d in documents]
+
+
+@router.get("/api/v1/folders/{folder_id}/graph")
+async def folder_graph(folder_id: str, cases: Cases, caller: Caller) -> dict:
+    """The `[[wikilink]]` graph of this folder's documents ({nodes, edges})."""
+    graph = await cases.links.graph(caller, folder_id=FolderId(folder_id))
+    return asdict(graph)
 
 
 class PlaceDocumentRequest(BaseModel):
