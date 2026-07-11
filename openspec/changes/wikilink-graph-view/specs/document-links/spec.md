@@ -69,3 +69,32 @@ title and report how many documents are isolated (no links).
 - **WHEN** the graph opens
 - **THEN** it SHALL be scaled and centred to fit the view
 - **AND** edges SHALL show direction with arrowheads
+
+### Requirement: Graph analytics
+
+The graph view SHALL compute analytics from the documents and links and present
+them in plain language. It SHALL group documents into clusters (communities) and
+colour nodes by cluster, report centrality so the user can see a document's role
+(most connected, a bridge between topics, a good starting point, an
+authoritative document), surface structural insights (isolated documents,
+documents with no incoming references, and the number of disconnected groups),
+and let the user trace the shortest path between two documents.
+
+#### Scenario: See a document's role and cluster
+
+- **WHEN** the user selects a node
+- **THEN** the inspector SHALL show its cluster and centrality
+- **AND** SHALL label it as most connected, a bridge, a best starting point, or
+  authoritative when it is the top document for that measure
+
+#### Scenario: Surface structural insights
+
+- **WHEN** the graph loads
+- **THEN** the view SHALL report the number of clusters and disconnected groups
+- **AND** SHALL flag isolated documents and documents with no incoming references
+
+#### Scenario: Trace how two documents relate
+
+- **WHEN** the user selects a document, chooses "Find path to…", and clicks
+  another document
+- **THEN** the view SHALL highlight the shortest path of links between them
