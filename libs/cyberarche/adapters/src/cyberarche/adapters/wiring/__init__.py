@@ -33,6 +33,7 @@ from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.code_exec import CodeExecutionPort
 from cyberarche.application.ports.images import ImageGenerationPort
+from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
@@ -186,6 +187,7 @@ def _build_use_cases(
     queue: TaskQueuePort,
     peer_bus: PeerBusPort,
     api_keys: ApiKeyRepository,
+    inferred_links: InferredLinkRepository,
     model_name: str,
     clock,
     ids,
@@ -235,7 +237,15 @@ def _build_use_cases(
         favorites=FavoriteUseCases(favorites, documents, access),
         folders=FolderUseCases(folders, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
-        links=LinksUseCases(documents, realtime, crdt_engine, access),
+        links=LinksUseCases(
+            documents,
+            realtime,
+            crdt_engine,
+            access,
+            llm=llm,
+            inferred_links=inferred_links,
+            clock=clock,
+        ),
     )
 
 
@@ -315,6 +325,7 @@ class _Repositories:
     teamspaces: TeamspaceRepository
     favorites: FavoriteRepository
     folders: FolderRepository
+    inferred_links: InferredLinkRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -347,6 +358,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         PostgresFavoriteRepository,
         PostgresTeamspaceRepository,
     )
+    from cyberarche.adapters.outbound.postgres.inferred_links import (
+        PostgresInferredLinkRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -366,6 +380,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         teamspaces=PostgresTeamspaceRepository(pool),
         favorites=PostgresFavoriteRepository(pool),
         folders=PostgresFolderRepository(pool),
+        inferred_links=PostgresInferredLinkRepository(pool),
     )
 
 
@@ -387,6 +402,7 @@ def _memory_repositories() -> _Repositories:
         teamspaces=fakes.InMemoryTeamspaceRepository(),
         favorites=fakes.InMemoryFavoriteRepository(),
         folders=fakes.InMemoryFolderRepository(),
+        inferred_links=fakes.InMemoryInferredLinkRepository(),
     )
 
 
@@ -630,6 +646,7 @@ async def build_container(
             queue,
             peer_bus,
             repos.api_keys,
+            repos.inferred_links,
             config.llm_model,
             clock,
             ids,

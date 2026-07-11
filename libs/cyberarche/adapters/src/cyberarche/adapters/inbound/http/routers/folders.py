@@ -100,6 +100,13 @@ async def folder_graph(folder_id: str, cases: Cases, caller: Caller) -> dict:
     return asdict(graph)
 
 
+@router.get("/api/v1/folders/{folder_id}/graph/inferred")
+async def folder_inferred_graph(folder_id: str, cases: Cases, caller: Caller) -> dict:
+    """The graph with AI-inferred typed edges added (cached per document)."""
+    graph = await cases.links.inferred_graph(caller, folder_id=FolderId(folder_id))
+    return asdict(graph)
+
+
 class PlaceDocumentRequest(BaseModel):
     # A folder, or a teamspace, or (both null) the private space.
     folder_id: str | None = None

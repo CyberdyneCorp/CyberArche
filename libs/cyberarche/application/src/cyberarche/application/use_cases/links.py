@@ -8,13 +8,22 @@ read path the agent uses (realtime.current_state -> engine.read_blocks).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.crdt import CrdtEnginePort
+from cyberarche.application.ports.inferred_links import (
+    InferredLinkRecord,
+    InferredLinkRepository,
+    InferredRelation,
+)
+from cyberarche.application.ports.llm import LLMMessage, LLMPort
 from cyberarche.application.ports.repositories import DocumentRepository
+from cyberarche.application.ports.telemetry import ClockPort
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
@@ -34,6 +43,10 @@ class GraphNode:
 class GraphEdge:
     source: str
     target: str
+    type: str = "links_to"  # links_to | depends_on | explains | cites | similar | …
+    confidence: int = 100
+    evidence: str = ""
+    inferred: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +94,80 @@ def _references(blocks: list[dict], wanted_title_lower: str) -> bool:
     return False
 
 
+_RELATION_TYPES = {
+    "depends_on",
+    "explains",
+    "cites",
+    "similar",
+    "contradicts",
+    "mentions",
+}
+_MIN_CONFIDENCE = 60
+_MAX_INFER_DOCS = 40  # cap LLM calls per request; larger folders truncate
+
+
+def _document_text(blocks: list[dict]) -> str:
+    parts: list[str] = []
+    for block in blocks:
+        parts.extend(_block_texts(block))
+    return "\n".join(t for t in parts if t.strip())
+
+
+_INFER_SYSTEM = (
+    "You classify how one document relates to others in a knowledge base. "
+    "Given a source document and a list of other document titles, output only the "
+    "OTHER documents the source has a meaningful relationship to. Relationship "
+    "types: depends_on (the source needs it as a prerequisite), explains (the "
+    "source expands or explains it), cites (the source references it as a source), "
+    "similar (same topic/overlapping content), contradicts (conflicting claims), "
+    "mentions (referenced in passing). Reply ONLY with a JSON array of objects "
+    '{"target": "<exact other title>", "type": "<type>", "confidence": <0-100>, '
+    '"evidence": "<short reason or quote>"}. Include a relationship only when '
+    "confidence >= 60. If there are none, reply with []."
+)
+
+
+def _parse_relations(text: str, valid_titles: set[str]) -> tuple[InferredRelation, ...]:
+    """Parse the model's JSON array, keeping only well-typed, confident relations
+    whose target is a real other document."""
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end <= start:
+        return ()
+    try:
+        items = json.loads(text[start : end + 1])
+    except (ValueError, TypeError):
+        return ()
+    relations: list[InferredRelation] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        target = str(item.get("target", "")).strip()
+        rel_type = str(item.get("type", "")).strip()
+        try:
+            confidence = int(item.get("confidence", 0))
+        except (ValueError, TypeError):
+            confidence = 0
+        if (
+            rel_type not in _RELATION_TYPES
+            or confidence < _MIN_CONFIDENCE
+            or target.lower() not in valid_titles
+            or (target.lower(), rel_type) in seen
+        ):
+            continue
+        seen.add((target.lower(), rel_type))
+        relations.append(
+            InferredRelation(
+                target_title=target,
+                type=rel_type,
+                confidence=min(confidence, 100),
+                evidence=str(item.get("evidence", ""))[:280],
+            )
+        )
+    return tuple(relations)
+
+
 class LinksUseCases:
     def __init__(
         self,
@@ -88,11 +175,17 @@ class LinksUseCases:
         realtime: RealtimeUseCases,
         engine: CrdtEnginePort,
         access: AccessControl,
+        llm: LLMPort | None = None,
+        inferred_links: InferredLinkRepository | None = None,
+        clock: ClockPort | None = None,
     ) -> None:
         self._documents = documents
         self._realtime = realtime
         self._engine = engine
         self._access = access
+        self._llm = llm
+        self._inferred = inferred_links
+        self._clock = clock
 
     async def backlinks(
         self, caller: CallerContext, document_id: DocumentId
@@ -180,3 +273,147 @@ class LinksUseCases:
                 seen.add((source, target))
                 edges.append(GraphEdge(source=source, target=target))
         return LinkGraph(nodes=nodes, edges=edges)
+
+    async def inferred_graph(
+        self,
+        caller: CallerContext,
+        *,
+        teamspace_id: TeamspaceId | None = None,
+        folder_id: FolderId | None = None,
+    ) -> LinkGraph:
+        """The graph with AI-inferred typed edges added to the explicit `[[…]]`
+        edges. Inference is cached per document by content hash — a document is
+        re-classified only when its content changed, so re-opening the view makes
+        no LLM calls."""
+        if self._inferred is None or self._llm is None or self._clock is None:
+            return await self.graph(
+                caller, teamspace_id=teamspace_id, folder_id=folder_id
+            )
+        if teamspace_id is not None:
+            scope = await self._documents.list_for_teamspace(
+                caller.tenant_id, teamspace_id
+            )
+        elif folder_id is not None:
+            scope = await self._documents.list_for_folder(caller.tenant_id, folder_id)
+        else:
+            raise ValidationFailed("teamspace_id or folder_id required")
+
+        visible = [
+            doc
+            for doc in scope
+            if not doc.trashed
+            and await self._access.document_role(caller, doc) is not None
+        ]
+        if not visible:
+            return LinkGraph(nodes=[], edges=[])
+
+        texts: dict[str, str] = {}
+        explicit: dict[str, set[str]] = {}
+        for doc in visible:
+            try:
+                blocks = self._engine.read_blocks(
+                    await self._realtime.current_state(caller, doc.id)
+                )
+            except NotAuthorized:
+                continue
+            texts[str(doc.id)] = _document_text(blocks)
+            explicit[str(doc.id)] = _outgoing_titles(blocks)
+
+        title_to_id: dict[str, str] = {}
+        for doc in await self._documents.list_in_workspace(
+            caller.tenant_id, visible[0].workspace_id
+        ):
+            key = doc.title.strip().lower()
+            if key and key not in title_to_id:
+                title_to_id[key] = str(doc.id)
+        in_scope = {str(doc.id) for doc in visible}
+
+        nodes = [GraphNode(id=str(doc.id), title=doc.title) for doc in visible]
+        edges: list[GraphEdge] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add_edge(edge: GraphEdge) -> None:
+            key = (edge.source, edge.target, edge.type)
+            if (
+                edge.target
+                and edge.target != edge.source
+                and edge.target in in_scope
+                and key not in seen
+            ):
+                seen.add(key)
+                edges.append(edge)
+
+        # Explicit `[[links]]`.
+        for doc in visible:
+            source = str(doc.id)
+            for title in explicit.get(source, set()):
+                target = title_to_id.get(title)
+                if target:
+                    add_edge(GraphEdge(source=source, target=target))
+
+        # Inferred edges — cache hit, or classify + cache.
+        cached = await self._inferred.get_many(
+            caller.tenant_id, [doc.id for doc in visible]
+        )
+        classified = 0
+        for doc in visible:
+            source = str(doc.id)
+            text = texts.get(source, "")
+            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            record = cached.get(source)
+            if record is not None and record.content_hash == content_hash:
+                relations = record.relations
+            elif classified < _MAX_INFER_DOCS:
+                relations = await self._classify(doc, text, visible)
+                await self._inferred.put(
+                    caller.tenant_id,
+                    InferredLinkRecord(
+                        source_document_id=source,
+                        content_hash=content_hash,
+                        computed_at=self._clock.now(),
+                        relations=relations,
+                    ),
+                )
+                classified += 1
+            else:
+                relations = ()  # over the per-request cap; classified next time
+            for rel in relations:
+                target = title_to_id.get(rel.target_title.strip().lower())
+                if target:
+                    add_edge(
+                        GraphEdge(
+                            source=source,
+                            target=target,
+                            type=rel.type,
+                            confidence=rel.confidence,
+                            evidence=rel.evidence,
+                            inferred=True,
+                        )
+                    )
+        return LinkGraph(nodes=nodes, edges=edges)
+
+    async def _classify(
+        self, doc: Document, text: str, others: list[Document]
+    ) -> tuple[InferredRelation, ...]:
+        """Ask the model how `doc` relates to the other in-scope documents."""
+        candidates = [d for d in others if d.id != doc.id]
+        if not candidates or not text.strip() or self._llm is None:
+            return ()
+        listing = "\n".join(f"- {d.title}" for d in candidates[:_MAX_INFER_DOCS])
+        messages = [
+            LLMMessage(role="system", content=_INFER_SYSTEM),
+            LLMMessage(
+                role="user",
+                content=(
+                    f'Document: "{doc.title}"\n{text[:1500]}\n\n'
+                    f"Other documents in this folder:\n{listing}\n\n"
+                    "Return the relationships as a JSON array."
+                ),
+            ),
+        ]
+        try:
+            response = await self._llm.complete(messages, reasoning_effort="minimal")
+        except Exception:
+            return ()
+        valid = {d.title.strip().lower() for d in candidates}
+        return _parse_relations(response.text, valid)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cyberarche.application.ports.llm import LLMResponse
 from cyberarche.application.use_cases import UseCases
 
 
@@ -99,3 +100,62 @@ async def test_folder_graph_scopes_to_the_folder(use_cases: UseCases, alice):
 
     assert {n.id for n in graph.nodes} == {a.id, b.id}
     assert {(e.source, e.target) for e in graph.edges} == {(a.id, b.id)}
+
+
+async def test_inferred_graph_is_typed_and_cached(use_cases: UseCases, llm, alice):
+    from cyberarche.domain.ids import TeamspaceId
+
+    ws = await use_cases.workspaces.create(alice, name="WS")
+    team = await use_cases.teamspaces.create(alice, ws.id, name="Team")
+    a = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Derivatives", teamspace_id=team.id
+    )
+    b = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Limits", teamspace_id=team.id
+    )
+    await use_cases.agent.apply_blocks(
+        alice, a.id, [para("Understanding limits is required before a derivative.")]
+    )
+    await use_cases.agent.apply_blocks(alice, b.id, [para("The limit of a function.")])
+
+    # Each document is classified once; only Derivatives→Limits resolves (a
+    # Limits→Limits self-link is dropped), so one inferred edge results.
+    rel = '[{"target":"Limits","type":"depends_on","confidence":94,"evidence":"limits first"}]'
+    llm._responses = [LLMResponse(text=rel), LLMResponse(text=rel)]
+
+    graph = await use_cases.links.inferred_graph(alice, teamspace_id=TeamspaceId(team.id))
+    inferred = [e for e in graph.edges if e.inferred]
+    assert any(e.type == "depends_on" and e.confidence == 94 for e in inferred)
+    assert (a.id, b.id) in {(e.source, e.target) for e in inferred}
+    calls = len(llm.requests)
+    assert calls == 2  # one LLM call per document
+
+    # Re-request with nothing changed → served from cache → NO new LLM calls.
+    graph2 = await use_cases.links.inferred_graph(alice, teamspace_id=TeamspaceId(team.id))
+    assert len(llm.requests) == calls  # the model was not asked again
+    assert any(e.inferred and e.type == "depends_on" for e in graph2.edges)
+
+
+async def test_only_changed_documents_are_reinferred(use_cases: UseCases, llm, alice):
+    from cyberarche.domain.ids import TeamspaceId
+
+    ws = await use_cases.workspaces.create(alice, name="WS")
+    team = await use_cases.teamspaces.create(alice, ws.id, name="Team")
+    a = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="One", teamspace_id=team.id
+    )
+    b = await use_cases.documents.create(
+        alice, workspace_id=ws.id, title="Two", teamspace_id=team.id
+    )
+    await use_cases.agent.apply_blocks(alice, a.id, [para("first")])
+    await use_cases.agent.apply_blocks(alice, b.id, [para("second")])
+
+    llm._responses = [LLMResponse(text="[]"), LLMResponse(text="[]")]
+    await use_cases.links.inferred_graph(alice, teamspace_id=TeamspaceId(team.id))
+    calls = len(llm.requests)  # 2
+
+    # Change only document A → its content hash changes → only A is re-classified.
+    await use_cases.agent.apply_blocks(alice, a.id, [para("first, now expanded")])
+    llm._responses = [LLMResponse(text="[]")]
+    await use_cases.links.inferred_graph(alice, teamspace_id=TeamspaceId(team.id))
+    assert len(llm.requests) == calls + 1  # exactly one document re-inferred

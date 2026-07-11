@@ -424,6 +424,24 @@ class ScriptedImageGenerator:
         return GeneratedImage(content=_STUB_PNG, content_type="image/png")
 
 
+class InMemoryInferredLinkRepository:
+    """InferredLinkRepository fake: an in-process cache of inferred relations."""
+
+    def __init__(self) -> None:
+        self._records: dict[tuple[str, str], object] = {}
+
+    async def get_many(self, tenant_id, source_ids):
+        out = {}
+        for sid in source_ids:
+            record = self._records.get((str(tenant_id), str(sid)))
+            if record is not None:
+                out[str(sid)] = record
+        return out
+
+    async def put(self, tenant_id, record) -> None:
+        self._records[(str(tenant_id), record.source_document_id)] = record
+
+
 class ScriptedMeetings:
     """MeetingsPort fake: records the access token it was called with and returns
     a fixed recording, so the agent meeting tools can be tested offline."""

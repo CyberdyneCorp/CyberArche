@@ -88,6 +88,17 @@ async def teamspace_graph(teamspace_id: str, cases: Cases, caller: Caller) -> di
     return asdict(graph)
 
 
+@router.get("/api/v1/teamspaces/{teamspace_id}/graph/inferred")
+async def teamspace_inferred_graph(
+    teamspace_id: str, cases: Cases, caller: Caller
+) -> dict:
+    """The graph with AI-inferred typed edges added (cached per document)."""
+    graph = await cases.links.inferred_graph(
+        caller, teamspace_id=TeamspaceId(teamspace_id)
+    )
+    return asdict(graph)
+
+
 @router.get("/api/v1/teamspaces/{teamspace_id}/members")
 async def teamspace_members(
     teamspace_id: str, cases: Cases, caller: Caller

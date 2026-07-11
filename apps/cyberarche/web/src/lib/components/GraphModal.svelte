@@ -5,7 +5,14 @@
 	 * plain-language roles, isolated/orphan/source/sink insights, and shortest
 	 * path between two documents. Double-click a node to open its document. */
 	import { goto } from '$app/navigation';
-	import { folderGraph, teamspaceGraph, type LinkGraph } from '$lib/api/links';
+	import {
+		folderGraph,
+		folderInferredGraph,
+		teamspaceGraph,
+		teamspaceInferredGraph,
+		type GraphEdge,
+		type LinkGraph
+	} from '$lib/api/links';
 	import { graphView } from '$lib/viewmodels/graph-view.svelte';
 	import {
 		analyzeGraph,
@@ -27,10 +34,15 @@
 		r: number;
 		community: number;
 	}
-	const sim: { nodes: SimNode[]; edges: { source: SimNode; target: SimNode }[] } = {
-		nodes: [],
-		edges: []
-	};
+	interface SimEdge {
+		source: SimNode;
+		target: SimNode;
+		type: string;
+		confidence: number;
+		evidence: string;
+		inferred: boolean;
+	}
+	const sim: { nodes: SimNode[]; edges: SimEdge[] } = { nodes: [], edges: [] };
 	const neighbours = new Map<string, Set<string>>();
 	let analysis = $state<GraphAnalysis | null>(null);
 	let frame = $state(0);
@@ -39,6 +51,23 @@
 	let empty = $state(false);
 	let selectedId = $state<string | null>(null);
 	let query = $state('');
+
+	// AI-inferred typed links: toggled per scope; results are cached client-side
+	// (and server-side per document) so re-toggling/re-opening doesn't refetch.
+	let aiLinks = $state(false);
+	let inferring = $state(false);
+	const graphCache = new Map<string, LinkGraph>();
+
+	const EDGE_STYLE: Record<string, { color: string; dash: string; label: string }> = {
+		links_to: { color: 'var(--tx3)', dash: '', label: 'Links to' },
+		depends_on: { color: '#ef4444', dash: '6 4', label: 'Depends on' },
+		explains: { color: '#10b981', dash: '6 4', label: 'Explains' },
+		cites: { color: '#6366f1', dash: '2 4', label: 'Cites' },
+		similar: { color: '#0ea5e9', dash: '4 4', label: 'Similar' },
+		contradicts: { color: '#f97316', dash: '8 3', label: 'Contradicts' },
+		mentions: { color: '#a78bfa', dash: '3 4', label: 'Mentions' }
+	};
+	const edgeStyle = (type: string) => EDGE_STYLE[type] ?? EDGE_STYLE.links_to;
 
 	// Shortest-path mode: after "Find path to…", the next node click sets the target.
 	let pathFrom = $state<string | null>(null);
@@ -80,6 +109,19 @@
 		if (analysis.bestStart === selectedId) r.push('Best starting point');
 		if (analysis.authoritative === selectedId) r.push('Authoritative');
 		return r;
+	});
+
+	const selectedRelations = $derived.by(() => {
+		void frame;
+		if (!selectedId) return [] as SimEdge[];
+		return sim.edges.filter((e) => e.source.id === selectedId && e.inferred);
+	});
+
+	const usedEdgeTypes = $derived.by(() => {
+		void frame;
+		const types = new Set<string>();
+		for (const e of sim.edges) if (e.inferred) types.add(e.type);
+		return [...types];
 	});
 
 	const pathEdgeKeys = $derived.by(() => {
@@ -137,13 +179,17 @@
 				const uy = dy / d;
 				const onPath = pathEdgeKeys.has(`${e.source.id}|${e.target.id}`);
 				const hot = onPath || e.source.id === selectedId || e.target.id === selectedId;
+				const style = edgeStyle(e.type);
+				const baseWidth = e.inferred ? 1 + (e.confidence / 100) * 1.8 : 1.3;
 				return {
 					x1: e.source.x + ux * e.source.r,
 					y1: e.source.y + uy * e.source.r,
 					x2: e.target.x - ux * (e.target.r + 6),
 					y2: e.target.y - uy * (e.target.r + 6),
-					hot,
-					dim: (!!active || !!pathIds) && !hot
+					dim: (!!active || !!pathIds) && !hot,
+					color: hot ? 'var(--acc)' : e.inferred ? style.color : 'var(--line2, var(--line))',
+					dash: e.inferred ? style.dash : '',
+					widthv: hot ? Math.max(baseWidth, 2.2) : baseWidth
 				};
 			})
 		};
@@ -199,16 +245,27 @@
 		selectedId = null;
 		query = '';
 		clearPath();
+		const cacheKey = `${kind}:${id}:${aiLinks ? 'ai' : 'plain'}`;
 		try {
-			const graph: LinkGraph = kind === 'teamspace'
-				? await teamspaceGraph(id)
-				: await folderGraph(id);
+			let graph = graphCache.get(cacheKey);
+			if (!graph) {
+				if (aiLinks) inferring = true;
+				graph = aiLinks
+					? kind === 'teamspace'
+						? await teamspaceInferredGraph(id)
+						: await folderInferredGraph(id)
+					: kind === 'teamspace'
+						? await teamspaceGraph(id)
+						: await folderGraph(id);
+				graphCache.set(cacheKey, graph);
+			}
 			build(graph);
 			empty = sim.nodes.length === 0;
 		} catch {
 			error = 'Could not load the graph.';
 		} finally {
 			loading = false;
+			inferring = false;
 		}
 	}
 
@@ -239,7 +296,14 @@
 		});
 		sim.nodes = [...byId.values()];
 		sim.edges = graph.edges
-			.map((e) => ({ source: byId.get(e.source)!, target: byId.get(e.target)! }))
+			.map((e: GraphEdge) => ({
+				source: byId.get(e.source)!,
+				target: byId.get(e.target)!,
+				type: e.type ?? 'links_to',
+				confidence: e.confidence ?? 100,
+				evidence: e.evidence ?? '',
+				inferred: e.inferred ?? false
+			}))
 			.filter((e) => e.source && e.target);
 		tx = 0;
 		ty = 0;
@@ -432,6 +496,7 @@
 
 	$effect(() => {
 		const s = scope;
+		void aiLinks; // reload when the AI-links toggle flips
 		if (!s) {
 			stop();
 			return;
@@ -625,6 +690,14 @@
 						<option value={2}>Depth: 2</option>
 						<option value={3}>Depth: 3</option>
 					</select>
+					<button
+						class="tbtn"
+						class:on={aiLinks}
+						data-testid="graph-ai"
+						title="Infer typed relationships with AI (cached)"
+						aria-pressed={aiLinks}
+						onclick={() => (aiLinks = !aiLinks)}>✦ AI links</button
+					>
 					<button class="tbtn" title="Fit to view" data-testid="graph-fit" onclick={fitView}>⤢ Fit</button>
 					<button class="close" aria-label="Close" onclick={() => graphView.close()}>✕</button>
 				</div>
@@ -650,7 +723,17 @@
 					</defs>
 					<g transform={`translate(${tx} ${ty}) scale(${scale})`}>
 						{#each rendered.edges as e, i (i)}
-							<line class="edge" class:hot={e.hot} class:dim={e.dim} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} marker-end="url(#graph-arrow)" />
+							<line
+								class="edge"
+								class:dim={e.dim}
+								x1={e.x1}
+								y1={e.y1}
+								x2={e.x2}
+								y2={e.y2}
+								style={`stroke:${e.color};stroke-width:${e.widthv}`}
+								stroke-dasharray={e.dash}
+								marker-end="url(#graph-arrow)"
+							/>
 						{/each}
 						{#each rendered.nodes as n (n.id)}
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -713,6 +796,21 @@
 						{:else}
 							<p class="insp-note">No links yet — this document is isolated.</p>
 						{/if}
+						{#if selectedRelations.length}
+							<div class="insp-section">AI-inferred relationships</div>
+							<div class="relations">
+								{#each selectedRelations as r (r.target.id + r.type)}
+									<button class="rel" onclick={() => focusNode(r.target.id)}>
+										<span class="rel-head">
+											<span class="rel-type" style={`color:${edgeStyle(r.type).color}`}>{edgeStyle(r.type).label}</span>
+											<span class="rel-target">{r.target.title}</span>
+											<span class="rel-conf">{r.confidence}%</span>
+										</span>
+										{#if r.evidence}<span class="rel-ev">“{r.evidence}”</span>{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
 						<div class="insp-actions">
 							<button class="primary" data-testid="graph-open" onclick={() => openDocument(selected!.id)}>Open ↗</button>
 							<button class="ghost" onclick={startPath} data-testid="graph-find-path">Find path to…</button>
@@ -763,7 +861,9 @@
 			</div>
 
 			<footer class="status">
-				{#if loading}
+				{#if inferring}
+					<span class="picking-hint">✦ Inferring relationships with AI… (cached after the first time)</span>
+				{:else if loading}
 					<span>Loading graph…</span>
 				{:else if error}
 					<span class="err">{error}</span>
@@ -775,8 +875,13 @@
 					<span class="path">{pathList.map((n) => n.title).join('  →  ')}</span>
 				{:else}
 					<span class="stat">{sim.nodes.length} documents · {sim.edges.length} links · {analysis?.communities ?? 0} clusters</span>
-					<span class="spacer"></span>
-					<span class="hint">Click to inspect · double-click to open · scroll to zoom</span>
+					{#if aiLinks && usedEdgeTypes.length}
+						<span class="legend-inline">
+							{#each usedEdgeTypes as t (t)}
+								<span class="leg-e"><span class="leg-line" style={`border-color:${edgeStyle(t).color}`}></span>{edgeStyle(t).label}</span>
+							{/each}
+						</span>
+					{/if}
 				{/if}
 				<span class="spacer"></span>
 				<div class="zoom">
@@ -852,6 +957,78 @@
 	.tbtn:hover {
 		background: var(--bg3);
 		color: var(--tx);
+	}
+	.tbtn.on {
+		background: var(--accbg2);
+		border-color: var(--acc);
+		color: var(--acc-strong);
+		font-weight: 600;
+	}
+	.relations {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+		margin-bottom: 14px;
+	}
+	.rel {
+		text-align: left;
+		padding: 7px 9px;
+		border-radius: var(--r-control);
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	.rel:hover {
+		border-color: var(--acc);
+	}
+	.rel-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.rel-type {
+		font-size: 10.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+		font-weight: 600;
+	}
+	.rel-target {
+		font-size: 12.5px;
+		color: var(--tx);
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.rel-conf {
+		font-size: 11px;
+		color: var(--tx3);
+		font-variant-numeric: tabular-nums;
+	}
+	.rel-ev {
+		font-size: 11.5px;
+		color: var(--tx2);
+		font-style: italic;
+		line-height: 1.35;
+	}
+	.legend-inline {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-left: 10px;
+	}
+	.leg-e {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 11px;
+		color: var(--tx2);
+	}
+	.leg-line {
+		width: 14px;
+		border-top: 2px dashed;
 	}
 	.close {
 		width: 28px;
@@ -930,10 +1107,6 @@
 		stroke: var(--line2, var(--line));
 		stroke-width: 1.3;
 		transition: opacity 0.15s;
-	}
-	.edge.hot {
-		stroke: var(--acc);
-		stroke-width: 2.2;
 	}
 	.edge.dim {
 		opacity: 0.12;
@@ -1162,9 +1335,6 @@
 	.status .stat {
 		font-variant-numeric: tabular-nums;
 		color: var(--tx);
-	}
-	.status .hint {
-		color: var(--tx3);
 	}
 	.status .path {
 		color: var(--acc-strong);

@@ -10,6 +10,10 @@ export interface GraphNode {
 export interface GraphEdge {
 	source: string;
 	target: string;
+	type: string; // links_to | depends_on | explains | cites | similar | contradicts | mentions
+	confidence: number;
+	evidence: string;
+	inferred: boolean;
 }
 
 export interface LinkGraph {
@@ -22,3 +26,10 @@ export const teamspaceGraph = (teamspaceId: string) =>
 
 export const folderGraph = (folderId: string) =>
 	get<LinkGraph>(`/api/v1/folders/${folderId}/graph`);
+
+/** The graph with AI-inferred typed edges added (cached server-side per doc). */
+export const teamspaceInferredGraph = (teamspaceId: string) =>
+	get<LinkGraph>(`/api/v1/teamspaces/${teamspaceId}/graph/inferred`);
+
+export const folderInferredGraph = (folderId: string) =>
+	get<LinkGraph>(`/api/v1/folders/${folderId}/graph/inferred`);

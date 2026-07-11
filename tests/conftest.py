@@ -36,6 +36,7 @@ from cyberarche.application.testing.fakes import (
     ScriptedCodeExecutor,
     ScriptedImageGenerator,
     ScriptedLLM,
+    InMemoryInferredLinkRepository,
     ScriptedMeetings,
     SequentialIds,
     StaticTokenPort,
@@ -101,6 +102,11 @@ def meetings() -> ScriptedMeetings:
 
 
 @pytest.fixture
+def inferred_links() -> InMemoryInferredLinkRepository:
+    return InMemoryInferredLinkRepository()
+
+
+@pytest.fixture
 def agent_runs() -> InMemoryAgentRunRepository:
     return InMemoryAgentRunRepository()
 
@@ -155,6 +161,7 @@ def use_cases(
     images: ScriptedImageGenerator,
     code_exec: ScriptedCodeExecutor,
     meetings: ScriptedMeetings,
+    inferred_links: InMemoryInferredLinkRepository,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
     secret_box: NaiveSecretBox,
@@ -232,7 +239,15 @@ def use_cases(
         favorites=FavoriteUseCases(favorite_repo, documents, access),
         folders=FolderUseCases(folder_repo, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
-        links=LinksUseCases(documents, realtime, engine, access),
+        links=LinksUseCases(
+            documents,
+            realtime,
+            engine,
+            access,
+            llm=llm,
+            inferred_links=inferred_links,
+            clock=clock,
+        ),
     )
 
 
