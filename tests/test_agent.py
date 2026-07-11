@@ -455,6 +455,132 @@ async def test_ask_returns_tool_calls_for_the_chat(use_cases, llm, alice):
     assert calls["insert_blocks"].result.startswith("inserted 1 block")
 
 
+async def test_agent_reads_a_meeting_transcript_with_delegated_token(
+    use_cases, llm, meetings, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="get_meeting_transcript",
+                    arguments={"recording_id": "rec-1"},
+                ),
+            ),
+        ),
+        LLMResponse(text="Added the standup notes.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="add my standup transcript",
+        access_token="tok-123",
+    )
+
+    # The caller's own token is forwarded to the provider (delegated auth).
+    assert meetings.tokens == ["tok-123"]
+    call = next(c for c in answer.tool_calls if c.name == "get_meeting_transcript")
+    assert "Weekly standup" in call.result
+    assert "Alice: draft the spec" in call.result  # action item rendered
+    assert "Alice: hello everyone" in call.result  # transcript body rendered
+
+
+async def test_agent_asks_across_meetings(use_cases, llm, meetings, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1", name="ask_meetings", arguments={"question": "roadmap?"}
+                ),
+            ),
+        ),
+        LLMResponse(text="done", model="m"),
+    ]
+
+    await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="what did my meetings say about the roadmap?",
+        access_token="tok-xyz",
+    )
+
+    assert meetings.asked == ["roadmap?"]
+    assert meetings.tokens == ["tok-xyz"]
+
+
+async def test_meeting_tools_require_a_caller_token(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    # No access token on the request path → the per-user tools are not offered.
+    without = await use_cases.agent._available_tools(
+        alice, document.workspace_id, document.id, None, None
+    )
+    assert "list_meetings" not in {t.name for t in without}
+    # With the caller's token they appear.
+    with_token = await use_cases.agent._available_tools(
+        alice, document.workspace_id, document.id, None, "tok"
+    )
+    assert {"list_meetings", "get_meeting_transcript", "ask_meetings"} <= {
+        t.name for t in with_token
+    }
+
+
+async def test_meetings_tool_reports_unavailable_when_unconfigured(use_cases, alice):
+    from cyberarche.application.ports.llm import ToolCall as _ToolCall
+
+    use_cases.agent._meetings = None
+    result = await use_cases.agent._run_meetings_tool(
+        _ToolCall(id="c", name="list_meetings", arguments={}), "tok"
+    )
+    assert result.startswith("error:") and "not configured" in result
+
+
+async def test_cyberflies_adapter_maps_transcript_and_sends_caller_token():
+    import httpx
+
+    from cyberarche.adapters.outbound.meetings.cyberflies import (
+        CyberfliesMeetingsAdapter,
+    )
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("authorization", "")
+        seen["path"] = request.url.path
+        return httpx.Response(
+            200,
+            json={
+                "id": "rec-9",
+                "status": "ready",
+                "created_at": "2026-07-02T09:00:00Z",
+                "media": {},
+                "transcription": {"text": "hello world", "word_count": 2},
+                "summary": {
+                    "headline": "Kickoff",
+                    "abstract": "We started.",
+                    "bullets": ["scoped it"],
+                    "action_items": [{"text": "Bob: build it", "assignee": "Bob"}],
+                },
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = CyberfliesMeetingsAdapter("https://cyberflies", client)
+    rec = await adapter.get_recording("USER-TOKEN", "rec-9")
+    await client.aclose()
+
+    assert seen["auth"] == "Bearer USER-TOKEN"  # caller token forwarded as bearer
+    assert seen["path"] == "/api/v1/recordings/rec-9"
+    assert rec.headline == "Kickoff"
+    assert rec.transcript == "hello world"
+    assert rec.action_items == ["Bob: build it"]
+    assert rec.bullets == ["scoped it"]
+
+
 async def test_agent_generate_image_inserts_an_image_block(
     use_cases, llm, images, alice
 ):

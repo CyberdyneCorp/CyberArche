@@ -418,6 +418,48 @@ class ScriptedImageGenerator:
         return GeneratedImage(content=_STUB_PNG, content_type="image/png")
 
 
+class ScriptedMeetings:
+    """MeetingsPort fake: records the access token it was called with and returns
+    a fixed recording, so the agent meeting tools can be tested offline."""
+
+    def __init__(self) -> None:
+        self.tokens: list[str] = []
+        self.asked: list[str] = []
+
+    async def list_recordings(self, access_token: str, *, limit: int = 20):
+        from cyberarche.application.ports.meetings import MeetingSummary
+
+        self.tokens.append(access_token)
+        return [
+            MeetingSummary(
+                id="rec-1",
+                status="ready",
+                captured_at="2026-07-01T10:00:00Z",
+                headline="Weekly standup",
+            )
+        ]
+
+    async def get_recording(self, access_token: str, recording_id: str):
+        from cyberarche.application.ports.meetings import MeetingTranscript
+
+        self.tokens.append(access_token)
+        return MeetingTranscript(
+            id=recording_id,
+            status="ready",
+            captured_at="2026-07-01T10:00:00Z",
+            headline="Weekly standup",
+            abstract="The team synced on the roadmap.",
+            bullets=["Shipped the editor", "Planned Q3"],
+            action_items=["Alice: draft the spec"],
+            transcript="Alice: hello everyone. Bob: hi.",
+        )
+
+    async def ask(self, access_token: str, question: str) -> str:
+        self.tokens.append(access_token)
+        self.asked.append(question)
+        return "Across your meetings: the roadmap was approved."
+
+
 class ScriptedCodeExecutor:
     """CodeExecutionPort fake: records code and returns a scripted result
     (one PNG figure + stdout) so agent code-execution can be tested offline."""

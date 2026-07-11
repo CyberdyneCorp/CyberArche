@@ -26,6 +26,11 @@ from cyberarche.application.ports.code_exec import (
 )
 from cyberarche.application.ports.extraction import FileExtractorPort
 from cyberarche.application.ports.images import ImageGenerationPort
+from cyberarche.application.ports.meetings import (
+    MeetingSummary,
+    MeetingTranscript,
+    MeetingsPort,
+)
 from cyberarche.application.ports.storage import BlobStoragePort
 from cyberarche.application.ports.llm import (
     LLMMessage,
@@ -156,11 +161,13 @@ class AgentUseCases:
         images: ImageGenerationPort | None = None,
         blobs: BlobStoragePort | None = None,
         code: CodeExecutionPort | None = None,
+        meetings: MeetingsPort | None = None,
     ) -> None:
         self._llm = llm
         self._images = images
         self._blobs = blobs
         self._code = code
+        self._meetings = meetings
         self._documents = documents
         self._realtime = realtime
         self._knowledge = knowledge
@@ -185,6 +192,7 @@ class AgentUseCases:
         instruction: str,
         session_connectors: set[str] | None = None,
         history: list[tuple[str, str]] | None = None,
+        access_token: str | None = None,
     ) -> AgentAnswer:
         """Answer/act grounded in the document, with tool use.
 
@@ -220,6 +228,7 @@ class AgentUseCases:
             instruction,
             messages,
             session_connectors,
+            access_token,
         )
         # If the agent already applied its edit live, don't offer to insert it
         # again (that produced a duplicate block); otherwise carry insertables.
@@ -377,11 +386,12 @@ class AgentUseCases:
         prompt: str,
         messages: list[LLMMessage],
         session_connectors: set[str] | None = None,
+        access_token: str | None = None,
     ) -> tuple[str, bool, list[ToolCallLog]]:
         tools_used: list[str] = []
         call_log: list[ToolCallLog] = []
         tools = await self._available_tools(
-            caller, workspace_id, document_id, session_connectors
+            caller, workspace_id, document_id, session_connectors, access_token
         )
         response = await self._llm.complete(messages, tools=tools)
         for _ in range(MAX_TOOL_ROUNDS):
@@ -397,7 +407,12 @@ class AgentUseCases:
             for call in response.tool_calls:
                 tools_used.append(call.name)
                 result = await self._dispatch(
-                    caller, workspace_id, document_id, call, session_connectors
+                    caller,
+                    workspace_id,
+                    document_id,
+                    call,
+                    session_connectors,
+                    access_token,
                 )
                 kind, connector = _classify_tool(call.name)
                 call_log.append(
@@ -437,6 +452,7 @@ class AgentUseCases:
         workspace_id: WorkspaceId,
         document_id: DocumentId,
         session_connectors: set[str] | None,
+        access_token: str | None = None,
     ) -> list[ToolSpec]:
         """Document-bound editing tools, the built-in tools, and the external
         MCP tools active for this document + session (namespaced by connector)."""
@@ -449,6 +465,10 @@ class AgentUseCases:
             tools = tools + [_image_tool_spec()]
         if self._code is not None:
             tools = tools + [_python_tool_spec()]
+        # Per-user meeting tools need the caller's own token (delegated auth), so
+        # they only appear on the authenticated request path.
+        if self._meetings is not None and access_token:
+            tools = tools + _meeting_tool_specs()
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(
                 caller,
@@ -465,9 +485,12 @@ class AgentUseCases:
         document_id: DocumentId,
         call: ToolCall,
         session_connectors: set[str] | None = None,
+        access_token: str | None = None,
     ) -> str:
         """Editing tools bind to the OPEN document (design D-2), so a
         hallucinated id can never reach another document."""
+        if call.name in _MEETING_TOOL_NAMES:
+            return await self._run_meetings_tool(call, access_token)
         if call.name == "generate_image":
             return await self._run_generate_image(
                 caller, workspace_id, document_id, call.arguments
@@ -598,6 +621,37 @@ class AgentUseCases:
             return "error: you do not have permission to edit this document"
         except Exception as error:
             return f"error: {error}"
+
+    async def _run_meetings_tool(
+        self, call: ToolCall, access_token: str | None
+    ) -> str:
+        """Read the caller's meetings via the delegated access token. The token
+        is used only as the provider bearer here — never logged or recorded."""
+        if self._meetings is None:
+            return "error: meeting transcripts are not configured"
+        if not access_token:
+            return "error: sign in required to access meetings"
+        args = call.arguments or {}
+        try:
+            if call.name == "list_meetings":
+                items = await self._meetings.list_recordings(
+                    access_token, limit=int(args.get("limit") or 20)
+                )
+                return _render_meeting_list(items)
+            if call.name == "get_meeting_transcript":
+                recording_id = str(args.get("recording_id", "")).strip()
+                if not recording_id:
+                    return "error: recording_id required"
+                rec = await self._meetings.get_recording(access_token, recording_id)
+                return _render_meeting_transcript(rec)
+            if call.name == "ask_meetings":
+                question = str(args.get("question", "")).strip()
+                if not question:
+                    return "error: question required"
+                return await self._meetings.ask(access_token, question)
+        except Exception as error:
+            return f"error: {_meetings_error(error)}"
+        return f"error: unknown meetings tool {call.name}"
 
     async def _run_python(
         self,
@@ -829,6 +883,108 @@ def _mindmap_tool_spec() -> ToolSpec:
             "required": ["central", "branches"],
         },
     )
+
+
+_MEETING_TOOL_NAMES = {"list_meetings", "get_meeting_transcript", "ask_meetings"}
+
+
+def _meeting_tool_specs() -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="list_meetings",
+            description=(
+                "List the user's recent meeting recordings (from Cyberflies). "
+                "Returns each meeting's id, captured time, status, and headline. "
+                "Use a returned id with get_meeting_transcript to read one."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max meetings to list (default 20).",
+                    }
+                },
+                "required": [],
+            },
+        ),
+        ToolSpec(
+            name="get_meeting_transcript",
+            description=(
+                "Fetch one meeting's transcript and summary (headline, abstract, "
+                "key points, action items) by its recording id (from "
+                "list_meetings). Use this to add a meeting's notes or transcript "
+                "to the document."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "recording_id": {
+                        "type": "string",
+                        "description": "The meeting's recording id.",
+                    }
+                },
+                "required": ["recording_id"],
+            },
+        ),
+        ToolSpec(
+            name="ask_meetings",
+            description=(
+                "Ask a natural-language question answered across ALL the user's "
+                "meetings, e.g. 'what action items came out of my meetings this "
+                "week?'. Returns a synthesized answer grounded in their meetings."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The question."}
+                },
+                "required": ["question"],
+            },
+        ),
+    ]
+
+
+def _meetings_error(error: Exception) -> str:
+    """Friendly text for a provider failure, without importing the HTTP client."""
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    if status in (401, 403):
+        return "not signed in to the meetings service, or no access to it"
+    if status == 404:
+        return "that meeting was not found"
+    return str(error) or "meetings service error"
+
+
+def _render_meeting_list(items: list[MeetingSummary]) -> str:
+    if not items:
+        return "no meetings found"
+    lines = [
+        f"- id={m.id} | {m.captured_at or 'unknown time'} | {m.status} | "
+        f"{m.headline or '(no summary yet)'}"
+        for m in items
+    ]
+    return "meetings:\n" + "\n".join(lines)
+
+
+def _render_meeting_transcript(rec: MeetingTranscript) -> str:
+    parts = [f"meeting {rec.id} ({rec.status})"]
+    if rec.captured_at:
+        parts.append(f"captured: {rec.captured_at}")
+    if rec.headline:
+        parts.append(f"headline: {rec.headline}")
+    if rec.abstract:
+        parts.append(f"abstract: {rec.abstract}")
+    if rec.bullets:
+        parts.append("key points:\n" + "\n".join(f"- {b}" for b in rec.bullets))
+    if rec.action_items:
+        parts.append("action items:\n" + "\n".join(f"- {a}" for a in rec.action_items))
+    parts.append(
+        "transcript:\n" + rec.transcript
+        if rec.transcript
+        else "(transcript not ready yet)"
+    )
+    return "\n\n".join(parts)
 
 
 def _image_tool_spec() -> ToolSpec:

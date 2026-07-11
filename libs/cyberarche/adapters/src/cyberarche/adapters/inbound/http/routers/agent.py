@@ -7,7 +7,11 @@ from datetime import datetime
 from fastapi import APIRouter, UploadFile
 from pydantic import BaseModel
 
-from cyberarche.adapters.inbound.http.dependencies import Caller, Cases
+from cyberarche.adapters.inbound.http.dependencies import (
+    AccessToken,
+    Caller,
+    Cases,
+)
 from cyberarche.application.ports.agent import AgentRun
 from cyberarche.domain.ids import DocumentId
 
@@ -85,7 +89,11 @@ class AgentRunResponse(BaseModel):
 
 @router.post("/ask")
 async def ask(
-    document_id: str, body: AskRequest, cases: Cases, caller: Caller
+    document_id: str,
+    body: AskRequest,
+    cases: Cases,
+    caller: Caller,
+    access_token: AccessToken,
 ) -> AskResponse:
     answer = await cases.agent.ask(
         caller,
@@ -95,6 +103,7 @@ async def ask(
         if body.enabled_connectors is not None
         else None,
         history=[(h.role, h.content) for h in (body.history or [])],
+        access_token=access_token,
     )
     return AskResponse(
         answer=answer.text,

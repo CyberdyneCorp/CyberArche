@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Cyberdyne Python Interpreter (agent run_python tool); needs CyberdyneAuth
     # service-token credentials to authenticate. Empty disables the tool.
     interpreter_url: str = "https://interpreter.backend.coolify.cyberdynecorp.ai"
+    # Cyberflies meeting transcripts (agent meeting tools). Called with the
+    # caller's own access token; empty disables the tools.
+    meetings_url: str = "https://cyberflies.backend.coolify.cyberdynecorp.ai"
     connector_secret_key: str = ""
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
@@ -55,6 +58,7 @@ class Settings(BaseSettings):
             image_model=self.image_model,
             image_base_url=self.image_base_url,
             interpreter_base_url=self.interpreter_url,
+            meetings_base_url=self.meetings_url,
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,

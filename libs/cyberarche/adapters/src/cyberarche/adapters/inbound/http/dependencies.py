@@ -50,5 +50,13 @@ async def require_caller(
     )
 
 
+def require_access_token(request: Request) -> str:
+    """The caller's raw bearer token, for delegated calls to first-party
+    services in the same CyberAuth realm (e.g. meeting transcripts). Kept out of
+    CallerContext, which stays claims-only; only routes that delegate ask for it."""
+    return _bearer_token(request)
+
+
 Cases = Annotated[UseCases, Depends(get_use_cases)]
 Caller = Annotated[CallerContext, Depends(require_caller)]
+AccessToken = Annotated[str, Depends(require_access_token)]

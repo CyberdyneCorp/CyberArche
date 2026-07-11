@@ -33,6 +33,7 @@ from cyberarche.application.ports.bus import PeerBusPort
 from cyberarche.application.ports.crdt import CrdtEnginePort, UpdateLogPort
 from cyberarche.application.ports.code_exec import CodeExecutionPort
 from cyberarche.application.ports.images import ImageGenerationPort
+from cyberarche.application.ports.meetings import MeetingsPort
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
     ConnectorRepository,
@@ -112,6 +113,9 @@ class WiringConfig:
     # Python code execution (agent run_python tool). Empty URL = disabled; needs
     # CyberdyneAuth service-token credentials to authenticate to the interpreter.
     interpreter_base_url: str = ""
+    # Meeting transcripts (agent meeting tools). Empty URL = disabled; the agent
+    # calls it with the caller's own access token (per-user data).
+    meetings_base_url: str = ""
     connector_secret_key: str = ""
     # Shared infrastructure for multi-replica deployments (12.5/12.6):
     # with redis_url set, live realtime fanout and the job queue go through
@@ -168,6 +172,7 @@ def _build_use_cases(
     llm: LLMPort,
     images: ImageGenerationPort | None,
     code: CodeExecutionPort | None,
+    meetings: MeetingsPort | None,
     agent_runs: AgentRunRepository,
     connectors: ConnectorRepository,
     mcp_client: McpClientPort,
@@ -220,6 +225,7 @@ def _build_use_cases(
             images=images,
             blobs=blobs,
             code=code,
+            meetings=meetings,
         ),
         sharing=SharingUseCases(
             documents, memberships, share_links, comments, access, clock, ids
@@ -278,6 +284,19 @@ def _build_code_executor(config: WiringConfig, service_tokens, shared_http):
     return CyberdyneInterpreterAdapter(
         config.interpreter_base_url, shared_http(), service_tokens.service_token
     )
+
+
+def _build_meetings(config: WiringConfig, shared_http):
+    """Cyberflies meetings adapter, or None when unconfigured. Authenticates per
+    request with the caller's own access token (per-user data), not a service
+    token, so it needs no credentials at construction."""
+    if not config.meetings_base_url:
+        return None
+    from cyberarche.adapters.outbound.meetings.cyberflies import (
+        CyberfliesMeetingsAdapter,
+    )
+
+    return CyberfliesMeetingsAdapter(config.meetings_base_url, shared_http())
 
 
 @dataclass(slots=True)
@@ -463,6 +482,7 @@ async def build_container(
     llm: LLMPort | None = None,
     images: ImageGenerationPort | None = None,
     code: CodeExecutionPort | None = None,
+    meetings: MeetingsPort | None = None,
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
@@ -518,6 +538,9 @@ async def build_container(
 
     if code is None:
         code = _build_code_executor(config, service_tokens, shared_http)
+
+    if meetings is None:
+        meetings = _build_meetings(config, shared_http)
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -593,6 +616,7 @@ async def build_container(
             llm,
             images,
             code,
+            meetings,
             agent_runs,
             connectors,
             mcp_client,

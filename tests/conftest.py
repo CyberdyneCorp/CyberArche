@@ -36,6 +36,7 @@ from cyberarche.application.testing.fakes import (
     ScriptedCodeExecutor,
     ScriptedImageGenerator,
     ScriptedLLM,
+    ScriptedMeetings,
     SequentialIds,
     StaticTokenPort,
 )
@@ -95,6 +96,11 @@ def code_exec() -> ScriptedCodeExecutor:
 
 
 @pytest.fixture
+def meetings() -> ScriptedMeetings:
+    return ScriptedMeetings()
+
+
+@pytest.fixture
 def agent_runs() -> InMemoryAgentRunRepository:
     return InMemoryAgentRunRepository()
 
@@ -148,6 +154,7 @@ def use_cases(
     llm: ScriptedLLM,
     images: ScriptedImageGenerator,
     code_exec: ScriptedCodeExecutor,
+    meetings: ScriptedMeetings,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
     secret_box: NaiveSecretBox,
@@ -215,6 +222,7 @@ def use_cases(
             images=images,
             blobs=blobs,
             code=code_exec,
+            meetings=meetings,
         ),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
