@@ -98,3 +98,22 @@ and let the user trace the shortest path between two documents.
 - **WHEN** the user selects a document, chooses "Find path to…", and clicks
   another document
 - **THEN** the view SHALL highlight the shortest path of links between them
+
+### Requirement: Graph layouts and navigation
+
+The graph view SHALL offer multiple layouts — force-directed, hierarchical
+(directed layering), radial (rings by hop distance from a focus), and clustered
+(grouped by community) — selectable by the user. It SHALL provide a depth control
+that, when a node is selected, limits the graph to that node's N-hop
+neighbourhood, and a minimap giving an overview of the whole graph and the
+current viewport.
+
+#### Scenario: Switch layout
+
+- **WHEN** the user chooses a different layout
+- **THEN** the nodes SHALL be re-positioned according to that layout
+
+#### Scenario: Focus a local neighbourhood
+
+- **WHEN** a node is selected and a depth of N is chosen
+- **THEN** only documents within N links of the selected node SHALL be shown

@@ -45,6 +45,10 @@
 	let pathIds = $state<Set<string> | null>(null);
 	let pathList = $state<SimNode[]>([]);
 
+	type Layout = 'force' | 'hierarchical' | 'radial' | 'clustered';
+	let layout = $state<Layout>('force');
+	let depth = $state(0); // hops from the selected node; 0 = show all
+
 	let tx = $state(0);
 	let ty = $state(0);
 	let scale = $state(1);
@@ -87,11 +91,33 @@
 		return keys;
 	});
 
+	// Depth control: with a selected node and depth ≥ 1, show only its N-hop
+	// neighbourhood (a local graph); otherwise everything is visible.
+	const visibleIds = $derived.by(() => {
+		if (!selectedId || depth === 0) return null;
+		const seen = new Set<string>([selectedId]);
+		let frontier = [selectedId];
+		for (let h = 0; h < depth; h++) {
+			const next: string[] = [];
+			for (const id of frontier)
+				for (const nb of neighbours.get(id) ?? [])
+					if (!seen.has(nb)) {
+						seen.add(nb);
+						next.push(nb);
+					}
+			frontier = next;
+		}
+		return seen;
+	});
+
 	const rendered = $derived.by(() => {
 		void frame;
 		const active = selectedNeighbours;
+		const vis = visibleIds;
 		return {
-			nodes: sim.nodes.map((n) => ({
+			nodes: sim.nodes
+				.filter((n) => !vis || vis.has(n.id))
+				.map((n) => ({
 				id: n.id,
 				title: n.title,
 				x: n.x,
@@ -103,7 +129,7 @@
 				onPath: !!pathIds?.has(n.id),
 				match: query.trim().length > 0 && n.title.toLowerCase().includes(query.trim().toLowerCase())
 			})),
-			edges: sim.edges.map((e) => {
+			edges: sim.edges.filter((e) => !vis || (vis.has(e.source.id) && vis.has(e.target.id))).map((e) => {
 				const dx = e.target.x - e.source.x;
 				const dy = e.target.y - e.source.y;
 				const d = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -120,6 +146,38 @@
 					dim: (!!active || !!pathIds) && !hot
 				};
 			})
+		};
+	});
+
+	const MINI_W = 172;
+	const MINI_H = 116;
+	const minimap = $derived.by(() => {
+		void frame;
+		if (!sim.nodes.length) return null;
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		for (const n of sim.nodes) {
+			minX = Math.min(minX, n.x);
+			minY = Math.min(minY, n.y);
+			maxX = Math.max(maxX, n.x);
+			maxY = Math.max(maxY, n.y);
+		}
+		const gw = maxX - minX || 1;
+		const gh = maxY - minY || 1;
+		const s = Math.min((MINI_W - 14) / gw, (MINI_H - 14) / gh);
+		const ox = (MINI_W - gw * s) / 2;
+		const oy = (MINI_H - gh * s) / 2;
+		const map = (x: number, y: number) => ({ x: ox + (x - minX) * s, y: oy + (y - minY) * s });
+		const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+		const p0 = map(-tx / scale, -ty / scale);
+		const p1 = map((width - tx) / scale, (height - ty) / scale);
+		return {
+			nodes: sim.nodes.map((n) => ({ ...map(n.x, n.y), color: communityColor(n.community) })),
+			rect: {
+				x: clamp(p0.x, MINI_W),
+				y: clamp(p0.y, MINI_H),
+				w: clamp(p1.x, MINI_W) - clamp(p0.x, MINI_W),
+				h: clamp(p1.y, MINI_H) - clamp(p0.y, MINI_H)
+			}
 		};
 	});
 
@@ -186,10 +244,114 @@
 		tx = 0;
 		ty = 0;
 		scale = 1;
-		alpha = 1;
-		fitPending = true;
+		applyLayout();
+	}
+
+	// ---- layouts ----
+	function applyLayout(): void {
+		if (!sim.nodes.length) return;
+		if (layout === 'force') {
+			alpha = 1;
+			fitPending = true;
+			frame++;
+			if (!raf) tick();
+			return;
+		}
+		stop();
+		if (layout === 'hierarchical') layoutHierarchical();
+		else if (layout === 'radial') layoutRadial();
+		else layoutClustered();
+		fitView();
 		frame++;
-		tick();
+	}
+
+	/** Longest-path layering of the directed graph (cycles bounded by n passes). */
+	function layoutHierarchical(): void {
+		const level = new Map(sim.nodes.map((n) => [n.id, 0]));
+		for (let pass = 0; pass < sim.nodes.length; pass++) {
+			let changed = false;
+			for (const e of sim.edges) {
+				const want = level.get(e.source.id)! + 1;
+				if (want > level.get(e.target.id)!) {
+					level.set(e.target.id, want);
+					changed = true;
+				}
+			}
+			if (!changed) break;
+		}
+		const rows = new Map<number, SimNode[]>();
+		for (const n of sim.nodes) {
+			const l = level.get(n.id)!;
+			(rows.get(l) ?? rows.set(l, []).get(l)!).push(n);
+		}
+		const ySpace = 130;
+		for (const [l, nodes] of rows) {
+			const step = width / (nodes.length + 1);
+			nodes.forEach((n, i) => {
+				n.x = step * (i + 1);
+				n.y = 80 + l * ySpace;
+				n.vx = n.vy = 0;
+			});
+		}
+	}
+
+	/** Concentric rings by hop-distance from a centre (selected or most central). */
+	function layoutRadial(): void {
+		const centre = selectedId ?? analysis?.mostConnected ?? sim.nodes[0]?.id;
+		if (!centre) return;
+		const dist = new Map<string, number>([[centre, 0]]);
+		let frontier = [centre];
+		while (frontier.length) {
+			const next: string[] = [];
+			for (const id of frontier)
+				for (const nb of neighbours.get(id) ?? [])
+					if (!dist.has(nb)) {
+						dist.set(nb, dist.get(id)! + 1);
+						next.push(nb);
+					}
+			frontier = next;
+		}
+		let maxD = 0;
+		for (const d of dist.values()) maxD = Math.max(maxD, d);
+		const rings = new Map<number, SimNode[]>();
+		for (const n of sim.nodes) {
+			const d = dist.get(n.id) ?? maxD + 1; // disconnected go to an outer ring
+			(rings.get(d) ?? rings.set(d, []).get(d)!).push(n);
+		}
+		const cx = width / 2;
+		const cy = height / 2;
+		const gap = Math.min(cx, cy) / (Math.max(maxD, 1) + 1.5);
+		for (const [d, nodes] of rings) {
+			nodes.forEach((n, i) => {
+				const a = (2 * Math.PI * i) / nodes.length;
+				n.x = cx + (d === 0 ? 0 : d * gap) * Math.cos(a);
+				n.y = cy + (d === 0 ? 0 : d * gap) * Math.sin(a);
+				n.vx = n.vy = 0;
+			});
+		}
+	}
+
+	/** Group by community: cluster centroids on a big circle, members around each. */
+	function layoutClustered(): void {
+		const groups = new Map<number, SimNode[]>();
+		for (const n of sim.nodes) (groups.get(n.community) ?? groups.set(n.community, []).get(n.community)!).push(n);
+		const cx = width / 2;
+		const cy = height / 2;
+		const R = Math.min(cx, cy) * 0.6;
+		const keys = [...groups.keys()];
+		keys.forEach((k, gi) => {
+			const nodes = groups.get(k)!;
+			const ga = (2 * Math.PI * gi) / keys.length;
+			const gcx = keys.length > 1 ? cx + R * Math.cos(ga) : cx;
+			const gcy = keys.length > 1 ? cy + R * Math.sin(ga) : cy;
+			const r = 30 + nodes.length * 10;
+			nodes.forEach((n, i) => {
+				const a = (2 * Math.PI * i) / nodes.length;
+				n.x = gcx + (nodes.length > 1 ? r * Math.cos(a) : 0);
+				n.y = gcy + (nodes.length > 1 ? r * Math.sin(a) : 0);
+				n.vx = n.vy = 0;
+			});
+		});
 	}
 
 	const REPULSION = 6500;
@@ -288,6 +450,11 @@
 		});
 		ro.observe(svgEl);
 		return () => ro.disconnect();
+	});
+	// Re-lay-out when the mode changes (build() handles the initial layout).
+	$effect(() => {
+		void layout;
+		if (sim.nodes.length) applyLayout();
 	});
 
 	// ---- pan / zoom / drag / click ----
@@ -439,6 +606,25 @@
 						data-testid="graph-search"
 						onkeydown={(e) => e.key === 'Enter' && runSearch()}
 					/>
+					<select class="sel" bind:value={layout} data-testid="graph-layout" title="Layout" aria-label="Layout">
+						<option value="force">Force</option>
+						<option value="hierarchical">Hierarchical</option>
+						<option value="radial">Radial</option>
+						<option value="clustered">Clustered</option>
+					</select>
+					<select
+						class="sel"
+						bind:value={depth}
+						data-testid="graph-depth"
+						title="Depth from the selected node"
+						aria-label="Depth"
+						disabled={!selectedId}
+					>
+						<option value={0}>Depth: All</option>
+						<option value={1}>Depth: 1</option>
+						<option value={2}>Depth: 2</option>
+						<option value={3}>Depth: 3</option>
+					</select>
 					<button class="tbtn" title="Fit to view" data-testid="graph-fit" onclick={fitView}>⤢ Fit</button>
 					<button class="close" aria-label="Close" onclick={() => graphView.close()}>✕</button>
 				</div>
@@ -483,6 +669,15 @@
 						{/each}
 					</g>
 				</svg>
+
+				{#if minimap && !empty}
+					<svg class="minimap" width={MINI_W} height={MINI_H} viewBox={`0 0 ${MINI_W} ${MINI_H}`} aria-hidden="true">
+						{#each minimap.nodes as n, i (i)}
+							<circle cx={n.x} cy={n.y} r="2" style={`fill:${n.color}`} />
+						{/each}
+						<rect class="mini-view" x={minimap.rect.x} y={minimap.rect.y} width={minimap.rect.w} height={minimap.rect.h} />
+					</svg>
+				{/if}
 
 				{#if selected && selectedMetrics}
 					<aside class="inspector" data-testid="graph-inspector">
@@ -536,6 +731,14 @@
 							<div><dt>Separate groups</dt><dd>{analysis.components}</dd></div>
 							<div><dt>Avg. connections</dt><dd>{analysis.avgDegree.toFixed(1)}</dd></div>
 						</dl>
+						{#if analysis.communities > 1}
+							<div class="insp-section">Clusters</div>
+							<div class="legend">
+								{#each Array(analysis.communities) as _, c (c)}
+									<span class="leg"><span class="dot" style={`background:${communityColor(c)}`}></span>Cluster {c + 1}</span>
+								{/each}
+							</div>
+						{/if}
 						{#if analysis.mostConnected}
 							<div class="insp-section">Key documents</div>
 							<div class="neighbours">
@@ -660,10 +863,56 @@
 		background: var(--bg3);
 		color: var(--tx);
 	}
+	.sel {
+		padding: 5px 8px;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+		background: var(--bg1);
+		color: var(--tx2);
+		font-size: 12px;
+	}
+	.sel:disabled {
+		opacity: 0.5;
+	}
 	.body {
 		flex: 1;
 		display: flex;
 		min-height: 0;
+		position: relative;
+	}
+	.minimap {
+		position: absolute;
+		left: 12px;
+		bottom: 12px;
+		background: color-mix(in srgb, var(--bg2) 88%, transparent);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		box-shadow: var(--sh2, 0 2px 8px rgba(0, 0, 0, 0.1));
+		pointer-events: none;
+	}
+	.mini-view {
+		fill: color-mix(in srgb, var(--acc) 14%, transparent);
+		stroke: var(--acc);
+		stroke-width: 1;
+	}
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 10px;
+		margin-bottom: 14px;
+	}
+	.leg {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 12px;
+		color: var(--tx2);
+	}
+	.dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		display: inline-block;
 	}
 	.canvas {
 		flex: 1;
