@@ -628,6 +628,22 @@ async def test_web_media_tool_reports_unavailable_when_unconfigured(use_cases, a
     assert result.startswith("error:") and "not configured" in result
 
 
+async def test_web_media_error_maps_5xx_to_graceful_message():
+    # Regression: a 503 from the DAO backend must not leak the raw httpx URL/error
+    # to the model; it maps to a retryable, non-leaky message.
+    from cyberarche.application.use_cases.agent import _web_media_error
+
+    class _Resp:
+        status_code = 503
+
+    class _HttpError(Exception):
+        response = _Resp()
+
+    msg = _web_media_error(_HttpError("Server error '503 Service Unavailable' for url ..."))
+    assert "temporarily unavailable" in msg
+    assert "http" not in msg.lower() and "url" not in msg.lower()
+
+
 async def test_web_media_tool_requires_sign_in(use_cases, alice):
     from cyberarche.application.ports.llm import ToolCall as _ToolCall
 

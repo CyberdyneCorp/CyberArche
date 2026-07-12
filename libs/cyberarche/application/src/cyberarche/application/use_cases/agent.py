@@ -1133,6 +1133,13 @@ def _web_media_error(error: Exception) -> str:
         return "not signed in to the web/media service, or no access to it"
     if status == 404:
         return "that video or playlist was not found"
+    if status is not None and status >= 500:
+        # 503 in particular: YouTube throttles the backend's datacenter IP for
+        # transcript fetches. Surface a retryable, non-leaky message.
+        return (
+            "the web/media service is temporarily unavailable "
+            "(the source may be rate-limiting) — try again shortly"
+        )
     return str(error) or "web/media service unavailable"
 
 
