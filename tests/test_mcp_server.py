@@ -120,6 +120,42 @@ async def test_insert_blocks_flows_through_crdt_and_read_returns_them(mcp_setup)
     assert updates[-1].origin == "agent:alice"
 
 
+async def test_insert_blocks_splits_a_markdown_blob_paragraph(mcp_setup):
+    # A model that dumps "## heading" + a ```fence``` into one paragraph must
+    # land as real heading/code blocks, not raw markdown text (regression).
+    client, holder, container = mcp_setup
+    workspace = await container.use_cases.workspaces.create(
+        CALLERS["alice-token"], name="WS"
+    )
+    holder.use("alice-token")
+    created = data(
+        await client.call_tool(
+            "create_document", {"workspace_id": workspace.id, "title": "Doc"}
+        )
+    )
+
+    await client.call_tool(
+        "insert_blocks",
+        {
+            "document_id": created["id"],
+            "blocks": [
+                {
+                    "type": "paragraph",
+                    "data": {
+                        "text": "## Example (Python):\n```python\nprint(1)\n```"
+                    },
+                }
+            ],
+        },
+    )
+
+    read = data(await client.call_tool("read_document", {"document_id": created["id"]}))
+    types = [b["type"] for b in read["blocks"]]
+    assert types == ["heading", "code"]
+    assert read["blocks"][0]["data"] == {"text": "Example (Python):", "level": 2}
+    assert read["blocks"][1]["data"]["language"] == "python"
+
+
 async def test_knowledge_tools_ingest_and_query(mcp_setup):
     client, holder, container = mcp_setup
     workspace = await container.use_cases.workspaces.create(

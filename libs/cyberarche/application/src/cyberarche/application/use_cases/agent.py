@@ -295,13 +295,22 @@ class AgentUseCases:
             caller, document_id, update, origin=f"agent:{caller.user_id}"
         )
 
+    def _prepare_blocks(self, blocks: list[dict]) -> list[dict]:
+        """Normalize model-supplied blocks, then split any paragraph that hides
+        block-level markdown (## heading, fenced code, lists) into real blocks,
+        and validate the result. Shared by every CRDT-peer insertion path."""
+        prepared: list[dict] = []
+        for block in blocks:
+            prepared.extend(_expand_block(self._ids, _normalize_block(block)))
+        for block in prepared:
+            validate_block_type(block.get("type", ""))
+        return prepared
+
     async def apply_blocks(
         self, caller: CallerContext, document_id: DocumentId, blocks: list[dict]
     ) -> bytes:
         """Insert blocks as a CRDT peer: live, attributed, conflict-free."""
-        blocks = [_normalize_block(block) for block in blocks]
-        for block in blocks:
-            validate_block_type(block.get("type", ""))
+        blocks = self._prepare_blocks(blocks)
         state = await self._realtime.current_state(caller, document_id)
         update = self._engine.append_blocks(state, blocks)
         return await self._realtime.apply(
@@ -317,9 +326,7 @@ class AgentUseCases:
         after_id: str | None = None,
     ) -> bytes:
         """Insert blocks after `after_id` (append when None), as a CRDT peer."""
-        blocks = [_normalize_block(block) for block in blocks]
-        for block in blocks:
-            validate_block_type(block.get("type", ""))
+        blocks = self._prepare_blocks(blocks)
         state = await self._realtime.current_state(caller, document_id)
         update = self._engine.insert_blocks_after(state, after_id, blocks)
         return await self._realtime.apply(
@@ -1115,6 +1122,91 @@ def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | No
 _FENCE_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\n(.*?)```", re.DOTALL)
 _DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.DOTALL)
 
+# Block-level markdown recognized line-by-line inside prose. A model that
+# ignores the "one {type, data} block each" contract and dumps a markdown blob
+# into a single paragraph is split back into real blocks so the editor (which
+# only renders block-level markdown as its own block, never inside a paragraph)
+# shows a heading/list/quote instead of raw "## …" text.
+_HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
+_TODO_RE = re.compile(r"^(?:[-*+]\s+)?\[([ xX])\]\s+(.*)$")
+_QUOTE_RE = re.compile(r"^>\s+(.*)$")
+_BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
+_NUMBERED_RE = re.compile(r"^\d+[.)]\s+(.*)$")
+# Any line that starts a non-paragraph block — used to decide whether a
+# paragraph the model produced actually needs splitting.
+_BLOCK_MD_LINE_RE = re.compile(
+    r"^(#{1,3}\s|>\s|[-*+]\s|\d+[.)]\s|\[[ xX]\]\s|(?:---|\*\*\*|___)\s*$)"
+)
+
+
+def _line_block(ids: IdPort, line: str) -> dict | None:
+    """Map one stripped line of block-level markdown to a block, else None."""
+    heading = _HEADING_RE.match(line)
+    if heading:
+        return {
+            "id": ids.new_id(),
+            "type": "heading",
+            "data": {
+                "text": _inline_math(heading.group(2).strip()),
+                "level": len(heading.group(1)),
+            },
+        }
+    if line in ("---", "***", "___"):
+        return {"id": ids.new_id(), "type": "divider", "data": {}}
+    quote = _QUOTE_RE.match(line)
+    if quote:
+        return {
+            "id": ids.new_id(),
+            "type": "quote",
+            "data": {"text": _inline_math(quote.group(1).strip())},
+        }
+    todo = _TODO_RE.match(line)  # before bullet: "- [ ] x" also matches _BULLET_RE
+    if todo:
+        return {
+            "id": ids.new_id(),
+            "type": "todo",
+            "data": {
+                "text": _inline_math(todo.group(2).strip()),
+                "checked": todo.group(1).lower() == "x",
+            },
+        }
+    bullet = _BULLET_RE.match(line)
+    if bullet:
+        return {
+            "id": ids.new_id(),
+            "type": "bulleted_list",
+            "data": {"text": _inline_math(bullet.group(1).strip())},
+        }
+    numbered = _NUMBERED_RE.match(line)
+    if numbered:
+        return {
+            "id": ids.new_id(),
+            "type": "numbered_list",
+            "data": {"text": _inline_math(numbered.group(1).strip())},
+        }
+    return None
+
+
+def _needs_expansion(text: str) -> bool:
+    """A paragraph's text hides block-level markdown that should be its own block."""
+    if "```" in text or "$$" in text or "\\[" in text:
+        return True
+    return any(_BLOCK_MD_LINE_RE.match(line.strip()) for line in text.split("\n"))
+
+
+def _expand_block(ids: IdPort, block: dict) -> list[dict]:
+    """Split a paragraph carrying block-level markdown into real blocks.
+
+    Non-paragraph blocks and plain prose paragraphs pass through untouched, so
+    this is safe to run over every block a model hands us.
+    """
+    if block.get("type", "paragraph") != "paragraph":
+        return [block]
+    text = (block.get("data") or {}).get("text")
+    if not isinstance(text, str) or not _needs_expansion(text):
+        return [block]
+    return _answer_blocks(ids, text) or [block]
+
 
 _SOURCE_BLOCKS = {"code", "latex", "mermaid"}
 
@@ -1153,12 +1245,35 @@ def _answer_blocks(ids: IdPort, text: str) -> list[dict]:
     blocks: list[dict] = []
 
     def paragraphs(chunk: str) -> None:
-        for para in chunk.split("\n\n"):
-            body = _inline_math(para.strip())
-            if body:
-                blocks.append(
-                    {"id": ids.new_id(), "type": "paragraph", "data": {"text": body}}
-                )
+        # Line-based: a blank line or a block-markdown line (heading/list/quote/
+        # divider) ends the current paragraph; consecutive prose lines join.
+        buffer: list[str] = []
+
+        def flush() -> None:
+            if buffer:
+                body = _inline_math("\n".join(buffer).strip())
+                if body:
+                    blocks.append(
+                        {
+                            "id": ids.new_id(),
+                            "type": "paragraph",
+                            "data": {"text": body},
+                        }
+                    )
+                buffer.clear()
+
+        for raw in chunk.split("\n"):
+            line = raw.strip()
+            if not line:
+                flush()
+                continue
+            block = _line_block(ids, line)
+            if block is not None:
+                flush()
+                blocks.append(block)
+            else:
+                buffer.append(raw)
+        flush()
 
     def emit_display_math(segment: str) -> None:
         last = 0

@@ -123,7 +123,12 @@ When the agent already applied its change to the document during the run (via an
 editing tool), the answer SHALL NOT offer the same content for manual insertion,
 so it is not added twice. Blocks the agent inserts SHALL be normalized so a
 source-based block (code, latex, mermaid) is never left empty when its content
-was provided under a different field.
+was provided under a different field. When the agent inserts a `paragraph` whose
+text carries block-level markdown (a `#`/`##`/`###` heading, a fenced code
+block, display math, a list item, or a blockquote), that paragraph SHALL be
+split into the corresponding typed blocks, because the editor renders
+block-level markdown only as its own block and would otherwise show the raw
+`## …` / ```` ``` ```` source as literal text.
 
 #### Scenario: Insert a conversational answer
 - **WHEN** the agent answers a question without editing the document
@@ -138,6 +143,13 @@ was provided under a different field.
 - **WHEN** the agent inserts a mermaid, latex, or code block with the content
   under a field other than `source`
 - **THEN** the inserted block SHALL still render that content, not a placeholder
+
+#### Scenario: A markdown blob paragraph is split into typed blocks
+- **WHEN** the agent inserts a `paragraph` whose text contains block-level
+  markdown such as a `## heading` followed by a fenced code block
+- **THEN** the insertion SHALL produce a `heading` block and a `code` block
+- **AND** the document SHALL NOT contain a paragraph rendering `## …` or the
+  code fence as literal text
 
 ### Requirement: Agent generates images
 When image generation is configured, the agent SHALL offer a tool that creates

@@ -940,6 +940,66 @@ def test_answer_blocks_never_empty_for_nonempty_text():
     assert blocks and blocks[0]["data"]["text"] == "just text"
 
 
+def test_answer_blocks_parses_headings_and_lists():
+    text = (
+        "## Section\n"
+        "Intro line.\n"
+        "- first\n"
+        "- second\n"
+        "1. one\n"
+        "> a quote\n"
+        "- [ ] todo open\n"
+        "- [x] todo done"
+    )
+    blocks = _answer_blocks(_Ids(), text)
+    kinds = [(b["type"], b["data"]) for b in blocks]
+    assert ("heading", {"text": "Section", "level": 2}) in kinds
+    assert ("paragraph", {"text": "Intro line."}) in kinds
+    assert ("bulleted_list", {"text": "first"}) in kinds
+    assert ("numbered_list", {"text": "one"}) in kinds
+    assert ("quote", {"text": "a quote"}) in kinds
+    assert ("todo", {"text": "todo open", "checked": False}) in kinds
+    assert ("todo", {"text": "todo done", "checked": True}) in kinds
+
+
+# ---- paragraph carrying a markdown blob is split into real blocks -----------
+
+from cyberarche.application.use_cases.agent import _expand_block  # noqa: E402
+
+
+def test_expand_block_splits_paragraph_with_heading_and_fenced_code():
+    # The exact regression: a model dumped a "## heading" + ```python fence into
+    # one paragraph, which the editor rendered as raw "## …" / "```python" text.
+    para = {
+        "type": "paragraph",
+        "data": {
+            "text": (
+                "## Example (Python):\n"
+                "```python\n"
+                "def f(x):\n"
+                "    return x**2 + 2*x + 1\n"
+                "```"
+            )
+        },
+    }
+    out = _expand_block(_Ids(), para)
+    types = [b["type"] for b in out]
+    assert types == ["heading", "code"]
+    assert out[0]["data"] == {"text": "Example (Python):", "level": 2}
+    assert out[1]["data"]["language"] == "python"
+    assert "def f(x):" in out[1]["data"]["source"]
+
+
+def test_expand_block_leaves_plain_paragraph_and_typed_blocks_untouched():
+    para = {"type": "paragraph", "data": {"text": "Just a normal sentence."}}
+    assert _expand_block(_Ids(), para) == [para]
+    # A dash mid-sentence is not a list; the paragraph is preserved verbatim.
+    ranged = {"type": "paragraph", "data": {"text": "The range is 3 - 5 items."}}
+    assert _expand_block(_Ids(), ranged) == [ranged]
+    code = {"type": "code", "data": {"source": "## not a heading", "language": "md"}}
+    assert _expand_block(_Ids(), code) == [code]
+
+
 # ---- block normalization: no empty source blocks (agent-renderable-blocks) --
 
 from cyberarche.application.use_cases.agent import _normalize_block  # noqa: E402
