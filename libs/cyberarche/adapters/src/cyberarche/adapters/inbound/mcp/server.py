@@ -20,7 +20,13 @@ from fastmcp import FastMCP
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.rag import RagQueryMode
 from cyberarche.domain.errors import NotAuthenticated
-from cyberarche.domain.ids import DocumentId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    DocumentId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 
 if TYPE_CHECKING:
     from cyberarche.adapters.wiring import Container
@@ -67,6 +73,24 @@ def build_mcp_server(
 
         return PlainTextResponse("ok")
 
+    # ---- workspace / teamspace discovery -----------------------------------
+
+    @mcp.tool
+    async def list_workspaces() -> list[dict]:
+        """List the workspaces the caller belongs to. Use a workspace id with
+        create_document, rag_query, ingest_file, or list_teamspaces."""
+        caller = await resolve()
+        workspaces = await cases.workspaces.list(caller)
+        return [{"id": w.id, "name": w.name} for w in workspaces]
+
+    @mcp.tool
+    async def list_teamspaces(workspace_id: str) -> list[dict]:
+        """List the teamspaces (shared document groups) of a workspace the caller
+        can see. Pass a teamspace id to create_document to place a shared doc."""
+        caller = await resolve()
+        teamspaces = await cases.teamspaces.list(caller, WorkspaceId(workspace_id))
+        return [{"id": t.id, "name": t.name} for t in teamspaces]
+
     # ---- document tools ----------------------------------------------------
 
     @mcp.tool
@@ -95,15 +119,21 @@ def build_mcp_server(
 
     @mcp.tool
     async def create_document(
-        workspace_id: str, title: str, parent_id: str | None = None
+        workspace_id: str,
+        title: str,
+        parent_id: str | None = None,
+        teamspace_id: str | None = None,
     ) -> dict:
-        """Create a document in a workspace the caller can edit."""
+        """Create a document in a workspace the caller can edit. Pass
+        `teamspace_id` (from list_teamspaces) to place it in a shared teamspace;
+        omit it for a private document."""
         caller = await resolve()
         document = await cases.documents.create(
             caller,
             workspace_id=WorkspaceId(workspace_id),
             title=title,
             parent_id=DocumentId(parent_id) if parent_id else None,
+            teamspace_id=TeamspaceId(teamspace_id) if teamspace_id else None,
         )
         return {"id": document.id, "title": document.title}
 

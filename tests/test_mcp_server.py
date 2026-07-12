@@ -17,7 +17,7 @@ from cyberarche.adapters.wiring import WiringConfig, build_container
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.testing.fakes import StaticTokenPort
 from cyberarche.domain.errors import NotAuthenticated
-from cyberarche.domain.ids import TenantId, UserId
+from cyberarche.domain.ids import DocumentId, TenantId, UserId
 
 
 class TokenHolder:
@@ -361,3 +361,35 @@ async def test_real_resolver_accepts_an_api_key_and_rejects_it_once_revoked():
             await _resolve_with(container, f"Bearer {secret}")
     finally:
         await container.aclose()
+
+
+async def test_workspace_and_teamspace_discovery_over_mcp(mcp_setup):
+    client, holder, container = mcp_setup
+    alice = CALLERS["alice-token"]
+    workspace = await container.use_cases.workspaces.create(alice, name="Acme")
+    teamspace = await container.use_cases.teamspaces.create(
+        alice, workspace.id, name="Engineering"
+    )
+
+    holder.use("alice-token")
+    workspaces = data(await client.call_tool("list_workspaces", {}))
+    assert {"id": workspace.id, "name": "Acme"} in workspaces
+
+    teamspaces = data(
+        await client.call_tool("list_teamspaces", {"workspace_id": workspace.id})
+    )
+    assert {"id": teamspace.id, "name": "Engineering"} in teamspaces
+
+    # A document can now be placed in that teamspace over MCP.
+    created = data(
+        await client.call_tool(
+            "create_document",
+            {
+                "workspace_id": workspace.id,
+                "title": "Roadmap",
+                "teamspace_id": teamspace.id,
+            },
+        )
+    )
+    doc = await container.use_cases.documents.get(alice, DocumentId(created["id"]))
+    assert doc.teamspace_id == teamspace.id
