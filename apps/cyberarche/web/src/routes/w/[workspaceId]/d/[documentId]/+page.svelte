@@ -13,6 +13,9 @@
 	import { colorFor, createEditor, type EditorVM } from '$lib/viewmodels/editor.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import { createSharing, type SharingVM } from '$lib/viewmodels/sharing.svelte';
+	import { dialogs } from '$lib/viewmodels/dialogs.svelte';
+	import { toasts } from '$lib/viewmodels/toasts.svelte';
+	import { saveTemplate } from '$lib/api/templates';
 
 	registerBuiltinBlocks();
 
@@ -20,6 +23,23 @@
 	const workspaceId = $derived(page.params.workspaceId!);
 
 	let doc = $state<Document | null>(null);
+
+	async function saveAsTemplate() {
+		const name = await dialogs.prompt({
+			title: 'Save as template',
+			message: 'Name this template — new documents can be created from it.',
+			placeholder: 'e.g. Meeting notes',
+			initial: doc?.title && doc.title !== 'Untitled' ? doc.title : '',
+			confirmLabel: 'Save'
+		});
+		if (name === null) return;
+		try {
+			await saveTemplate(workspaceId, name.trim() || 'Untitled template', documentId);
+			toasts.success('Saved as template');
+		} catch {
+			toasts.error("Couldn't save the template");
+		}
+	}
 	let titleDraft = $state('');
 	let editor = $state<EditorVM | null>(null);
 	let agent = $state<AgentPanelVM | null>(null);
@@ -110,6 +130,12 @@
 					class="chip"
 					class:chip-accent={editor?.status === 'connected'}
 					data-testid="sync-status">{statusLabel}</span
+				>
+				<button
+					class="btn btn-secondary export"
+					data-testid="save-template"
+					title="Save this document as a reusable template"
+					onclick={saveAsTemplate}>Save as template</button
 				>
 				<button
 					class="btn btn-secondary export"

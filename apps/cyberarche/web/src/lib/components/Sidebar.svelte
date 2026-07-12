@@ -12,6 +12,7 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import NotificationsBell from './NotificationsBell.svelte';
 	import TeamspaceMembersDialog from './TeamspaceMembersDialog.svelte';
+	import TemplatePicker from './TemplatePicker.svelte';
 	import TreeItem from './TreeItem.svelte';
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 
@@ -189,6 +190,7 @@
 	];
 
 	let membersFor = $state<TeamspaceNode | null>(null);
+	let templatePickerOpen = $state(false);
 
 	async function exportTeamspaceFlow(node: TeamspaceNode) {
 		const { teamspaceDocuments } = await import('$lib/api/teamspaces');
@@ -341,9 +343,18 @@
 <aside class="sidebar">
 	<WorkspaceSwitcher {workspaceId} />
 
-	<button class="new" data-testid="new-document" onclick={() => newDocument()}>
-		<span class="plus">＋</span> New document
-	</button>
+	<div class="new-row">
+		<button class="new" data-testid="new-document" onclick={() => newDocument()}>
+			<span class="plus">＋</span> New document
+		</button>
+		<button
+			class="new tmpl-btn"
+			data-testid="new-from-template"
+			title="New from template"
+			aria-label="New from template"
+			onclick={() => (templatePickerOpen = true)}>▤</button
+		>
+	</div>
 
 	{#if teamspaces && teamspaces.favorites.length > 0}
 		<nav class="section">
@@ -640,6 +651,10 @@
 	/>
 {/if}
 
+{#if templatePickerOpen}
+	<TemplatePicker {workspaceId} onclose={() => (templatePickerOpen = false)} />
+{/if}
+
 {#if menu}
 	<ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
@@ -656,11 +671,17 @@
 		padding: 10px;
 		overflow: hidden;
 	}
+	.new-row {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin: 8px 0;
+	}
 	.new {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		margin: 8px 0;
+		flex: 1;
 		padding: 6px 8px;
 		border-radius: var(--r-control);
 		color: var(--acc-strong);
@@ -668,6 +689,11 @@
 	}
 	.new:hover {
 		background: var(--accbg);
+	}
+	.tmpl-btn {
+		flex: 0 0 auto;
+		justify-content: center;
+		padding: 6px 9px;
 	}
 	.plus {
 		font-size: 12px;

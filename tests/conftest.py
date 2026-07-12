@@ -38,6 +38,7 @@ from cyberarche.application.testing.fakes import (
     ScriptedLLM,
     InMemoryInferredLinkRepository,
     InMemoryNotificationRepository,
+    InMemoryTemplateRepository,
     ScriptedMeetings,
     SequentialIds,
     StaticTokenPort,
@@ -51,6 +52,7 @@ from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
+from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -208,9 +210,12 @@ def use_cases(
         ids,
         notifications=notification_repo,
     )
+    document_use_cases = DocumentUseCases(
+        documents, access, clock, ids, teamspace_repo, folder_repo
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids, teamspace_repo, folder_repo),
+        documents=document_use_cases,
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, engine, realtime
         ),
@@ -253,6 +258,15 @@ def use_cases(
             clock=clock,
         ),
         notifications=NotificationUseCases(notification_repo),
+        templates=TemplateUseCases(
+            InMemoryTemplateRepository(),
+            document_use_cases,
+            realtime,
+            engine,
+            access,
+            clock,
+            ids,
+        ),
     )
 
 

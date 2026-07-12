@@ -424,6 +424,35 @@ class ScriptedImageGenerator:
         return GeneratedImage(content=_STUB_PNG, content_type="image/png")
 
 
+class InMemoryTemplateRepository:
+    """TemplateRepository fake."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, object] = {}
+
+    async def add(self, template) -> None:
+        self._items[str(template.id)] = template
+
+    async def list_for_workspace(self, tenant_id, workspace_id):
+        mine = [
+            t
+            for t in self._items.values()
+            if str(t.tenant_id) == str(tenant_id)
+            and str(t.workspace_id) == str(workspace_id)
+        ]
+        mine.sort(key=lambda t: t.created_at, reverse=True)
+        return mine
+
+    async def get(self, tenant_id, template_id):
+        t = self._items.get(str(template_id))
+        return t if t and str(t.tenant_id) == str(tenant_id) else None
+
+    async def delete(self, tenant_id, template_id) -> None:
+        t = self._items.get(str(template_id))
+        if t and str(t.tenant_id) == str(tenant_id):
+            del self._items[str(template_id)]
+
+
 class InMemoryNotificationRepository:
     """NotificationRepository fake: an in-process per-user inbox."""
 

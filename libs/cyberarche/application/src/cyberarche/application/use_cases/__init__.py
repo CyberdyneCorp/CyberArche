@@ -20,6 +20,7 @@ from cyberarche.application.use_cases.teamspaces import (
     TeamspaceUseCases,
 )
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
+from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 
 
@@ -42,3 +43,4 @@ class UseCases:
     files: FileUseCases
     links: LinksUseCases
     notifications: NotificationUseCases
+    templates: TemplateUseCases

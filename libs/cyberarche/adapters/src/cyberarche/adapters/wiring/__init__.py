@@ -36,6 +36,7 @@ from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
 from cyberarche.application.ports.notifications import NotificationRepository
+from cyberarche.application.ports.templates import TemplateRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
     ConnectorRepository,
@@ -66,6 +67,7 @@ from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
     TeamspaceUseCases,
@@ -191,6 +193,7 @@ def _build_use_cases(
     api_keys: ApiKeyRepository,
     inferred_links: InferredLinkRepository,
     notifications: NotificationRepository,
+    templates: TemplateRepository,
     model_name: str,
     clock,
     ids,
@@ -205,9 +208,12 @@ def _build_use_cases(
     connector_use_cases = ConnectorUseCases(
         connectors, mcp_client, secret_box, access, clock, ids
     )
+    document_use_cases = DocumentUseCases(
+        documents, access, clock, ids, teamspaces, folders
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
-        documents=DocumentUseCases(documents, access, clock, ids, teamspaces, folders),
+        documents=document_use_cases,
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, crdt_engine, realtime
         ),
@@ -257,6 +263,15 @@ def _build_use_cases(
             clock=clock,
         ),
         notifications=NotificationUseCases(notifications),
+        templates=TemplateUseCases(
+            templates,
+            document_use_cases,
+            realtime,
+            crdt_engine,
+            access,
+            clock,
+            ids,
+        ),
     )
 
 
@@ -338,6 +353,7 @@ class _Repositories:
     folders: FolderRepository
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
+    templates: TemplateRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -376,6 +392,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.notifications import (
         PostgresNotificationRepository,
     )
+    from cyberarche.adapters.outbound.postgres.templates import (
+        PostgresTemplateRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -397,6 +416,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         folders=PostgresFolderRepository(pool),
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
+        templates=PostgresTemplateRepository(pool),
     )
 
 
@@ -420,6 +440,7 @@ def _memory_repositories() -> _Repositories:
         folders=fakes.InMemoryFolderRepository(),
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
+        templates=fakes.InMemoryTemplateRepository(),
     )
 
 
@@ -665,6 +686,7 @@ async def build_container(
             repos.api_keys,
             repos.inferred_links,
             repos.notifications,
+            repos.templates,
             config.llm_model,
             clock,
             ids,

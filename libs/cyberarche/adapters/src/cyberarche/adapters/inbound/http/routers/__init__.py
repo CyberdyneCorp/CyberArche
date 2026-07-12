@@ -21,6 +21,7 @@ from cyberarche.adapters.inbound.http.routers.notifications import (
 )
 from cyberarche.adapters.inbound.http.routers.sharing import router as sharing_router
 from cyberarche.adapters.inbound.http.routers.teamspaces import router as teamspaces_router
+from cyberarche.adapters.inbound.http.routers.templates import router as templates_router
 from cyberarche.adapters.inbound.http.routers.workspaces import router as workspaces_router
 
 all_routers = [
@@ -38,4 +39,5 @@ all_routers = [
     folders_router,
     files_router,
     notifications_router,
+    templates_router,
 ]
