@@ -563,6 +563,51 @@ class ScriptedMeetings:
         return "Across your meetings: the roadmap was approved."
 
 
+class ScriptedWebMedia:
+    """WebMediaPort fake: records the forwarded access token and the calls, and
+    returns fixed results, so the agent web/media tools can be tested offline."""
+
+    def __init__(self) -> None:
+        self.tokens: list[str] = []
+        self.searched: list[str] = []
+        self.transcripts: list[str] = []
+        self.playlists: list[str] = []
+
+    async def search(self, access_token: str, query: str, *, num: int = 10):
+        from cyberarche.application.ports.web_media import SearchResult
+
+        self.tokens.append(access_token)
+        self.searched.append(query)
+        return [
+            SearchResult(title="First", url="https://a.test/1", snippet="one"),
+            SearchResult(title="Second", url="https://a.test/2", snippet=None),
+        ][:num]
+
+    async def youtube_transcript(
+        self, access_token: str, video: str, *, lang: str | None = None
+    ):
+        from cyberarche.application.ports.web_media import Transcript
+
+        self.tokens.append(access_token)
+        self.transcripts.append(video)
+        return Transcript(
+            video_id=video,
+            text="Hello and welcome to the talk.",
+            title="A talk",
+            lang=lang or "en",
+        )
+
+    async def youtube_playlist(self, access_token: str, playlist: str):
+        from cyberarche.application.ports.web_media import PlaylistVideo
+
+        self.tokens.append(access_token)
+        self.playlists.append(playlist)
+        return [
+            PlaylistVideo(video_id="v1", url="https://y.test/v1", title="Ep 1"),
+            PlaylistVideo(video_id="v2", url="https://y.test/v2", title="Ep 2"),
+        ]
+
+
 class ScriptedCodeExecutor:
     """CodeExecutionPort fake: records code and returns a scripted result
     (one PNG figure + stdout) so agent code-execution can be tested offline."""

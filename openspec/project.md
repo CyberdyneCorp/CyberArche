@@ -38,6 +38,12 @@ Notion/Confluence alternative built around three differentiators:
   Per-`project_slug` isolated LightRAG workspaces. We ingest documents
   (`/documents/upload`), poll tasks, and query (`/queries/sync|async`, modes
   local/global/hybrid/naive/mix). Bearer-token authenticated.
+- **DAO backend** — `https://dao.backend.coolify.cyberdynecorp.ai`
+  Web search (`/api/v1/search`) and YouTube transcript/playlist
+  (`/api/v1/youtube/*`) power the agent's `web_search` / `youtube_transcript` /
+  `youtube_playlist` tools. CyberdyneAuth has no delegation grant, so we
+  **forward the caller's own bearer token** (never a service token) — the DAO
+  backend validates it and scopes the results.
 
 ## Architecture Conventions
 

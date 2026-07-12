@@ -25,6 +25,9 @@ class McpSettings(BaseSettings):
     auth_tenant_claim: str = "org_id"
     rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
     rag_api_token: str = ""
+    # DAO backend for the web_search + youtube_transcript MCP tools (forwarded
+    # caller token). Empty disables the tools.
+    dao_url: str = "https://dao.backend.coolify.cyberdynecorp.ai"
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-5"
     llm_api_key: str = ""
@@ -50,6 +53,7 @@ class McpSettings(BaseSettings):
             auth_tenant_claim=self.auth_tenant_claim,
             rag_base_url=self.rag_base_url,
             rag_api_token=self.rag_api_token,
+            dao_base_url=self.dao_url,
             llm_provider=self.llm_provider,
             llm_model=self.llm_model,
             llm_api_key=self.llm_api_key,

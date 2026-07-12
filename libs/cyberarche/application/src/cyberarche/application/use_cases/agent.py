@@ -32,6 +32,12 @@ from cyberarche.application.ports.meetings import (
     MeetingsPort,
 )
 from cyberarche.application.ports.storage import BlobStoragePort
+from cyberarche.application.ports.web_media import (
+    PlaylistVideo,
+    SearchResult,
+    Transcript,
+    WebMediaPort,
+)
 from cyberarche.application.ports.llm import (
     LLMMessage,
     LLMPort,
@@ -162,12 +168,14 @@ class AgentUseCases:
         blobs: BlobStoragePort | None = None,
         code: CodeExecutionPort | None = None,
         meetings: MeetingsPort | None = None,
+        web_media: WebMediaPort | None = None,
     ) -> None:
         self._llm = llm
         self._images = images
         self._blobs = blobs
         self._code = code
         self._meetings = meetings
+        self._web_media = web_media
         self._documents = documents
         self._realtime = realtime
         self._knowledge = knowledge
@@ -484,6 +492,10 @@ class AgentUseCases:
         # they only appear on the authenticated request path.
         if self._meetings is not None and access_token:
             tools = tools + _meeting_tool_specs()
+        # Web/media tools forward the caller's own token to the DAO backend, so
+        # (like meetings) they only appear on the authenticated request path.
+        if self._web_media is not None and access_token:
+            tools = tools + _web_media_tool_specs()
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(
                 caller,
@@ -506,6 +518,8 @@ class AgentUseCases:
         hallucinated id can never reach another document."""
         if call.name in _MEETING_TOOL_NAMES:
             return await self._run_meetings_tool(call, access_token)
+        if call.name in _WEB_MEDIA_TOOL_NAMES:
+            return await self._run_web_media_tool(call, access_token)
         if call.name == "generate_image":
             return await self._run_generate_image(
                 caller, workspace_id, document_id, call.arguments
@@ -667,6 +681,46 @@ class AgentUseCases:
         except Exception as error:
             return f"error: {_meetings_error(error)}"
         return f"error: unknown meetings tool {call.name}"
+
+    async def _run_web_media_tool(
+        self, call: ToolCall, access_token: str | None
+    ) -> str:
+        """Web search + YouTube tools. The caller's token is forwarded to the DAO
+        backend as the bearer — used only there, never logged or recorded."""
+        if self._web_media is None:
+            return "error: web and media tools are not configured"
+        if not access_token:
+            return "error: sign in required to use web and media tools"
+        args = call.arguments or {}
+        try:
+            if call.name == "web_search":
+                query = str(args.get("query", "")).strip()
+                if not query:
+                    return "error: query required"
+                results = await self._web_media.search(
+                    access_token, query, num=int(args.get("num") or 10)
+                )
+                return _render_search(results)
+            if call.name == "youtube_transcript":
+                video = str(args.get("video", "")).strip()
+                if not video:
+                    return "error: video required"
+                lang = str(args.get("lang", "")).strip() or None
+                transcript = await self._web_media.youtube_transcript(
+                    access_token, video, lang=lang
+                )
+                return _render_transcript(transcript)
+            if call.name == "youtube_playlist":
+                playlist = str(args.get("playlist", "")).strip()
+                if not playlist:
+                    return "error: playlist required"
+                videos = await self._web_media.youtube_playlist(
+                    access_token, playlist
+                )
+                return _render_playlist(videos)
+        except Exception as error:
+            return f"error: {_web_media_error(error)}"
+        return f"error: unknown web/media tool {call.name}"
 
     async def _run_python(
         self,
@@ -1000,6 +1054,118 @@ def _render_meeting_transcript(rec: MeetingTranscript) -> str:
         else "(transcript not ready yet)"
     )
     return "\n\n".join(parts)
+
+
+_WEB_MEDIA_TOOL_NAMES = {"web_search", "youtube_transcript", "youtube_playlist"}
+
+
+def _web_media_tool_specs() -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="web_search",
+            description=(
+                "Search the live web for up-to-date information. Returns ranked "
+                "results with title, URL, and snippet. Use it to research a "
+                "topic or find current sources; cite the URLs and, when asked, "
+                "insert a summary with links into the document."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query."},
+                    "num": {
+                        "type": "integer",
+                        "description": "Max results (default 10, max 20).",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        ToolSpec(
+            name="youtube_transcript",
+            description=(
+                "Fetch a YouTube video's transcript. `video` is a URL or the "
+                "11-character video id. Use it to summarize the talk into the "
+                "document, or — when the user asks to add it to the knowledge "
+                "base — ingest the transcript into the workspace RAG."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "video": {
+                        "type": "string",
+                        "description": "Video URL or 11-char id.",
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "Preferred transcript language (BCP-47).",
+                    },
+                },
+                "required": ["video"],
+            },
+        ),
+        ToolSpec(
+            name="youtube_playlist",
+            description=(
+                "List the videos in a YouTube playlist. `playlist` is a URL or "
+                "id. Returns each video's title and URL; follow up with "
+                "youtube_transcript to read one."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "playlist": {
+                        "type": "string",
+                        "description": "Playlist URL or id.",
+                    }
+                },
+                "required": ["playlist"],
+            },
+        ),
+    ]
+
+
+def _web_media_error(error: Exception) -> str:
+    """Friendly text for a DAO-backend failure, without importing the HTTP client."""
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    if status in (401, 403):
+        return "not signed in to the web/media service, or no access to it"
+    if status == 404:
+        return "that video or playlist was not found"
+    return str(error) or "web/media service unavailable"
+
+
+def _render_search(results: list[SearchResult]) -> str:
+    if not results:
+        return "no results found"
+    lines = []
+    for i, r in enumerate(results, 1):
+        line = f"{i}. {r.title or r.url} — {r.url}"
+        if r.snippet:
+            line += f"\n   {r.snippet}"
+        lines.append(line)
+    return "web results:\n" + "\n".join(lines)
+
+
+def _render_transcript(t: Transcript) -> str:
+    header = f"transcript for video {t.video_id}"
+    if t.title:
+        header += f" — {t.title}"
+    if t.lang:
+        header += f" [{t.lang}]"
+    if not t.text:
+        return header + "\n(no transcript available)"
+    return header + "\n\n" + t.text
+
+
+def _render_playlist(videos: list[PlaylistVideo]) -> str:
+    if not videos:
+        return "no videos found"
+    lines = [
+        f"{i}. {v.title or v.video_id} — {v.url}" for i, v in enumerate(videos, 1)
+    ]
+    return "playlist videos:\n" + "\n".join(lines)
 
 
 def _image_tool_spec() -> ToolSpec:

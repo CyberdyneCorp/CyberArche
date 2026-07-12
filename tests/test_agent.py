@@ -541,6 +541,102 @@ async def test_meeting_tools_require_a_caller_token(use_cases, alice):
     }
 
 
+async def test_web_media_tools_require_a_caller_token(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    # No access token → the per-caller web/media tools are not offered.
+    without = await use_cases.agent._available_tools(
+        alice, document.workspace_id, document.id, None, None
+    )
+    assert "web_search" not in {t.name for t in without}
+    # With the caller's token they appear.
+    with_token = await use_cases.agent._available_tools(
+        alice, document.workspace_id, document.id, None, "tok"
+    )
+    assert {"web_search", "youtube_transcript", "youtube_playlist"} <= {
+        t.name for t in with_token
+    }
+
+
+async def test_agent_web_search_forwards_token_and_renders(
+    use_cases, llm, web_media, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1", name="web_search", arguments={"query": "cyberdyne"}
+                ),
+            ),
+        ),
+        LLMResponse(text="Here is what I found.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="research cyberdyne",
+        access_token="tok-web",
+    )
+
+    # The caller's own token is forwarded to the DAO backend (delegated auth).
+    assert web_media.tokens == ["tok-web"]
+    assert web_media.searched == ["cyberdyne"]
+    call = next(c for c in answer.tool_calls if c.name == "web_search")
+    assert "First" in call.result and "https://a.test/1" in call.result
+
+
+async def test_agent_youtube_transcript_forwards_token(
+    use_cases, llm, web_media, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="youtube_transcript",
+                    arguments={"video": "abc123"},
+                ),
+            ),
+        ),
+        LLMResponse(text="Summarized.", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="summarize this video",
+        access_token="tok-yt",
+    )
+
+    assert web_media.tokens == ["tok-yt"]
+    assert web_media.transcripts == ["abc123"]
+    call = next(c for c in answer.tool_calls if c.name == "youtube_transcript")
+    assert "Hello and welcome" in call.result
+
+
+async def test_web_media_tool_reports_unavailable_when_unconfigured(use_cases, alice):
+    from cyberarche.application.ports.llm import ToolCall as _ToolCall
+
+    use_cases.agent._web_media = None
+    result = await use_cases.agent._run_web_media_tool(
+        _ToolCall(id="c", name="web_search", arguments={"query": "x"}), "tok"
+    )
+    assert result.startswith("error:") and "not configured" in result
+
+
+async def test_web_media_tool_requires_sign_in(use_cases, alice):
+    from cyberarche.application.ports.llm import ToolCall as _ToolCall
+
+    result = await use_cases.agent._run_web_media_tool(
+        _ToolCall(id="c", name="web_search", arguments={"query": "x"}), None
+    )
+    assert result.startswith("error:") and "sign in" in result
+
+
 async def test_meetings_tool_reports_unavailable_when_unconfigured(use_cases, alice):
     from cyberarche.application.ports.llm import ToolCall as _ToolCall
 

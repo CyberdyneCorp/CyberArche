@@ -32,6 +32,20 @@ if TYPE_CHECKING:
     from cyberarche.adapters.wiring import Container
 
 CallerResolver = Callable[[], Awaitable[CallerContext]]
+# Synchronous: extracting the raw bearer is pure header parsing, no I/O.
+BearerResolver = Callable[[], str]
+
+
+def _bearer_from_headers() -> str:
+    """Extract the raw bearer token from the current MCP request's HTTP headers."""
+    from fastmcp.server.dependencies import get_http_headers
+
+    # include_all: fastmcp strips the authorization header by default.
+    header = get_http_headers(include_all=True).get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise NotAuthenticated("missing bearer token")
+    return token.strip()
 
 _INSTRUCTIONS = (
     "Tools over the caller's CyberArche documents and workspace knowledge. "
@@ -41,14 +55,7 @@ _INSTRUCTIONS = (
 
 def _http_caller_resolver(container: "Container") -> CallerResolver:
     async def resolve() -> CallerContext:
-        from fastmcp.server.dependencies import get_http_headers
-
-        # include_all: fastmcp strips the authorization header by default.
-        header = get_http_headers(include_all=True).get("authorization", "")
-        scheme, _, token = header.partition(" ")
-        if scheme.lower() != "bearer" or not token.strip():
-            raise NotAuthenticated("missing bearer token")
-        claims = await container.token_port.verify(token.strip())
+        claims = await container.token_port.verify(_bearer_from_headers())
         return CallerContext(
             user_id=UserId(claims.subject),
             tenant_id=TenantId(claims.tenant_id),
@@ -61,9 +68,15 @@ def _http_caller_resolver(container: "Container") -> CallerResolver:
 
 
 def build_mcp_server(
-    container: "Container", *, caller_resolver: CallerResolver | None = None
+    container: "Container",
+    *,
+    caller_resolver: CallerResolver | None = None,
+    bearer_resolver: BearerResolver | None = None,
 ) -> FastMCP:
     resolve = caller_resolver or _http_caller_resolver(container)
+    # The raw bearer is forwarded to sibling backends (web/media) that share the
+    # CyberdyneAuth identity; tests inject it since they bypass HTTP headers.
+    bearer = bearer_resolver or _bearer_from_headers
     cases = container.use_cases
     mcp = FastMCP(name="cyberarche", instructions=_INSTRUCTIONS)
 
@@ -194,5 +207,35 @@ def build_mcp_server(
             content=base64.b64decode(content_base64),
         )
         return {"task_id": record.task_id, "status": record.status.value}
+
+    # ---- web + media tools (only when the DAO backend is configured) --------
+
+    if container.web_media is not None:
+        web_media = container.web_media
+
+        @mcp.tool
+        async def web_search(query: str, num: int = 10) -> list[dict]:
+            """Search the live web. Returns ranked results (title, url, snippet).
+            Runs as the caller: their bearer token is forwarded to the search
+            service, which scopes the results."""
+            await resolve()
+            results = await web_media.search(bearer(), query, num=num)
+            return [
+                {"title": r.title, "url": r.url, "snippet": r.snippet}
+                for r in results
+            ]
+
+        @mcp.tool
+        async def youtube_transcript(video: str, lang: str | None = None) -> dict:
+            """Fetch a YouTube video's transcript (`video` = URL or 11-char id).
+            Runs as the caller via their forwarded bearer token."""
+            await resolve()
+            transcript = await web_media.youtube_transcript(bearer(), video, lang=lang)
+            return {
+                "video_id": transcript.video_id,
+                "title": transcript.title,
+                "lang": transcript.lang,
+                "text": transcript.text,
+            }
 
     return mcp

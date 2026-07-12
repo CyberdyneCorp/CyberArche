@@ -156,6 +156,60 @@ async def test_insert_blocks_splits_a_markdown_blob_paragraph(mcp_setup):
     assert read["blocks"][1]["data"]["language"] == "python"
 
 
+async def test_web_tools_absent_when_dao_unconfigured(mcp_setup):
+    client, holder, _ = mcp_setup
+    holder.use("alice-token")
+    tools = {t.name for t in await client.list_tools()}
+    assert "web_search" not in tools and "youtube_transcript" not in tools
+
+
+async def test_web_search_and_transcript_forward_the_caller_bearer():
+    from cyberarche.application.testing.fakes import ScriptedWebMedia
+
+    web_media = ScriptedWebMedia()
+    container = await build_container(
+        WiringConfig(backend="memory"),
+        token_port=StaticTokenPort({}),
+        web_media=web_media,
+    )
+    holder = TokenHolder()
+
+    async def resolver() -> CallerContext:
+        caller = CALLERS.get(holder.token or "")
+        if caller is None:
+            raise NotAuthenticated("missing or invalid token")
+        return caller
+
+    def bearer() -> str:
+        if not holder.token:
+            raise NotAuthenticated("missing bearer token")
+        return holder.token
+
+    server = build_mcp_server(
+        container, caller_resolver=resolver, bearer_resolver=bearer
+    )
+    async with Client(server) as client:
+        holder.use("alice-token")
+        tools = {t.name for t in await client.list_tools()}
+        assert {"web_search", "youtube_transcript"} <= tools
+
+        results = data(await client.call_tool("web_search", {"query": "cyberdyne"}))
+        assert web_media.tokens == ["alice-token"]  # caller bearer forwarded
+        assert results[0]["url"] == "https://a.test/1"
+
+        transcript = data(
+            await client.call_tool("youtube_transcript", {"video": "abc"})
+        )
+        assert transcript["text"].startswith("Hello")
+        assert web_media.transcripts == ["abc"]
+
+        # Unauthenticated call is denied.
+        holder.use(None)
+        with pytest.raises(ToolError):
+            await client.call_tool("web_search", {"query": "x"})
+    await container.aclose()
+
+
 async def test_knowledge_tools_ingest_and_query(mcp_setup):
     client, holder, container = mcp_setup
     workspace = await container.use_cases.workspaces.create(

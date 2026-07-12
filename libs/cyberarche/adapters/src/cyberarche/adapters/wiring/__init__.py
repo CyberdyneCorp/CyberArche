@@ -35,6 +35,7 @@ from cyberarche.application.ports.code_exec import CodeExecutionPort
 from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
+from cyberarche.application.ports.web_media import WebMediaPort
 from cyberarche.application.ports.notifications import NotificationRepository
 from cyberarche.application.ports.templates import TemplateRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
@@ -121,6 +122,9 @@ class WiringConfig:
     # Meeting transcripts (agent meeting tools). Empty URL = disabled; the agent
     # calls it with the caller's own access token (per-user data).
     meetings_base_url: str = ""
+    # Web search + YouTube tools (agent web_media tools) via the DAO backend.
+    # Empty URL = disabled; called with the caller's own forwarded access token.
+    dao_base_url: str = ""
     connector_secret_key: str = ""
     # Shared infrastructure for multi-replica deployments (12.5/12.6):
     # with redis_url set, live realtime fanout and the job queue go through
@@ -157,6 +161,7 @@ class Container:
     blobs: BlobStoragePort
     queue: TaskQueuePort
     peer_bus: PeerBusPort
+    web_media: WebMediaPort | None
     use_cases: UseCases
     _closers: list = None  # awaited on shutdown, in order
 
@@ -178,6 +183,7 @@ def _build_use_cases(
     images: ImageGenerationPort | None,
     code: CodeExecutionPort | None,
     meetings: MeetingsPort | None,
+    web_media: WebMediaPort | None,
     agent_runs: AgentRunRepository,
     connectors: ConnectorRepository,
     mcp_client: McpClientPort,
@@ -237,6 +243,7 @@ def _build_use_cases(
             blobs=blobs,
             code=code,
             meetings=meetings,
+            web_media=web_media,
         ),
         sharing=SharingUseCases(
             documents,
@@ -333,6 +340,19 @@ def _build_meetings(config: WiringConfig, shared_http):
     )
 
     return CyberfliesMeetingsAdapter(config.meetings_base_url, shared_http())
+
+
+def _build_web_media(config: WiringConfig, shared_http):
+    """DAO-backend web search + YouTube adapter, or None when unconfigured.
+    Authenticates per request with the caller's own forwarded access token (no
+    service token), so it needs no credentials at construction."""
+    if not config.dao_base_url:
+        return None
+    from cyberarche.adapters.outbound.web_media.dao_backend import (
+        DaoBackendWebMediaAdapter,
+    )
+
+    return DaoBackendWebMediaAdapter(config.dao_base_url, shared_http())
 
 
 @dataclass(slots=True)
@@ -537,6 +557,7 @@ async def build_container(
     images: ImageGenerationPort | None = None,
     code: CodeExecutionPort | None = None,
     meetings: MeetingsPort | None = None,
+    web_media: WebMediaPort | None = None,
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
@@ -595,6 +616,9 @@ async def build_container(
 
     if meetings is None:
         meetings = _build_meetings(config, shared_http)
+
+    if web_media is None:
+        web_media = _build_web_media(config, shared_http)
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -658,6 +682,7 @@ async def build_container(
         blobs=blobs,
         queue=queue,
         peer_bus=peer_bus,
+        web_media=web_media,
         use_cases=_build_use_cases(
             workspaces,
             documents,
@@ -671,6 +696,7 @@ async def build_container(
             images,
             code,
             meetings,
+            web_media,
             agent_runs,
             connectors,
             mcp_client,

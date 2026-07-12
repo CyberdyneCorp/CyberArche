@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Cyberflies meeting transcripts (agent meeting tools). Called with the
     # caller's own access token; empty disables the tools.
     meetings_url: str = "https://cyberflies.backend.coolify.cyberdynecorp.ai"
+    # DAO backend for agent web search + YouTube tools. Called with the caller's
+    # own forwarded access token; empty disables the tools.
+    dao_url: str = "https://dao.backend.coolify.cyberdynecorp.ai"
     connector_secret_key: str = ""
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
@@ -59,6 +62,7 @@ class Settings(BaseSettings):
             image_base_url=self.image_base_url,
             interpreter_base_url=self.interpreter_url,
             meetings_base_url=self.meetings_url,
+            dao_base_url=self.dao_url,
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,

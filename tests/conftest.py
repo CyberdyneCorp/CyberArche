@@ -40,6 +40,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryNotificationRepository,
     InMemoryTemplateRepository,
     ScriptedMeetings,
+    ScriptedWebMedia,
     SequentialIds,
     StaticTokenPort,
 )
@@ -106,6 +107,11 @@ def meetings() -> ScriptedMeetings:
 
 
 @pytest.fixture
+def web_media() -> ScriptedWebMedia:
+    return ScriptedWebMedia()
+
+
+@pytest.fixture
 def inferred_links() -> InMemoryInferredLinkRepository:
     return InMemoryInferredLinkRepository()
 
@@ -165,6 +171,7 @@ def use_cases(
     images: ScriptedImageGenerator,
     code_exec: ScriptedCodeExecutor,
     meetings: ScriptedMeetings,
+    web_media: ScriptedWebMedia,
     inferred_links: InMemoryInferredLinkRepository,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
@@ -239,6 +246,7 @@ def use_cases(
             blobs=blobs,
             code=code_exec,
             meetings=meetings,
+            web_media=web_media,
         ),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
