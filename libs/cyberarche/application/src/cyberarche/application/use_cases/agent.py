@@ -1127,7 +1127,7 @@ _DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]", re.DOTALL)
 # into a single paragraph is split back into real blocks so the editor (which
 # only renders block-level markdown as its own block, never inside a paragraph)
 # shows a heading/list/quote instead of raw "## …" text.
-_HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
+_HEADING_RE = re.compile(r"^(#{1,4})\s+(.*)$")
 _TODO_RE = re.compile(r"^(?:[-*+]\s+)?\[([ xX])\]\s+(.*)$")
 _QUOTE_RE = re.compile(r"^>\s+(.*)$")
 _BULLET_RE = re.compile(r"^[-*+]\s+(.*)$")
@@ -1135,7 +1135,7 @@ _NUMBERED_RE = re.compile(r"^\d+[.)]\s+(.*)$")
 # Any line that starts a non-paragraph block — used to decide whether a
 # paragraph the model produced actually needs splitting.
 _BLOCK_MD_LINE_RE = re.compile(
-    r"^(#{1,3}\s|>\s|[-*+]\s|\d+[.)]\s|\[[ xX]\]\s|(?:---|\*\*\*|___)\s*$)"
+    r"^(#{1,4}\s|>\s|[-*+]\s|\d+[.)]\s|\[[ xX]\]\s|(?:---|\*\*\*|___)\s*$)"
 )
 
 

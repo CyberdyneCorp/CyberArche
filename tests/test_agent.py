@@ -942,7 +942,10 @@ def test_answer_blocks_never_empty_for_nonempty_text():
 
 def test_answer_blocks_parses_headings_and_lists():
     text = (
+        "# Title\n"
         "## Section\n"
+        "### Subsection\n"
+        "#### Detail\n"
         "Intro line.\n"
         "- first\n"
         "- second\n"
@@ -953,7 +956,10 @@ def test_answer_blocks_parses_headings_and_lists():
     )
     blocks = _answer_blocks(_Ids(), text)
     kinds = [(b["type"], b["data"]) for b in blocks]
+    assert ("heading", {"text": "Title", "level": 1}) in kinds
     assert ("heading", {"text": "Section", "level": 2}) in kinds
+    assert ("heading", {"text": "Subsection", "level": 3}) in kinds
+    assert ("heading", {"text": "Detail", "level": 4}) in kinds
     assert ("paragraph", {"text": "Intro line."}) in kinds
     assert ("bulleted_list", {"text": "first"}) in kinds
     assert ("numbered_list", {"text": "one"}) in kinds

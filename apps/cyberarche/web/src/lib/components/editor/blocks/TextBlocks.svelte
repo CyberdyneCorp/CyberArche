@@ -54,7 +54,7 @@
 </script>
 
 {#if block.type === 'heading'}
-	<div class="heading" data-level={Math.min(level, 3)}>
+	<div class="heading" data-level={Math.min(Math.round(level) || 1, 4)}>
 		<EditableText {...shared} placeholder="Heading" />
 	</div>
 {:else if block.type === 'bulleted_list' || block.type === 'numbered_list'}
@@ -97,19 +97,28 @@
 		font-size: 15.5px;
 		line-height: 1.7;
 	}
+	/* Four distinct levels (`#`–`####`): a clear descending size scale so the
+	   hierarchy reads at a glance; H4 stays above body text via weight. */
 	.heading[data-level='1'] :global(.editable) {
-		font-size: 26px;
+		font-size: 28px;
 		font-weight: 700;
 		line-height: 1.3;
 	}
 	.heading[data-level='2'] :global(.editable) {
-		font-size: 21px;
+		font-size: 22px;
 		font-weight: 600;
 		line-height: 1.35;
 	}
 	.heading[data-level='3'] :global(.editable) {
-		font-size: 16.5px;
+		font-size: 18px;
 		font-weight: 600;
+		line-height: 1.4;
+	}
+	.heading[data-level='4'] :global(.editable) {
+		font-size: 16px;
+		font-weight: 600;
+		line-height: 1.4;
+		color: var(--tx2);
 	}
 	.list-item {
 		display: flex;

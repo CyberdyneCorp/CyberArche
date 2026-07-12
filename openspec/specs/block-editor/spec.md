@@ -30,6 +30,24 @@ SHALL merge it into the previous block, joining their text.
 - **WHEN** a user activates the delete control on a block
 - **THEN** the block SHALL be removed from the document
 
+### Requirement: Heading levels
+The editor SHALL support four heading levels (H1–H4), each rendered at a
+visually distinct size so the document hierarchy reads at a glance. Typing a
+markdown heading prefix at the start of a block SHALL set the level from the
+number of `#` characters: `#`→H1, `##`→H2, `###`→H3, `####`→H4. A heading whose
+stored level exceeds the supported range SHALL be clamped to the nearest
+supported level rather than rendered at the base size.
+
+#### Scenario: Markdown prefix sets the heading level
+- **WHEN** a user types `###` followed by a space at the start of a block
+- **THEN** the block SHALL become a heading at level 3
+- **AND** it SHALL render at that level's distinct size
+
+#### Scenario: Four distinct sizes
+- **WHEN** headings of levels 1 through 4 appear in a document
+- **THEN** each SHALL render at a different size, largest for H1 and smallest
+  for H4
+
 ### Requirement: LaTeX math blocks
 The editor SHALL support LaTeX for both inline math (delimited by `$…$` or by
 the TeX delimiters `\(…\)` and `\[…\]` within text) and block-level math (the
