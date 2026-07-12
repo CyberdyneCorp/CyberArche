@@ -2,8 +2,15 @@
 	import { page } from '$app/state';
 	import { createApiKeys, type ApiKeysVM } from '$lib/viewmodels/api-keys.svelte';
 	import { createConnectors, type ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
+	import {
+		createAgentPersona,
+		type AgentPersonaVM
+	} from '$lib/viewmodels/agentPersona.svelte';
 
 	const workspaceId = $derived(page.params.workspaceId!);
+
+	let persona = $state<AgentPersonaVM | null>(null);
+	let newMemory = $state('');
 
 	let connectors = $state<ConnectorsVM | null>(null);
 	let name = $state('');
@@ -23,7 +30,15 @@
 		const keysVm = createApiKeys();
 		apiKeys = keysVm;
 		keysVm.load();
+		const personaVm = createAgentPersona(workspaceId);
+		persona = personaVm;
+		personaVm.load();
 	});
+
+	async function addMemory(event: SubmitEvent) {
+		event.preventDefault();
+		if (persona && (await persona.addMemory(newMemory))) newMemory = '';
+	}
 
 	async function createKey(event: SubmitEvent) {
 		event.preventDefault();
@@ -126,6 +141,77 @@
 		</section>
 	{/if}
 
+	{#if persona}
+		<section class="card">
+			<h2>Agent instructions &amp; memory</h2>
+			<p class="hint">
+				Shape the agent for this workspace. Instructions are added to every agent
+				run; memories are durable facts it recalls across conversations.
+			</p>
+
+			<label class="field">
+				<span>Workspace instructions (shared — everyone here)</span>
+				<textarea
+					rows="4"
+					maxlength="4000"
+					placeholder="e.g. Always answer in Portuguese and cite block ids."
+					bind:value={persona.workspaceText}
+				></textarea>
+			</label>
+			<div class="row">
+				<span class="count">{persona.workspaceText.length}/4000</span>
+				<button
+					class="save"
+					disabled={persona.busy}
+					onclick={() => persona?.saveInstructions('workspace')}>Save</button
+				>
+			</div>
+
+			<label class="field">
+				<span>Your personal instructions (only you)</span>
+				<textarea
+					rows="3"
+					maxlength="2000"
+					placeholder="e.g. Keep answers terse; I prefer TypeScript examples."
+					bind:value={persona.personalText}
+				></textarea>
+			</label>
+			<div class="row">
+				<span class="count">{persona.personalText.length}/2000</span>
+				<button
+					class="save"
+					disabled={persona.busy}
+					onclick={() => persona?.saveInstructions('personal')}>Save</button
+				>
+			</div>
+
+			<h3 class="mem-title">Remembered facts</h3>
+			<form class="add" onsubmit={addMemory}>
+				<input
+					placeholder="Add a durable fact (no secrets)…"
+					bind:value={newMemory}
+				/>
+				<button type="submit" disabled={persona.busy || !newMemory.trim()}>Add</button>
+			</form>
+			{#each persona.memories as memory (memory.id)}
+				<div class="mem">
+					<span class="mem-text">{memory.text}</span>
+					<button
+						class="mem-remove"
+						title="Forget"
+						aria-label="Forget"
+						onclick={() => persona?.removeMemory(memory.id)}>×</button
+					>
+				</div>
+			{:else}
+				<p class="none">No memories yet.</p>
+			{/each}
+			{#if persona.error}
+				<p class="error" role="alert">{persona.error}</p>
+			{/if}
+		</section>
+	{/if}
+
 	{#if connectors}
 		<section class="card">
 			<h2>Attach an MCP server</h2>
@@ -222,6 +308,76 @@
 		padding: 40px 0 120px;
 		overflow-y: auto;
 		height: 100%;
+	}
+	.hint {
+		color: var(--tx2);
+		margin: 0 0 12px;
+		font-size: 13px;
+	}
+	.field {
+		display: block;
+		margin-top: 12px;
+	}
+	.field span {
+		display: block;
+		font-size: 13px;
+		color: var(--tx2);
+		margin-bottom: 4px;
+	}
+	.field textarea {
+		width: 100%;
+		resize: vertical;
+		padding: 8px 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+		background: var(--bg1);
+		color: var(--tx);
+		font: inherit;
+	}
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 6px;
+	}
+	.count {
+		font-size: 12px;
+		color: var(--tx3);
+		margin-left: auto;
+	}
+	.save {
+		padding: 5px 14px;
+		border-radius: var(--r-control);
+		background: var(--acc);
+		color: #fff;
+	}
+	.save:disabled {
+		opacity: 0.5;
+	}
+	.mem-title {
+		margin: 18px 0 8px;
+		font-size: 14px;
+	}
+	.mem {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+		margin-top: 6px;
+	}
+	.mem-text {
+		flex: 1;
+		font-size: 13px;
+	}
+	.mem-remove {
+		color: var(--tx3);
+		font-size: 16px;
+		line-height: 1;
+	}
+	.mem-remove:hover {
+		color: var(--rose);
 	}
 	.head h1 {
 		margin: 0;

@@ -91,9 +91,9 @@
 
 ## 11. Frontend (SvelteKit + Svelte 5 runes, MVVM)
 
-- [ ] 11.1 Model: typed HTTP client under `lib/api/` for instructions + memories.
-- [ ] 11.2 ViewModel (`*.svelte.ts`, `$state`/`$derived`, singleton + factory).
-- [ ] 11.3 View: agent-settings surface — edit custom instructions (with a
+- [x] 11.1 Model: typed HTTP client under `lib/api/` for instructions + memories.
+- [x] 11.2 ViewModel (`*.svelte.ts`, `$state`/`$derived`, singleton + factory).
+- [x] 11.3 View: agent-settings surface — edit custom instructions (with a
   character counter) and view/edit/delete memories; personal-instructions field
   gated to the current user.
 
