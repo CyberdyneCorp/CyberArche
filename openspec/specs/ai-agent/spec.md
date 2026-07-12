@@ -212,3 +212,106 @@ only the document. The amount of history included MAY be bounded.
 - **WHEN** a request is made with no prior turns
 - **THEN** the agent SHALL answer from the document and instruction alone
 
+### Requirement: Agent reads excalidraw scenes
+
+When the agent reads a document containing an `excalidraw` block, it SHALL
+include a textual description of the scene (the shapes present, their text
+labels, and the connections between them) in the context it reasons over, so it
+can answer questions about a diagram the user drew.
+
+#### Scenario: Agent summarizes a drawn diagram
+
+- **GIVEN** a document with an `excalidraw` block containing labelled shapes and
+  connectors
+- **WHEN** the user asks the agent about the diagram
+- **THEN** the agent's document context SHALL describe the shapes, their labels,
+  and their connections
+
+### Requirement: Agent creates diagrams
+
+The agent SHALL be able to create a diagram in a document by generating a valid
+`.excalidraw` scene and inserting it as an `excalidraw` block. At minimum it
+SHALL support generating a mind map from a central topic and its branches.
+
+#### Scenario: Agent creates a mind map
+
+- **WHEN** the user asks the agent to "create a mind map" for a topic
+- **THEN** the agent SHALL insert an `excalidraw` block whose scene contains a
+  central node and connected branch nodes
+- **AND** the block SHALL render the generated diagram
+
+### Requirement: Agent reads the caller's meeting transcripts
+
+When a meeting-transcript provider (Cyberflies) is configured, the agent SHALL
+offer tools to list the caller's meeting recordings, fetch a recording's
+transcript and summary, and answer natural-language questions across the
+caller's meetings. These tools SHALL be read-only: they return information for
+the agent to use (e.g. to insert as blocks) and SHALL NOT themselves modify the
+document.
+
+#### Scenario: Insert a meeting transcript
+
+- **GIVEN** the caller has a recording in Cyberflies
+- **WHEN** the caller asks the agent to add that meeting's transcript to the
+  document
+- **THEN** the agent SHALL retrieve the transcript and summary for that recording
+- **AND** insert the content into the open document
+
+#### Scenario: Answer from meetings
+
+- **WHEN** the caller asks the agent a question about their meetings
+- **THEN** the agent MAY query the meeting provider across the caller's meetings
+  and answer from the result
+
+### Requirement: Meeting access is delegated to the caller's identity
+
+The agent SHALL access the meeting provider using the caller's own access token,
+forwarded as a delegation credential only on the interactive request path and
+only to the single configured provider URL. The system SHALL NOT use a service
+token or any other user's identity for meeting access, so the provider enforces
+that the agent reads only what the caller is entitled to. The caller's token
+SHALL NOT be written to logs or audit records.
+
+#### Scenario: Only the caller's meetings are reachable
+
+- **WHEN** the agent calls the meeting provider on the caller's behalf
+- **THEN** it SHALL authenticate as the caller
+- **AND** SHALL only be able to read recordings the caller owns or that are
+  shared with the caller by the provider
+
+#### Scenario: Tools are absent without a caller token or provider
+
+- **WHEN** the meeting provider is not configured, or the request carries no
+  caller access token
+- **THEN** the meeting tools SHALL NOT be offered to the model
+
+### Requirement: Per-request reasoning effort
+
+The chat window SHALL let the user toggle reasoning for a message. When enabled,
+the agent SHALL request deeper reasoning from the model; when disabled, it SHALL
+request minimal reasoning for a fast, cheap response. The reasoning setting SHALL
+apply to that request's model calls, and SHALL be a no-op for models that do not
+support reasoning effort (so it never breaks a non-reasoning model).
+
+#### Scenario: Reasoning on requests deeper thinking
+
+- **WHEN** the user sends a message with the reasoning toggle on
+- **THEN** the agent SHALL call the model with a higher reasoning effort
+
+#### Scenario: Reasoning off is fast
+
+- **WHEN** the user sends a message with the reasoning toggle off
+- **THEN** the agent SHALL call the model with minimal reasoning effort
+
+### Requirement: Forward-compatible token limit
+
+The OpenAI-compatible adapter SHALL cap responses using `max_completion_tokens`
+so that reasoning models (GPT-5 family, o-series), which reject the legacy
+`max_tokens` field, are supported alongside earlier models.
+
+#### Scenario: A reasoning model is callable
+
+- **WHEN** the configured model is a GPT-5 / o-series model
+- **THEN** a completion request SHALL succeed rather than being rejected for an
+  unsupported token field
+
