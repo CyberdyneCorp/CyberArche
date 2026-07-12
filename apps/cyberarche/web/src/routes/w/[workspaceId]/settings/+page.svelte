@@ -14,8 +14,12 @@
 		createScheduledAgents,
 		type ScheduledAgentsVM
 	} from '$lib/viewmodels/scheduledAgents.svelte';
+	import { createGoogle, GOOGLE_GROUPS, type GoogleVM } from '$lib/viewmodels/google.svelte';
 
 	const workspaceId = $derived(page.params.workspaceId!);
+
+	let google = $state<GoogleVM | null>(null);
+	let googleGroups = $state<string[]>(['gmail_read', 'calendar', 'drive']);
 
 	let persona = $state<AgentPersonaVM | null>(null);
 	let newMemory = $state('');
@@ -56,7 +60,16 @@
 		const tasksVm = createScheduledAgents(workspaceId);
 		tasks = tasksVm;
 		tasksVm.load();
+		const googleVm = createGoogle(workspaceId);
+		google = googleVm;
+		googleVm.load();
 	});
+
+	function toggleGroup(id: string) {
+		googleGroups = googleGroups.includes(id)
+			? googleGroups.filter((g) => g !== id)
+			: [...googleGroups, id];
+	}
 
 	async function addTask(event: SubmitEvent) {
 		event.preventDefault();
@@ -352,6 +365,45 @@
 		</section>
 	{/if}
 
+	{#if google && google.status?.configured}
+		<section class="card">
+			<h2>Google Workspace</h2>
+			<p class="hint">
+				Connect your Google account to give the agent Gmail, Calendar, and
+				Docs/Drive tools. The connection is personal to you; the agent drafts mail
+				and proposes meetings but never sends or books without your action.
+			</p>
+			{#if google.status.connected}
+				<div class="google-connected">
+					<span>Connected as <strong>{google.status.email}</strong></span>
+					<button class="save" onclick={() => google?.disconnect()}>Disconnect</button>
+				</div>
+				<p class="task-meta">Granted: {google.status.scopes.length} scope(s)</p>
+			{:else}
+				<div class="google-groups">
+					{#each GOOGLE_GROUPS as grp (grp.id)}
+						<label class="google-group">
+							<input
+								type="checkbox"
+								checked={googleGroups.includes(grp.id)}
+								onchange={() => toggleGroup(grp.id)}
+							/>
+							{grp.label}
+						</label>
+					{/each}
+				</div>
+				<button
+					class="save"
+					disabled={googleGroups.length === 0}
+					onclick={() => google?.connect(googleGroups)}>Connect Google</button
+				>
+			{/if}
+			{#if google.error}
+				<p class="error" role="alert">{google.error}</p>
+			{/if}
+		</section>
+	{/if}
+
 	{#if connectors}
 		<section class="card">
 			<h2>Attach an MCP server</h2>
@@ -590,6 +642,24 @@
 	.task-instr {
 		font-size: 12px;
 		color: var(--tx2);
+	}
+	.google-groups {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin-bottom: 12px;
+	}
+	.google-group {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+	}
+	.google-connected {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 6px;
 	}
 	.head h1 {
 		margin: 0;

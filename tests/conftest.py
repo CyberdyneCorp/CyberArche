@@ -15,9 +15,11 @@ from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.application.testing.fakes import (
     FakeMcpClient,
     FixedClock,
+    FakeGoogleWorkspace,
     InMemoryAgentMemoryRepository,
     InMemoryAgentRunRepository,
     InMemoryAgentSkillRepository,
+    InMemoryGoogleConnectionRepository,
     InMemoryScheduledAgentRepository,
     InMemoryApiKeyRepository,
     InMemoryCustomInstructionsRepository,
@@ -51,6 +53,7 @@ from cyberarche.application.testing.fakes import (
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
@@ -124,6 +127,16 @@ def scheduled_repo() -> InMemoryScheduledAgentRepository:
 
 
 @pytest.fixture
+def google_repo() -> InMemoryGoogleConnectionRepository:
+    return InMemoryGoogleConnectionRepository()
+
+
+@pytest.fixture
+def google_port() -> FakeGoogleWorkspace:
+    return FakeGoogleWorkspace()
+
+
+@pytest.fixture
 def inferred_links() -> InMemoryInferredLinkRepository:
     return InMemoryInferredLinkRepository()
 
@@ -185,6 +198,8 @@ def use_cases(
     meetings: ScriptedMeetings,
     web_media: ScriptedWebMedia,
     scheduled_repo: InMemoryScheduledAgentRepository,
+    google_repo: InMemoryGoogleConnectionRepository,
+    google_port: FakeGoogleWorkspace,
     inferred_links: InMemoryInferredLinkRepository,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
@@ -240,6 +255,9 @@ def use_cases(
         clock,
         ids,
     )
+    google = GoogleWorkspaceUseCases(
+        google_repo, google_port, secret_box, access, clock, ids
+    )
     agent_use_cases = AgentUseCases(
         llm,
         documents,
@@ -259,6 +277,7 @@ def use_cases(
         meetings=meetings,
         web_media=web_media,
         persona=persona,
+        google=google,
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
@@ -280,6 +299,7 @@ def use_cases(
             ids,
         ),
         persona=persona,
+        google=google,
         skills=AgentSkillUseCases(InMemoryAgentSkillRepository(), access, clock, ids),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),

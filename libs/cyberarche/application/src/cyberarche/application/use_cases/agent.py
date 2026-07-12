@@ -60,6 +60,15 @@ from cyberarche.domain.connectors import split_qualified
 from cyberarche.domain.ids import WorkspaceId
 from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
+from cyberarche.domain.google_workspace import (
+    SCOPE_CALENDAR,
+    SCOPE_DOCS,
+    SCOPE_DRIVE,
+    SCOPE_GMAIL_COMPOSE,
+    SCOPE_GMAIL_READ,
+    GoogleConnection,
+)
 from cyberarche.domain.ids import AgentMemoryId, AgentRunId, ConnectorId, DocumentId
 from cyberarche.domain.memberships import Role
 
@@ -185,6 +194,7 @@ class AgentUseCases:
         meetings: MeetingsPort | None = None,
         web_media: WebMediaPort | None = None,
         persona: AgentPersonaUseCases | None = None,
+        google: GoogleWorkspaceUseCases | None = None,
     ) -> None:
         self._llm = llm
         self._images = images
@@ -193,6 +203,7 @@ class AgentUseCases:
         self._meetings = meetings
         self._web_media = web_media
         self._persona = persona
+        self._google = google
         self._documents = documents
         self._realtime = realtime
         self._knowledge = knowledge
@@ -609,6 +620,12 @@ class AgentUseCases:
             tools = tools + _web_media_tool_specs()
         if self._persona is not None:
             tools = tools + _persona_tool_specs()
+        # Google tools appear only when the caller has a usable Google connection,
+        # and only for the scopes they granted.
+        if self._google is not None:
+            connection = await self._google.status(caller, workspace_id)
+            if connection is not None and connection.is_usable():
+                tools = tools + _google_tool_specs(connection)
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(
                 caller,
@@ -640,6 +657,10 @@ class AgentUseCases:
             return await self._run_web_media_tool(call, access_token)
         if call.name in _PERSONA_TOOL_NAMES:
             return await self._run_persona_tool(caller, workspace_id, call)
+        if call.name in _GOOGLE_TOOL_NAMES:
+            return await self._run_google_tool(
+                caller, workspace_id, document_id, call
+            )
         if call.name == "generate_image":
             return await self._run_generate_image(
                 caller, workspace_id, document_id, call.arguments
@@ -882,6 +903,83 @@ class AgentUseCases:
         except Exception as error:
             return f"error: {error}"
         return f"error: unknown memory tool {call.name}"
+
+    async def _run_google_tool(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
+        call: ToolCall,
+    ) -> str:
+        """Google Workspace read/draft/free-busy tools for the connected caller.
+        Send and event-creation are NOT here — they require an explicit user
+        action through the HTTP router."""
+        if self._google is None:
+            return "error: Google Workspace is not configured"
+        args = call.arguments or {}
+        try:
+            if call.name == "google_gmail_search":
+                msgs = await self._google.gmail_search(
+                    caller, workspace_id, str(args.get("query", ""))
+                )
+                return _render_gmail(msgs)
+            if call.name == "google_gmail_read":
+                msg = await self._google.gmail_read(
+                    caller, workspace_id, str(args.get("message_id", ""))
+                )
+                return f"{msg.subject} — from {msg.sender}\n\n{msg.body}"
+            if call.name == "google_gmail_draft":
+                draft_id = await self._google.gmail_draft(
+                    caller,
+                    workspace_id,
+                    to=str(args.get("to", "")),
+                    subject=str(args.get("subject", "")),
+                    body=str(args.get("body", "")),
+                )
+                return (
+                    f"draft created (id={draft_id}) — review and send it yourself; "
+                    "the agent does not send mail"
+                )
+            if call.name == "google_calendar_list":
+                events = await self._google.calendar_list(
+                    caller,
+                    workspace_id,
+                    time_min=str(args.get("time_min", "")),
+                    time_max=str(args.get("time_max", "")),
+                )
+                return _render_events(events)
+            if call.name == "google_free_busy":
+                busy = await self._google.calendar_free_busy(
+                    caller,
+                    workspace_id,
+                    time_min=str(args.get("time_min", "")),
+                    time_max=str(args.get("time_max", "")),
+                )
+                if not busy:
+                    return "no busy periods in that window"
+                return "busy periods:\n" + "\n".join(
+                    f"- {b.start} → {b.end}" for b in busy
+                )
+            if call.name == "google_drive_search":
+                files = await self._google.drive_search(
+                    caller, workspace_id, str(args.get("query", ""))
+                )
+                if not files:
+                    return "no files found"
+                return "drive files:\n" + "\n".join(
+                    f"- id={f.id} | {f.name}" for f in files
+                )
+            if call.name == "google_import_doc":
+                blocks = await self._google.import_doc(
+                    caller, workspace_id, str(args.get("doc_id", ""))
+                )
+                if not blocks:
+                    return "the doc was empty"
+                await self.apply_blocks(caller, document_id, blocks)
+                return f"imported {len(blocks)} block(s) from the Google Doc"
+        except Exception as error:
+            return f"error: {error}"
+        return f"error: unknown Google tool {call.name}"
 
     async def _run_python(
         self,
@@ -1398,6 +1496,112 @@ def _render_memories(items: list) -> str:
         return "no memories saved for this workspace"
     lines = [f"- id={m.id} | {m.text}" for m in items]
     return "workspace memories:\n" + "\n".join(lines)
+
+
+_GOOGLE_TOOL_NAMES = {
+    "google_gmail_search",
+    "google_gmail_read",
+    "google_gmail_draft",
+    "google_calendar_list",
+    "google_free_busy",
+    "google_drive_search",
+    "google_import_doc",
+}
+
+
+def _tool(name: str, description: str, props: dict, required: list[str]) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=description,
+        parameters={"type": "object", "properties": props, "required": required},
+    )
+
+
+def _google_tool_specs(connection: GoogleConnection) -> list[ToolSpec]:
+    """Only the Google tools the connection's granted scopes allow."""
+    _s = {"type": "string"}
+    specs: list[ToolSpec] = []
+    if connection.has_scope(SCOPE_GMAIL_READ):
+        specs.append(
+            _tool(
+                "google_gmail_search",
+                "Search the connected user's Gmail. Returns matching messages.",
+                {"query": _s},
+                ["query"],
+            )
+        )
+        specs.append(
+            _tool(
+                "google_gmail_read",
+                "Read one Gmail message by id (from google_gmail_search).",
+                {"message_id": _s},
+                ["message_id"],
+            )
+        )
+    if connection.has_scope(SCOPE_GMAIL_COMPOSE):
+        specs.append(
+            _tool(
+                "google_gmail_draft",
+                "Create a Gmail DRAFT reply/message (never sends — the user must "
+                "review and send it). Provide to, subject, body.",
+                {"to": _s, "subject": _s, "body": _s},
+                ["to", "subject", "body"],
+            )
+        )
+    if connection.has_scope(SCOPE_CALENDAR):
+        specs.append(
+            _tool(
+                "google_calendar_list",
+                "List the user's Calendar events in an RFC3339 window "
+                "(time_min, time_max).",
+                {"time_min": _s, "time_max": _s},
+                ["time_min", "time_max"],
+            )
+        )
+        specs.append(
+            _tool(
+                "google_free_busy",
+                "Find the user's busy periods in an RFC3339 window to propose "
+                "free meeting slots. Creating the event needs the user's action.",
+                {"time_min": _s, "time_max": _s},
+                ["time_min", "time_max"],
+            )
+        )
+    if connection.has_scope(SCOPE_DRIVE) or connection.has_scope(SCOPE_DOCS):
+        specs.append(
+            _tool(
+                "google_drive_search",
+                "Search the user's Google Drive files. Returns file ids + names.",
+                {"query": _s},
+                ["query"],
+            )
+        )
+        specs.append(
+            _tool(
+                "google_import_doc",
+                "Import a Google Doc (by id) into the open document as blocks "
+                "(headings, text, lists, tables, code).",
+                {"doc_id": _s},
+                ["doc_id"],
+            )
+        )
+    return specs
+
+
+def _render_gmail(msgs: list) -> str:
+    if not msgs:
+        return "no messages found"
+    return "gmail results:\n" + "\n".join(
+        f"- id={m.id} | {m.subject} — {m.sender}: {m.snippet}" for m in msgs
+    )
+
+
+def _render_events(events: list) -> str:
+    if not events:
+        return "no events in that window"
+    return "calendar events:\n" + "\n".join(
+        f"- {e.summary} | {e.start} → {e.end}" for e in events
+    )
 
 
 def _image_tool_spec() -> ToolSpec:

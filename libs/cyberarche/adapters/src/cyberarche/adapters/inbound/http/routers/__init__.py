@@ -17,6 +17,7 @@ from cyberarche.adapters.inbound.http.routers.connectors import (
 from cyberarche.adapters.inbound.http.routers.documents import router as documents_router
 from cyberarche.adapters.inbound.http.routers.files import router as files_router
 from cyberarche.adapters.inbound.http.routers.folders import router as folders_router
+from cyberarche.adapters.inbound.http.routers.google import router as google_router
 from cyberarche.adapters.inbound.http.routers.health import router as health_router
 from cyberarche.adapters.inbound.http.routers.knowledge import (
     router as knowledge_router,
@@ -45,6 +46,7 @@ all_routers = [
     agent_persona_router,
     agent_skills_router,
     scheduled_agents_router,
+    google_router,
     connectors_router,
     sharing_router,
     teamspaces_router,

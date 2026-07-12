@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # DAO backend for agent web search + YouTube tools. Called with the caller's
     # own forwarded access token; empty disables the tools.
     dao_url: str = "https://dao.backend.coolify.cyberdynecorp.ai"
+    # Google Workspace connector OAuth (Gmail/Calendar/Docs). Empty = disabled.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
     connector_secret_key: str = ""
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
@@ -67,6 +71,9 @@ class Settings(BaseSettings):
             interpreter_base_url=self.interpreter_url,
             meetings_base_url=self.meetings_url,
             dao_base_url=self.dao_url,
+            google_client_id=self.google_client_id,
+            google_client_secret=self.google_client_secret,
+            google_redirect_uri=self.google_redirect_uri,
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,

@@ -859,6 +859,149 @@ class FakeMcpClient:
         return self.results.get(tool, f"{tool} ok")
 
 
+def _all_scopes() -> list[str]:
+    from cyberarche.domain.google_workspace import SCOPE_GROUPS
+
+    return [s for scopes in SCOPE_GROUPS.values() for s in scopes]
+
+
+class InMemoryGoogleConnectionRepository:
+    """GoogleConnectionRepository fake: metadata + encrypted token bytes."""
+
+    def __init__(self) -> None:
+        # key -> (GoogleConnection, access_encrypted, refresh_encrypted)
+        self._items: dict[tuple[str, str, str], tuple] = {}
+
+    @staticmethod
+    def _key(tenant_id, workspace_id, user_id):
+        return (str(tenant_id), str(workspace_id), str(user_id))
+
+    async def upsert(self, connection, *, access_encrypted, refresh_encrypted) -> None:
+        self._items[
+            self._key(connection.tenant_id, connection.workspace_id, connection.user_id)
+        ] = (connection, access_encrypted, refresh_encrypted)
+
+    async def get(self, tenant_id, workspace_id, user_id):
+        item = self._items.get(self._key(tenant_id, workspace_id, user_id))
+        return item[0] if item else None
+
+    async def read_secrets(self, tenant_id, workspace_id, user_id):
+        item = self._items.get(self._key(tenant_id, workspace_id, user_id))
+        return (item[1], item[2]) if item else None
+
+    async def set_status(self, tenant_id, workspace_id, user_id, status, updated_at):
+        import dataclasses
+
+        key = self._key(tenant_id, workspace_id, user_id)
+        item = self._items.get(key)
+        if item:
+            conn = dataclasses.replace(item[0], status=status, updated_at=updated_at)
+            self._items[key] = (conn, item[1], item[2])
+
+    async def delete(self, tenant_id, workspace_id, user_id) -> None:
+        self._items.pop(self._key(tenant_id, workspace_id, user_id), None)
+
+
+class FakeGoogleWorkspace:
+    """GoogleWorkspacePort fake: canned OAuth + API results; records the access
+    tokens it was called with so tests can assert per-user isolation."""
+
+    def __init__(self) -> None:
+        self.tokens_used: list[str] = []
+        self.revoked: list[str] = []
+        self.drafts: list[dict] = []
+        self.created_events: list[dict] = []
+        self.refresh_fails = False
+        self.granted_scopes: list[str] = []
+        self.email = "user@example.com"
+
+    def consent_url(self, *, state, scopes) -> str:
+        joined = "%20".join(scopes)
+        return f"https://accounts.google.com/o/oauth2/v2/auth?state={state}&scope={joined}"
+
+    async def exchange_code(self, code):
+        from cyberarche.application.ports.google_workspace import GoogleTokens
+
+        return GoogleTokens(
+            access_token=f"access-{code}",
+            refresh_token=f"refresh-{code}",
+            expires_at=datetime(2026, 1, 1, 1, tzinfo=UTC),
+            scopes=self.granted_scopes or _all_scopes(),
+            email=self.email,
+        )
+
+    async def refresh(self, refresh_token):
+        from cyberarche.application.ports.google_workspace import GoogleTokens
+
+        if self.refresh_fails:
+            raise RuntimeError("refresh token revoked")
+        return GoogleTokens(
+            access_token="access-refreshed",
+            refresh_token=refresh_token,
+            expires_at=datetime(2026, 1, 1, 1, tzinfo=UTC),
+            scopes=self.granted_scopes or _all_scopes(),
+            email=self.email,
+        )
+
+    async def revoke(self, token) -> None:
+        self.revoked.append(token)
+
+    async def gmail_search(self, access_token, query, *, limit=10):
+        from cyberarche.domain.google_workspace import GmailMessage
+
+        self.tokens_used.append(access_token)
+        return [
+            GmailMessage(
+                id="m1", thread_id="t1", subject=f"re: {query}",
+                sender="a@b.com", snippet="hello", body="hi there",
+            )
+        ]
+
+    async def gmail_read(self, access_token, message_id):
+        from cyberarche.domain.google_workspace import GmailMessage
+
+        self.tokens_used.append(access_token)
+        return GmailMessage(
+            id=message_id, thread_id="t1", subject="Subject",
+            sender="a@b.com", snippet="snip", body="full body",
+        )
+
+    async def gmail_create_draft(self, access_token, *, to, subject, body):
+        self.tokens_used.append(access_token)
+        self.drafts.append({"to": to, "subject": subject, "body": body})
+        return "draft-1"
+
+    async def calendar_list(self, access_token, *, time_min, time_max):
+        from cyberarche.domain.google_workspace import CalendarEvent
+
+        self.tokens_used.append(access_token)
+        return [CalendarEvent(id="e1", summary="Standup", start=time_min, end=time_max)]
+
+    async def calendar_free_busy(self, access_token, *, time_min, time_max):
+        from cyberarche.domain.google_workspace import BusyPeriod
+
+        self.tokens_used.append(access_token)
+        return [BusyPeriod(start=time_min, end=time_max)]
+
+    async def calendar_create_event(self, access_token, *, summary, start, end, attendees):
+        self.tokens_used.append(access_token)
+        self.created_events.append({"summary": summary, "start": start, "end": end})
+        return "event-1"
+
+    async def drive_search(self, access_token, query, *, limit=10):
+        from cyberarche.domain.google_workspace import DriveFile
+
+        self.tokens_used.append(access_token)
+        return [DriveFile(id="d1", name=f"{query}.doc", mime_type="application/vnd.google-apps.document")]
+
+    async def import_doc(self, access_token, doc_id):
+        self.tokens_used.append(access_token)
+        return [
+            {"type": "heading", "data": {"text": "Imported", "level": 2}},
+            {"type": "paragraph", "data": {"text": f"from doc {doc_id}"}},
+        ]
+
+
 class NaiveSecretBox:
     """SecretBoxPort fake: reversible obfuscation, clearly not plaintext."""
 

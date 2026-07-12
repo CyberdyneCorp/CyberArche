@@ -10,6 +10,7 @@ from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
+from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
@@ -50,3 +51,4 @@ class UseCases:
     templates: TemplateUseCases
     skills: AgentSkillUseCases
     scheduled_agents: ScheduledAgentUseCases
+    google: GoogleWorkspaceUseCases | None

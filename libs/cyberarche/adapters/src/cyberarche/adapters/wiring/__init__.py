@@ -41,6 +41,10 @@ from cyberarche.application.ports.agent_memory import (
     AgentMemoryRepository,
     CustomInstructionsRepository,
 )
+from cyberarche.application.ports.google_workspace import (
+    GoogleConnectionRepository,
+    GoogleWorkspacePort,
+)
 from cyberarche.application.ports.scheduled_agents import ScheduledAgentRepository
 from cyberarche.application.ports.skills import AgentSkillRepository
 from cyberarche.application.ports.templates import TemplateRepository
@@ -75,6 +79,7 @@ from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
@@ -134,6 +139,11 @@ class WiringConfig:
     # Web search + YouTube tools (agent web_media tools) via the DAO backend.
     # Empty URL = disabled; called with the caller's own forwarded access token.
     dao_base_url: str = ""
+    # Google Workspace connector (Gmail/Calendar/Docs). Empty client id/secret =
+    # disabled (the connector is not offered).
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
     connector_secret_key: str = ""
     # Shared infrastructure for multi-replica deployments (12.5/12.6):
     # with redis_url set, live realtime fanout and the job queue go through
@@ -213,11 +223,20 @@ def _build_use_cases(
     agent_memories: AgentMemoryRepository,
     agent_skills: AgentSkillRepository,
     scheduled_agents: ScheduledAgentRepository,
+    google_connections: GoogleConnectionRepository,
+    google_port: GoogleWorkspacePort | None,
     model_name: str,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships, teamspaces)
+    google = (
+        GoogleWorkspaceUseCases(
+            google_connections, google_port, secret_box, access, clock, ids
+        )
+        if google_port is not None
+        else None
+    )
     persona = AgentPersonaUseCases(
         custom_instructions, agent_memories, access, clock, ids
     )
@@ -252,6 +271,7 @@ def _build_use_cases(
         meetings=meetings,
         web_media=web_media,
         persona=persona,
+        google=google,
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
@@ -272,6 +292,7 @@ def _build_use_cases(
             clock,
             ids,
         ),
+        google=google,
         persona=persona,
         sharing=SharingUseCases(
             documents,
@@ -384,6 +405,21 @@ def _build_web_media(config: WiringConfig, shared_http):
     return DaoBackendWebMediaAdapter(config.dao_base_url, shared_http())
 
 
+def _build_google_port(config: WiringConfig, shared_http):
+    """Google Workspace adapter, or None when OAuth credentials are unconfigured
+    (the connector is simply not offered)."""
+    if not config.google_client_id or not config.google_client_secret:
+        return None
+    from cyberarche.adapters.outbound.google.client import GoogleWorkspaceClient
+
+    return GoogleWorkspaceClient(
+        client_id=config.google_client_id,
+        client_secret=config.google_client_secret,
+        redirect_uri=config.google_redirect_uri,
+        http=shared_http(),
+    )
+
+
 @dataclass(slots=True)
 class _Repositories:
     workspaces: WorkspaceRepository
@@ -407,6 +443,7 @@ class _Repositories:
     agent_memories: AgentMemoryRepository
     agent_skills: AgentSkillRepository
     scheduled_agents: ScheduledAgentRepository
+    google_connections: GoogleConnectionRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -458,6 +495,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.scheduled_agents import (
         PostgresScheduledAgentRepository,
     )
+    from cyberarche.adapters.outbound.postgres.google_connections import (
+        PostgresGoogleConnectionRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -484,6 +524,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         agent_memories=PostgresAgentMemoryRepository(pool),
         agent_skills=PostgresAgentSkillRepository(pool),
         scheduled_agents=PostgresScheduledAgentRepository(pool),
+        google_connections=PostgresGoogleConnectionRepository(pool),
     )
 
 
@@ -512,6 +553,7 @@ def _memory_repositories() -> _Repositories:
         agent_memories=fakes.InMemoryAgentMemoryRepository(),
         agent_skills=fakes.InMemoryAgentSkillRepository(),
         scheduled_agents=fakes.InMemoryScheduledAgentRepository(),
+        google_connections=fakes.InMemoryGoogleConnectionRepository(),
     )
 
 
@@ -609,6 +651,7 @@ async def build_container(
     code: CodeExecutionPort | None = None,
     meetings: MeetingsPort | None = None,
     web_media: WebMediaPort | None = None,
+    google_port: GoogleWorkspacePort | None = None,
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
@@ -670,6 +713,9 @@ async def build_container(
 
     if web_media is None:
         web_media = _build_web_media(config, shared_http)
+
+    if google_port is None:
+        google_port = _build_google_port(config, shared_http)
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (
@@ -768,6 +814,8 @@ async def build_container(
             repos.agent_memories,
             repos.agent_skills,
             repos.scheduled_agents,
+            repos.google_connections,
+            google_port,
             config.llm_model,
             clock,
             ids,

@@ -38,6 +38,11 @@ Notion/Confluence alternative built around three differentiators:
   Per-`project_slug` isolated LightRAG workspaces. We ingest documents
   (`/documents/upload`), poll tasks, and query (`/queries/sync|async`, modes
   local/global/hybrid/naive/mix). Bearer-token authenticated.
+- **Google Workspace** — per-user OAuth2 (Gmail/Calendar/Docs+Drive). The ONLY
+  first-party SaaS connector; every other SaaS (Slack, Jira, …) is served by the
+  generic external-MCP connectors. Tokens are stored envelope-encrypted per
+  user+workspace and refreshed automatically. Enabled only when
+  `google_client_id`/`google_client_secret` are configured.
 - **DAO backend** — `https://dao.backend.coolify.cyberdynecorp.ai`
   Web search (`/api/v1/search`) and YouTube transcript/playlist
   (`/api/v1/youtube/*`) power the agent's `web_search` / `youtube_transcript` /
