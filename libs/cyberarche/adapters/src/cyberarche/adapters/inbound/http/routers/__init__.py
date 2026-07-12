@@ -6,6 +6,9 @@ from cyberarche.adapters.inbound.http.routers.agent import router as agent_route
 from cyberarche.adapters.inbound.http.routers.agent_persona import (
     router as agent_persona_router,
 )
+from cyberarche.adapters.inbound.http.routers.agent_skills import (
+    router as agent_skills_router,
+)
 from cyberarche.adapters.inbound.http.routers.api_keys import router as api_keys_router
 from cyberarche.adapters.inbound.http.routers.auth import router as auth_router
 from cyberarche.adapters.inbound.http.routers.connectors import (
@@ -37,6 +40,7 @@ all_routers = [
     webhook_router,
     agent_router,
     agent_persona_router,
+    agent_skills_router,
     connectors_router,
     sharing_router,
     teamspaces_router,

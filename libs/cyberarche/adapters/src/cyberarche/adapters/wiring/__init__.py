@@ -41,6 +41,7 @@ from cyberarche.application.ports.agent_memory import (
     AgentMemoryRepository,
     CustomInstructionsRepository,
 )
+from cyberarche.application.ports.skills import AgentSkillRepository
 from cyberarche.application.ports.templates import TemplateRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
@@ -73,6 +74,7 @@ from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
@@ -207,6 +209,7 @@ def _build_use_cases(
     templates: TemplateRepository,
     custom_instructions: CustomInstructionsRepository,
     agent_memories: AgentMemoryRepository,
+    agent_skills: AgentSkillRepository,
     model_name: str,
     clock,
     ids,
@@ -282,6 +285,7 @@ def _build_use_cases(
             clock=clock,
         ),
         notifications=NotificationUseCases(notifications),
+        skills=AgentSkillUseCases(agent_skills, access, clock, ids),
         templates=TemplateUseCases(
             templates,
             document_use_cases,
@@ -388,6 +392,7 @@ class _Repositories:
     templates: TemplateRepository
     custom_instructions: CustomInstructionsRepository
     agent_memories: AgentMemoryRepository
+    agent_skills: AgentSkillRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -433,6 +438,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         PostgresAgentMemoryRepository,
         PostgresCustomInstructionsRepository,
     )
+    from cyberarche.adapters.outbound.postgres.skills import (
+        PostgresAgentSkillRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -457,6 +465,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         templates=PostgresTemplateRepository(pool),
         custom_instructions=PostgresCustomInstructionsRepository(pool),
         agent_memories=PostgresAgentMemoryRepository(pool),
+        agent_skills=PostgresAgentSkillRepository(pool),
     )
 
 
@@ -483,6 +492,7 @@ def _memory_repositories() -> _Repositories:
         templates=fakes.InMemoryTemplateRepository(),
         custom_instructions=fakes.InMemoryCustomInstructionsRepository(),
         agent_memories=fakes.InMemoryAgentMemoryRepository(),
+        agent_skills=fakes.InMemoryAgentSkillRepository(),
     )
 
 
@@ -737,6 +747,7 @@ async def build_container(
             repos.templates,
             repos.custom_instructions,
             repos.agent_memories,
+            repos.agent_skills,
             config.llm_model,
             clock,
             ids,

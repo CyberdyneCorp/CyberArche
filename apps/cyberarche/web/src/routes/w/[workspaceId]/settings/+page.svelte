@@ -6,11 +6,19 @@
 		createAgentPersona,
 		type AgentPersonaVM
 	} from '$lib/viewmodels/agentPersona.svelte';
+	import {
+		createAgentSkills,
+		type AgentSkillsVM
+	} from '$lib/viewmodels/agentSkills.svelte';
 
 	const workspaceId = $derived(page.params.workspaceId!);
 
 	let persona = $state<AgentPersonaVM | null>(null);
 	let newMemory = $state('');
+
+	let skills = $state<AgentSkillsVM | null>(null);
+	let skillName = $state('');
+	let skillInstruction = $state('');
 
 	let connectors = $state<ConnectorsVM | null>(null);
 	let name = $state('');
@@ -33,11 +41,22 @@
 		const personaVm = createAgentPersona(workspaceId);
 		persona = personaVm;
 		personaVm.load();
+		const skillsVm = createAgentSkills(workspaceId);
+		skills = skillsVm;
+		skillsVm.load();
 	});
 
 	async function addMemory(event: SubmitEvent) {
 		event.preventDefault();
 		if (persona && (await persona.addMemory(newMemory))) newMemory = '';
+	}
+
+	async function addSkill(event: SubmitEvent) {
+		event.preventDefault();
+		if (skills && (await skills.create(skillName.trim(), skillInstruction.trim()))) {
+			skillName = '';
+			skillInstruction = '';
+		}
 	}
 
 	async function createKey(event: SubmitEvent) {
@@ -212,6 +231,46 @@
 		</section>
 	{/if}
 
+	{#if skills}
+		<section class="card">
+			<h2>Agent skills</h2>
+			<p class="hint">
+				Save reusable prompts. Use <code>{'{variable}'}</code> placeholders (e.g.
+				“Summarize for <code>{'{audience}'}</code>”) — you’ll be asked to fill them in
+				when you run the skill from the agent panel.
+			</p>
+			<form class="skill-add" onsubmit={addSkill}>
+				<input placeholder="Skill name (e.g. Weekly status)" bind:value={skillName} />
+				<textarea
+					rows="2"
+					placeholder="Instruction, with {'{variables}'} — e.g. Summarize this doc for {'{audience}'}."
+					bind:value={skillInstruction}
+				></textarea>
+				<button
+					type="submit"
+					disabled={skills.busy || !skillName.trim() || !skillInstruction.trim()}
+					>Save skill</button
+				>
+			</form>
+			{#each skills.skills as skill (skill.id)}
+				<div class="mem">
+					<span class="mem-text"><strong>{skill.name}</strong> — {skill.instruction}</span>
+					<button
+						class="mem-remove"
+						title="Delete skill"
+						aria-label="Delete skill"
+						onclick={() => skills?.remove(skill.id)}>×</button
+					>
+				</div>
+			{:else}
+				<p class="none">No skills yet.</p>
+			{/each}
+			{#if skills.error}
+				<p class="error" role="alert">{skills.error}</p>
+			{/if}
+		</section>
+	{/if}
+
 	{#if connectors}
 		<section class="card">
 			<h2>Attach an MCP server</h2>
@@ -378,6 +437,33 @@
 	}
 	.mem-remove:hover {
 		color: var(--rose);
+	}
+	.skill-add {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-bottom: 12px;
+	}
+	.skill-add input,
+	.skill-add textarea {
+		width: 100%;
+		padding: 8px 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+		background: var(--bg1);
+		color: var(--tx);
+		font: inherit;
+		resize: vertical;
+	}
+	.skill-add button {
+		align-self: flex-start;
+		padding: 5px 14px;
+		border-radius: var(--r-control);
+		background: var(--acc);
+		color: #fff;
+	}
+	.skill-add button:disabled {
+		opacity: 0.5;
 	}
 	.head h1 {
 		margin: 0;

@@ -17,6 +17,7 @@ from cyberarche.application.testing.fakes import (
     FixedClock,
     InMemoryAgentMemoryRepository,
     InMemoryAgentRunRepository,
+    InMemoryAgentSkillRepository,
     InMemoryApiKeyRepository,
     InMemoryCustomInstructionsRepository,
     InMemoryBlobStorage,
@@ -49,6 +50,7 @@ from cyberarche.application.testing.fakes import (
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
@@ -260,6 +262,7 @@ def use_cases(
             persona=persona,
         ),
         persona=persona,
+        skills=AgentSkillUseCases(InMemoryAgentSkillRepository(), access, clock, ids),
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
         teamspaces=TeamspaceUseCases(

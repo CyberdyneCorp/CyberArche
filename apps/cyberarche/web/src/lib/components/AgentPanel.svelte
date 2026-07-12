@@ -3,6 +3,7 @@
 	import type { AgentToolCall } from '$lib/api/agent';
 	import type { AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import type { ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
+	import { createAgentSkills, type AgentSkillsVM } from '$lib/viewmodels/agentSkills.svelte';
 
 	const TOOL_ICON = { mcp: '🔌', editing: '✎', builtin: '🛠' } as const;
 
@@ -47,6 +48,22 @@
 	let prompt = $state('');
 	let showRuns = $state(false);
 	let dragOver = $state(false);
+
+	// Saved skills: reusable prompts. Picking one fills the input (placeholders
+	// left as {var} for the user to complete before sending).
+	let skills = $state<AgentSkillsVM | null>(null);
+	let skillsOpen = $state(false);
+	$effect(() => {
+		if (workspaceId && !skills) {
+			const vm = createAgentSkills(workspaceId);
+			skills = vm;
+			vm.load();
+		}
+	});
+	function useSkill(instruction: string) {
+		prompt = instruction;
+		skillsOpen = false;
+	}
 	// Reasoning toggle: off = fast/cheap, on = deeper thinking (reasoning models).
 	let reasoning = $state(false);
 
@@ -121,6 +138,27 @@
 			Ingest a file
 			<input type="file" accept=".pdf,.csv,.xlsx,.md,.txt" onchange={pickFile} hidden />
 		</label>
+		{#if skills && skills.skills.length > 0}
+			<div class="skills-wrap">
+				<button class="chip-btn" onclick={() => (skillsOpen = !skillsOpen)}
+					>Skills ▾</button
+				>
+				{#if skillsOpen}
+					<div class="skills-menu" role="menu">
+						{#each skills.skills as skill (skill.id)}
+							<button
+								class="skill-item"
+								role="menuitem"
+								title={skill.description || skill.instruction}
+								onclick={() => useSkill(skill.instruction)}
+							>
+								{skill.name}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
 	{#if showRuns}
@@ -337,6 +375,35 @@
 	.chip-btn:hover {
 		background: var(--aibg);
 		border-color: var(--ai);
+	}
+	.skills-wrap {
+		position: relative;
+	}
+	.skills-menu {
+		position: absolute;
+		z-index: 20;
+		top: calc(100% + 4px);
+		left: 0;
+		min-width: 180px;
+		max-height: 240px;
+		overflow-y: auto;
+		padding: 4px;
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+		display: flex;
+		flex-direction: column;
+	}
+	.skill-item {
+		text-align: left;
+		padding: 6px 9px;
+		border-radius: 6px;
+		font-size: 12px;
+		color: var(--tx);
+	}
+	.skill-item:hover {
+		background: var(--aibg);
 	}
 	.runs {
 		border-top: 1px solid var(--line);

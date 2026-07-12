@@ -453,6 +453,39 @@ class InMemoryTemplateRepository:
             del self._items[str(template_id)]
 
 
+class InMemoryAgentSkillRepository:
+    """AgentSkillRepository fake."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, object] = {}
+
+    async def add(self, skill) -> None:
+        self._items[str(skill.id)] = skill
+
+    async def list_for_workspace(self, tenant_id, workspace_id):
+        mine = [
+            s
+            for s in self._items.values()
+            if str(s.tenant_id) == str(tenant_id)
+            and str(s.workspace_id) == str(workspace_id)
+        ]
+        mine.sort(key=lambda s: s.created_at, reverse=True)
+        return mine
+
+    async def get(self, tenant_id, skill_id):
+        s = self._items.get(str(skill_id))
+        return s if s and str(s.tenant_id) == str(tenant_id) else None
+
+    async def update(self, skill) -> None:
+        if str(skill.id) in self._items:
+            self._items[str(skill.id)] = skill
+
+    async def delete(self, tenant_id, skill_id) -> None:
+        s = self._items.get(str(skill_id))
+        if s and str(s.tenant_id) == str(tenant_id):
+            del self._items[str(skill_id)]
+
+
 class InMemoryCustomInstructionsRepository:
     """CustomInstructionsRepository fake, keyed by (tenant, workspace, user)."""
 
