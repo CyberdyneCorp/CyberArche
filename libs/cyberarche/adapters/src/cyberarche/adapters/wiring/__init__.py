@@ -37,6 +37,10 @@ from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
 from cyberarche.application.ports.web_media import WebMediaPort
 from cyberarche.application.ports.notifications import NotificationRepository
+from cyberarche.application.ports.agent_memory import (
+    AgentMemoryRepository,
+    CustomInstructionsRepository,
+)
 from cyberarche.application.ports.templates import TemplateRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
@@ -68,6 +72,7 @@ from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
+from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
@@ -200,11 +205,16 @@ def _build_use_cases(
     inferred_links: InferredLinkRepository,
     notifications: NotificationRepository,
     templates: TemplateRepository,
+    custom_instructions: CustomInstructionsRepository,
+    agent_memories: AgentMemoryRepository,
     model_name: str,
     clock,
     ids,
 ) -> UseCases:
     access = AccessControl(memberships, teamspaces)
+    persona = AgentPersonaUseCases(
+        custom_instructions, agent_memories, access, clock, ids
+    )
     realtime = RealtimeUseCases(
         documents, update_log, crdt_engine, access, snapshots, clock, ids, peer_bus
     )
@@ -244,7 +254,9 @@ def _build_use_cases(
             code=code,
             meetings=meetings,
             web_media=web_media,
+            persona=persona,
         ),
+        persona=persona,
         sharing=SharingUseCases(
             documents,
             memberships,
@@ -374,6 +386,8 @@ class _Repositories:
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
     templates: TemplateRepository
+    custom_instructions: CustomInstructionsRepository
+    agent_memories: AgentMemoryRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -415,6 +429,10 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.templates import (
         PostgresTemplateRepository,
     )
+    from cyberarche.adapters.outbound.postgres.agent_memory import (
+        PostgresAgentMemoryRepository,
+        PostgresCustomInstructionsRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -437,6 +455,8 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
         templates=PostgresTemplateRepository(pool),
+        custom_instructions=PostgresCustomInstructionsRepository(pool),
+        agent_memories=PostgresAgentMemoryRepository(pool),
     )
 
 
@@ -461,6 +481,8 @@ def _memory_repositories() -> _Repositories:
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
         templates=fakes.InMemoryTemplateRepository(),
+        custom_instructions=fakes.InMemoryCustomInstructionsRepository(),
+        agent_memories=fakes.InMemoryAgentMemoryRepository(),
     )
 
 
@@ -713,6 +735,8 @@ async def build_container(
             repos.inferred_links,
             repos.notifications,
             repos.templates,
+            repos.custom_instructions,
+            repos.agent_memories,
             config.llm_model,
             clock,
             ids,

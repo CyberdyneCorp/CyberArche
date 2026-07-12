@@ -453,6 +453,87 @@ class InMemoryTemplateRepository:
             del self._items[str(template_id)]
 
 
+class InMemoryCustomInstructionsRepository:
+    """CustomInstructionsRepository fake, keyed by (tenant, workspace, user)."""
+
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str, str | None], object] = {}
+
+    @staticmethod
+    def _key(tenant_id, workspace_id, user_id):
+        return (str(tenant_id), str(workspace_id), str(user_id) if user_id else None)
+
+    async def get(self, tenant_id, workspace_id, user_id):
+        return self._items.get(self._key(tenant_id, workspace_id, user_id))
+
+    async def upsert(self, record) -> None:
+        self._items[self._key(record.tenant_id, record.workspace_id, record.user_id)] = (
+            record
+        )
+
+    async def clear(self, tenant_id, workspace_id, user_id) -> None:
+        self._items.pop(self._key(tenant_id, workspace_id, user_id), None)
+
+
+def _memory_tokens(query: str) -> list[str]:
+    seen: dict[str, None] = {}
+    for raw in query.lower().split():
+        token = "".join(ch for ch in raw if ch.isalnum())
+        if len(token) >= 3:
+            seen.setdefault(token, None)
+    return list(seen)
+
+
+class InMemoryAgentMemoryRepository:
+    """AgentMemoryRepository fake: recency + keyword recall, tenant-scoped."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, object] = {}
+
+    def _scoped(self, tenant_id, workspace_id):
+        mine = [
+            m
+            for m in self._items.values()
+            if str(m.tenant_id) == str(tenant_id)
+            and str(m.workspace_id) == str(workspace_id)
+        ]
+        mine.sort(key=lambda m: m.created_at, reverse=True)
+        return mine
+
+    async def add(self, memory) -> None:
+        self._items[str(memory.id)] = memory
+
+    async def list_for_workspace(self, tenant_id, workspace_id):
+        return self._scoped(tenant_id, workspace_id)
+
+    async def recent(self, tenant_id, workspace_id, limit):
+        return self._scoped(tenant_id, workspace_id)[: max(0, limit)]
+
+    async def relevant(self, tenant_id, workspace_id, query, limit):
+        tokens = _memory_tokens(query)
+        if not tokens:
+            return []
+        hits = [
+            m
+            for m in self._scoped(tenant_id, workspace_id)
+            if any(token in m.text.lower() for token in tokens)
+        ]
+        return hits[: max(0, limit)]
+
+    async def get(self, tenant_id, memory_id):
+        m = self._items.get(str(memory_id))
+        return m if m and str(m.tenant_id) == str(tenant_id) else None
+
+    async def update(self, memory) -> None:
+        if str(memory.id) in self._items:
+            self._items[str(memory.id)] = memory
+
+    async def delete(self, tenant_id, memory_id) -> None:
+        m = self._items.get(str(memory_id))
+        if m and str(m.tenant_id) == str(tenant_id):
+            del self._items[str(memory_id)]
+
+
 class InMemoryNotificationRepository:
     """NotificationRepository fake: an in-process per-user inbox."""
 

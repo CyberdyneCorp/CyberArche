@@ -15,8 +15,10 @@ from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.application.testing.fakes import (
     FakeMcpClient,
     FixedClock,
+    InMemoryAgentMemoryRepository,
     InMemoryAgentRunRepository,
     InMemoryApiKeyRepository,
+    InMemoryCustomInstructionsRepository,
     InMemoryBlobStorage,
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
@@ -46,6 +48,7 @@ from cyberarche.application.testing.fakes import (
 )
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
@@ -220,6 +223,13 @@ def use_cases(
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspace_repo, folder_repo
     )
+    persona = AgentPersonaUseCases(
+        InMemoryCustomInstructionsRepository(),
+        InMemoryAgentMemoryRepository(),
+        access,
+        clock,
+        ids,
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=document_use_cases,
@@ -247,7 +257,9 @@ def use_cases(
             code=code_exec,
             meetings=meetings,
             web_media=web_media,
+            persona=persona,
         ),
+        persona=persona,
         sharing=sharing,
         api_keys=ApiKeyUseCases(InMemoryApiKeyRepository(), clock, ids),
         teamspaces=TeamspaceUseCases(

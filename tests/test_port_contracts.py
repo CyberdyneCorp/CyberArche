@@ -456,7 +456,7 @@ async def test_folder_repository_contract(adapters):
     from cyberarche.domain.folders import Folder
     from cyberarche.domain.ids import FolderId, TeamspaceId
 
-    ws_repo, doc_repo = adapters["workspaces"], adapters["documents"]
+    ws_repo = adapters["workspaces"]
     repo = adapters["folders"]
     await ws_repo.add(workspace())
 

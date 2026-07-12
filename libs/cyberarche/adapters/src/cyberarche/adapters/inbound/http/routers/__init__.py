@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from cyberarche.adapters.inbound.http.routers.agent import router as agent_router
+from cyberarche.adapters.inbound.http.routers.agent_persona import (
+    router as agent_persona_router,
+)
 from cyberarche.adapters.inbound.http.routers.api_keys import router as api_keys_router
 from cyberarche.adapters.inbound.http.routers.auth import router as auth_router
 from cyberarche.adapters.inbound.http.routers.connectors import (
@@ -33,6 +36,7 @@ all_routers = [
     knowledge_router,
     webhook_router,
     agent_router,
+    agent_persona_router,
     connectors_router,
     sharing_router,
     teamspaces_router,

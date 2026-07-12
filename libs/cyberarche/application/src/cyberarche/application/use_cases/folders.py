@@ -10,7 +10,7 @@ from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.folders import FolderRepository
 from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
-from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
+from cyberarche.domain.errors import NotAuthorized, NotFound
 from cyberarche.domain.folders import Folder
 from cyberarche.domain.ids import FolderId, TeamspaceId, WorkspaceId
 from cyberarche.domain.memberships import Role, role_at_least, strongest

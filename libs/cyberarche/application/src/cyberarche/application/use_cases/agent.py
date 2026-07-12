@@ -58,7 +58,8 @@ from cyberarche.domain.blocks import validate_block_type
 from cyberarche.domain.connectors import split_qualified
 from cyberarche.domain.ids import WorkspaceId
 from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
-from cyberarche.domain.ids import AgentRunId, ConnectorId, DocumentId
+from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.domain.ids import AgentMemoryId, AgentRunId, ConnectorId, DocumentId
 from cyberarche.domain.memberships import Role
 
 MAX_TOOL_ROUNDS = 8
@@ -169,6 +170,7 @@ class AgentUseCases:
         code: CodeExecutionPort | None = None,
         meetings: MeetingsPort | None = None,
         web_media: WebMediaPort | None = None,
+        persona: AgentPersonaUseCases | None = None,
     ) -> None:
         self._llm = llm
         self._images = images
@@ -176,6 +178,7 @@ class AgentUseCases:
         self._code = code
         self._meetings = meetings
         self._web_media = web_media
+        self._persona = persona
         self._documents = documents
         self._realtime = realtime
         self._knowledge = knowledge
@@ -212,7 +215,13 @@ class AgentUseCases:
         plot' resolve against the conversation, not just the document.
         """
         document, context = await self._document_context(caller, document_id)
-        messages = [LLMMessage(role="system", content=_SYSTEM_PROMPT)]
+        system_prompt = _SYSTEM_PROMPT
+        if self._persona is not None:
+            # Prepend the workspace's custom instructions and recalled memory.
+            system_prompt += await self._persona.build_context(
+                caller, document.workspace_id, instruction
+            )
+        messages = [LLMMessage(role="system", content=system_prompt)]
         for role, content in (history or [])[-_MAX_HISTORY_TURNS:]:
             text = (content or "").strip()
             if not text:
@@ -496,6 +505,8 @@ class AgentUseCases:
         # (like meetings) they only appear on the authenticated request path.
         if self._web_media is not None and access_token:
             tools = tools + _web_media_tool_specs()
+        if self._persona is not None:
+            tools = tools + _persona_tool_specs()
         if self._connectors is not None:
             tools = tools + await self._connectors.tools(
                 caller,
@@ -520,6 +531,8 @@ class AgentUseCases:
             return await self._run_meetings_tool(call, access_token)
         if call.name in _WEB_MEDIA_TOOL_NAMES:
             return await self._run_web_media_tool(call, access_token)
+        if call.name in _PERSONA_TOOL_NAMES:
+            return await self._run_persona_tool(caller, workspace_id, call)
         if call.name == "generate_image":
             return await self._run_generate_image(
                 caller, workspace_id, document_id, call.arguments
@@ -721,6 +734,35 @@ class AgentUseCases:
         except Exception as error:
             return f"error: {_web_media_error(error)}"
         return f"error: unknown web/media tool {call.name}"
+
+    async def _run_persona_tool(
+        self, caller: CallerContext, workspace_id: WorkspaceId, call: ToolCall
+    ) -> str:
+        """Durable memory tools (remember / list / forget), workspace-scoped."""
+        if self._persona is None:
+            return "error: agent memory is not configured"
+        args = call.arguments or {}
+        try:
+            if call.name == "remember":
+                note = str(args.get("note", "")).strip()
+                if not note:
+                    return "error: note required"
+                memory = await self._persona.add_memory(caller, workspace_id, note)
+                return f"remembered (id={memory.id})"
+            if call.name == "list_memories":
+                items = await self._persona.list_memories(caller, workspace_id)
+                return _render_memories(items)
+            if call.name == "forget":
+                memory_id = str(args.get("memory_id", "")).strip()
+                if not memory_id:
+                    return "error: memory_id required"
+                await self._persona.delete_memory(
+                    caller, workspace_id, AgentMemoryId(memory_id)
+                )
+                return f"forgot memory {memory_id}"
+        except Exception as error:
+            return f"error: {error}"
+        return f"error: unknown memory tool {call.name}"
 
     async def _run_python(
         self,
@@ -1173,6 +1215,65 @@ def _render_playlist(videos: list[PlaylistVideo]) -> str:
         f"{i}. {v.title or v.video_id} — {v.url}" for i, v in enumerate(videos, 1)
     ]
     return "playlist videos:\n" + "\n".join(lines)
+
+
+_PERSONA_TOOL_NAMES = {"remember", "list_memories", "forget"}
+
+
+def _persona_tool_specs() -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="remember",
+            description=(
+                "Save a durable fact or preference about this workspace so you "
+                "recall it in future conversations (e.g. 'the team writes in "
+                "Portuguese', 'we deploy on Coolify'). Store lasting facts, not "
+                "one-off details — and NEVER store secrets, tokens, passwords, "
+                "or credentials."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The durable fact/preference to remember.",
+                    }
+                },
+                "required": ["note"],
+            },
+        ),
+        ToolSpec(
+            name="list_memories",
+            description=(
+                "List the durable memories saved for this workspace, with their "
+                "ids. Use before forget to find the id to remove."
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+        ),
+        ToolSpec(
+            name="forget",
+            description=(
+                "Delete a saved workspace memory by its id (from list_memories)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "The memory id to delete.",
+                    }
+                },
+                "required": ["memory_id"],
+            },
+        ),
+    ]
+
+
+def _render_memories(items: list) -> str:
+    if not items:
+        return "no memories saved for this workspace"
+    lines = [f"- id={m.id} | {m.text}" for m in items]
+    return "workspace memories:\n" + "\n".join(lines)
 
 
 def _image_tool_spec() -> ToolSpec:

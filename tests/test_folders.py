@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from cyberarche.application.use_cases import UseCases
-from cyberarche.domain.errors import NotAuthorized, NotFound
+from cyberarche.domain.errors import NotAuthorized
 from cyberarche.domain.memberships import Role, WorkspaceMembership
 from tests.conftest import caller
 
