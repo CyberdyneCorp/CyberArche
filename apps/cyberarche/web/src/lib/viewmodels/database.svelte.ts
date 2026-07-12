@@ -28,6 +28,8 @@ export interface Row {
 	id: string;
 	order: number;
 	values: Record<string, CellValue>;
+	/** The document this row opens as a page (rows-as-pages), lazily created. */
+	pageId?: string;
 }
 
 export const OPTION_COLORS = [
@@ -265,6 +267,11 @@ export function createDatabase(
 			const row = ymap.get(rowId) as Row | undefined;
 			if (!row) return;
 			putRow({ ...row, values: { ...row.values, [propertyId]: value } });
+		},
+		/** Link a row to the document that holds its page content (rows-as-pages). */
+		setRowPage(rowId: string, pageId: string): void {
+			const row = ymap.get(rowId) as Row | undefined;
+			if (row) putRow({ ...row, pageId });
 		},
 		/** Board: rows grouped by a select property's option (plus the "no value"
 		 * bucket keyed ''). */

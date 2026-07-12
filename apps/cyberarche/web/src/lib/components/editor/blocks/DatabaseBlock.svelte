@@ -2,6 +2,9 @@
 	/** Database block (database-block spec): a schema of typed properties + rows,
 	 * shown as an editable Table or a kanban Board grouped by a select property.
 	 * State lives in the document CRDT via the database view-model. */
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { createDocument, getDocument } from '$lib/api/documents';
 	import type { BlockComponentProps } from '$lib/editor/registry';
 	import type { EditorVM } from '$lib/viewmodels/editor.svelte';
 	import {
@@ -26,7 +29,7 @@
 	});
 	$effect(() => () => db.destroy());
 
-	let view = $state<'table' | 'board'>('table');
+	let view = $state<'table' | 'board' | 'calendar' | 'gallery'>('table');
 	let sort = $state<{ id: string; dir: 'asc' | 'desc' } | null>(null);
 	let optionsFor = $state<string | null>(null); // property id whose options popover is open
 	let newOption = $state('');
@@ -69,6 +72,76 @@
 		return groups;
 	});
 
+	// ---- calendar ----
+	const dateProps = $derived(db.properties.filter((p) => p.type === 'date'));
+	let calProp = $state('');
+	$effect(() => {
+		if (!calProp && dateProps.length) calProp = dateProps[0].id;
+	});
+	let calYear = $state(new Date().getFullYear());
+	let calMonth = $state(new Date().getMonth());
+	const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+	const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+	function iso(d: Date): string {
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
+	function shiftMonth(delta: number): void {
+		const d = new Date(calYear, calMonth + delta, 1);
+		calYear = d.getFullYear();
+		calMonth = d.getMonth();
+	}
+	const monthGrid = $derived.by(() => {
+		const byDay = new Map<string, Row[]>();
+		if (calProp)
+			for (const row of filteredRows) {
+				const v = row.values[calProp] as string;
+				if (v) (byDay.get(v) ?? byDay.set(v, []).get(v)!).push(row);
+			}
+		const first = new Date(calYear, calMonth, 1);
+		const cur = new Date(first);
+		cur.setDate(1 - first.getDay());
+		const weeks: { iso: string; day: number; inMonth: boolean; rows: Row[] }[][] = [];
+		for (let w = 0; w < 6; w++) {
+			const days = [];
+			for (let d = 0; d < 7; d++) {
+				const key = iso(cur);
+				days.push({ iso: key, day: cur.getDate(), inMonth: cur.getMonth() === calMonth, rows: byDay.get(key) ?? [] });
+				cur.setDate(cur.getDate() + 1);
+			}
+			weeks.push(days);
+		}
+		return weeks;
+	});
+
+	// ---- rows as pages ----
+	const workspaceId = $derived(page.params.workspaceId!);
+	const parentDocId = $derived(page.params.documentId!);
+	let parentTeamspace: string | null | undefined = undefined;
+	async function resolveTeamspace(): Promise<string | null> {
+		if (parentTeamspace === undefined) {
+			try {
+				parentTeamspace = (await getDocument(parentDocId)).teamspace_id ?? null;
+			} catch {
+				parentTeamspace = null;
+			}
+		}
+		return parentTeamspace;
+	}
+	async function openRowPage(row: Row): Promise<void> {
+		let pid = row.pageId;
+		if (!pid) {
+			const doc = await createDocument(
+				workspaceId,
+				cardTitle(row) || 'Untitled',
+				undefined,
+				(await resolveTeamspace()) ?? undefined
+			);
+			pid = doc.id;
+			db.setRowPage(row.id, pid);
+		}
+		await goto(`/w/${workspaceId}/d/${pid}`);
+	}
+
 	function toggleSort(id: string): void {
 		if (sort?.id !== id) sort = { id, dir: 'asc' };
 		else if (sort.dir === 'asc') sort = { id, dir: 'desc' };
@@ -104,12 +177,22 @@
 		<div class="views">
 			<button class:active={view === 'table'} onclick={() => (view = 'table')}>▦ Table</button>
 			<button class:active={view === 'board'} onclick={() => (view = 'board')} disabled={!selectProps.length}>▧ Board</button>
+			<button class:active={view === 'calendar'} onclick={() => (view = 'calendar')} disabled={!dateProps.length}>📅 Calendar</button>
+			<button class:active={view === 'gallery'} onclick={() => (view = 'gallery')}>▦▦ Gallery</button>
 		</div>
 		{#if view === 'board' && selectProps.length}
 			<label class="group-by">
 				Group by
 				<select bind:value={boardProp}>
 					{#each selectProps as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+				</select>
+			</label>
+		{/if}
+		{#if view === 'calendar' && dateProps.length}
+			<label class="group-by">
+				By
+				<select bind:value={calProp}>
+					{#each dateProps as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
 				</select>
 			</label>
 		{/if}
@@ -204,6 +287,7 @@
 					{#each displayRows as row (row.id)}
 						<tr>
 							<td class="gutter">
+								<button class="row-open" title="Open as page" onclick={() => openRowPage(row)}>↗</button>
 								{#if !ro}<button class="row-del" title="Delete row" onclick={() => db.removeRow(row.id)}>×</button>{/if}
 							</td>
 							{#each db.properties as p (p.id)}
@@ -233,7 +317,7 @@
 		{#if !ro}
 			<button class="add-row" data-testid="db-add-row" onclick={() => db.addRow()}>＋ New row</button>
 		{/if}
-	{:else if boardProperty}
+	{:else if view === 'board' && boardProperty}
 		<div class="board">
 			{#each [...(boardProperty.options ?? []), { id: '', name: 'No ' + boardProperty.name, color: 'var(--tx3)' }] as col (col.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -241,13 +325,60 @@
 					<div class="col-head"><span class="dot" style={`background:${col.color}`}></span>{col.name}<span class="count">{boardGroups.get(col.id)?.length ?? 0}</span></div>
 					{#each boardGroups.get(col.id) ?? [] as row (row.id)}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div class="card" draggable={!ro} ondragstart={() => (dragRow = row.id)} data-testid="db-card">{cardTitle(row)}</div>
+						<div class="card" draggable={!ro} ondragstart={() => (dragRow = row.id)} data-testid="db-card">
+							<span class="card-title">{cardTitle(row)}</span>
+							<button class="open" title="Open as page" onclick={() => openRowPage(row)}>↗</button>
+						</div>
 					{/each}
 					{#if !ro}
 						<button class="add-card" onclick={() => db.addRow(col.id ? { [boardProp]: col.id } : {})}>＋ Add</button>
 					{/if}
 				</div>
 			{/each}
+		</div>
+	{:else if view === 'calendar'}
+		<div class="cal">
+			<div class="cal-head">
+				<button class="mini" onclick={() => shiftMonth(-1)}>‹</button>
+				<span class="cal-month">{MONTHS[calMonth]} {calYear}</span>
+				<button class="mini" onclick={() => shiftMonth(1)}>›</button>
+			</div>
+			<div class="cal-grid">
+				{#each DOW as d (d)}<div class="cal-dow">{d}</div>{/each}
+				{#each monthGrid as week}
+					{#each week as cell (cell.iso)}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div class="cal-cell" class:dim={!cell.inMonth}>
+							<div class="cal-daynum">
+								{cell.day}
+								{#if !ro}<button class="cal-add" title="Add on this day" onclick={() => calProp && db.addRow({ [calProp]: cell.iso })}>＋</button>{/if}
+							</div>
+							{#each cell.rows as row (row.id)}
+								<button class="cal-event" title={cardTitle(row)} onclick={() => openRowPage(row)}>{cardTitle(row)}</button>
+							{/each}
+						</div>
+					{/each}
+				{/each}
+			</div>
+		</div>
+	{:else if view === 'gallery'}
+		<div class="gallery">
+			{#each displayRows as row (row.id)}
+				<div class="g-card">
+					<div class="g-title">{cardTitle(row)}</div>
+					<dl class="g-props">
+						{#each db.properties.filter((p) => p.id !== titleProp?.id).slice(0, 4) as p (p.id)}
+							{#if row.values[p.id] != null && row.values[p.id] !== ''}
+								<div><dt>{p.name}</dt><dd>{p.type === 'select' ? optionName(p, row.values[p.id]) : p.type === 'checkbox' ? (row.values[p.id] ? '✓' : '') : String(row.values[p.id])}</dd></div>
+							{/if}
+						{/each}
+					</dl>
+					<button class="open g-open" title="Open as page" onclick={() => openRowPage(row)}>Open ↗</button>
+				</div>
+			{/each}
+			{#if !ro}
+				<button class="g-add" onclick={() => db.addRow()}>＋ New</button>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -378,8 +509,21 @@
 		vertical-align: top;
 	}
 	.gutter {
-		width: 24px;
+		width: 42px;
 		background: var(--bg1);
+		white-space: nowrap;
+		text-align: center;
+	}
+	.row-open,
+	.row-del {
+		color: var(--tx3);
+		font-size: 12px;
+		padding: 2px 3px;
+		border-radius: 4px;
+	}
+	.row-open:hover {
+		background: var(--bg3);
+		color: var(--acc-strong);
 	}
 	.col {
 		display: flex;
@@ -459,13 +603,164 @@
 	td input[type='checkbox'] {
 		margin: 6px;
 	}
-	.row-del {
-		width: 100%;
-		color: var(--tx3);
-		font-size: 13px;
-	}
 	.row-del:hover {
 		color: var(--rose);
+	}
+	.card {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.card-title {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.open {
+		color: var(--tx3);
+		font-size: 12px;
+		padding: 1px 4px;
+		border-radius: 4px;
+		flex-shrink: 0;
+	}
+	.open:hover {
+		color: var(--acc-strong);
+		background: var(--bg3);
+	}
+	/* calendar */
+	.cal {
+		padding: 10px;
+	}
+	.cal-head {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		margin-bottom: 8px;
+	}
+	.cal-month {
+		font-weight: 600;
+		color: var(--tx);
+		font-size: 13px;
+	}
+	.cal-grid {
+		display: grid;
+		grid-template-columns: repeat(7, 1fr);
+		gap: 1px;
+		background: var(--line);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		overflow: hidden;
+	}
+	.cal-dow {
+		background: var(--bg1);
+		padding: 4px;
+		text-align: center;
+		font-size: 10.5px;
+		text-transform: uppercase;
+		color: var(--tx3);
+	}
+	.cal-cell {
+		background: var(--bg2);
+		min-height: 74px;
+		padding: 3px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.cal-cell.dim {
+		background: var(--bg1);
+	}
+	.cal-daynum {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 11px;
+		color: var(--tx2);
+	}
+	.cal-add {
+		color: var(--tx3);
+		opacity: 0;
+		font-size: 11px;
+	}
+	.cal-cell:hover .cal-add {
+		opacity: 1;
+	}
+	.cal-event {
+		text-align: left;
+		background: var(--accbg2);
+		color: var(--acc-strong);
+		border-radius: 4px;
+		padding: 2px 5px;
+		font-size: 11px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.cal-event:hover {
+		background: var(--accbg);
+	}
+	/* gallery */
+	.gallery {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+		gap: 10px;
+		padding: 12px;
+	}
+	.g-card {
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		padding: 10px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.g-title {
+		font-weight: 600;
+		color: var(--tx);
+		font-size: 13px;
+	}
+	.g-props {
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	.g-props div {
+		display: flex;
+		justify-content: space-between;
+		gap: 8px;
+		font-size: 11.5px;
+	}
+	.g-props dt {
+		color: var(--tx3);
+	}
+	.g-props dd {
+		margin: 0;
+		color: var(--tx2);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.g-open {
+		align-self: flex-start;
+		font-size: 12px;
+		color: var(--acc);
+	}
+	.g-add {
+		display: grid;
+		place-items: center;
+		border: 1px dashed var(--line);
+		border-radius: 8px;
+		color: var(--tx3);
+		min-height: 60px;
+	}
+	.g-add:hover {
+		color: var(--tx);
+		border-color: var(--acc);
 	}
 	.add-col button {
 		width: 30px;

@@ -56,3 +56,24 @@ board views. Filters SHALL persist in the document.
 
 - **WHEN** filters are set and the document is reopened
 - **THEN** the same filters SHALL still apply
+
+### Requirement: Calendar and gallery views, and rows as pages
+
+The `database` block SHALL additionally offer a calendar view (rows placed on a
+month grid by a chosen date property, with month navigation and adding a row on
+a day) and a gallery view (rows as cards). Each row SHALL be openable as a page:
+opening a row that has no page yet SHALL create a document for it and link it to
+the row; opening SHALL navigate to that document.
+
+#### Scenario: Place rows on a calendar
+
+- **GIVEN** a database with a date property
+- **WHEN** the user switches to the calendar view
+- **THEN** each row SHALL appear on the day matching its date
+
+#### Scenario: Open a row as a page
+
+- **WHEN** the user opens a row as a page for the first time
+- **THEN** a document SHALL be created and linked to that row
+- **AND** the document SHALL open
+- **AND** opening the same row again SHALL reopen that document
