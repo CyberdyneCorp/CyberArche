@@ -9,6 +9,29 @@ export type ExportFormat = 'pdf' | 'markdown' | 'csv';
 
 const str = (v: unknown): string => (v == null ? '' : String(v));
 
+/** Render a database block as a Markdown table (select values resolved to option
+ * names). */
+function databaseToMarkdown(data: Record<string, unknown>): string {
+	const db = data.db as
+		| {
+				properties: { id: string; name: string; type: string; options?: { id: string; name: string }[] }[];
+				rows: { values: Record<string, unknown> }[];
+		  }
+		| undefined;
+	if (!db?.properties?.length) return '';
+	const cell = (p: (typeof db.properties)[number], v: unknown): string => {
+		if (p.type === 'select') return p.options?.find((o) => o.id === v)?.name ?? '';
+		if (p.type === 'checkbox') return v ? '✓' : '';
+		return str(v);
+	};
+	const header = `| ${db.properties.map((p) => str(p.name)).join(' | ')} |`;
+	const rule = `| ${db.properties.map(() => '---').join(' | ')} |`;
+	const body = (db.rows ?? []).map(
+		(r) => `| ${db.properties.map((p) => cell(p, r.values?.[p.id])).join(' | ')} |`
+	);
+	return [header, rule, ...body].join('\n');
+}
+
 function tableToMarkdown(data: Record<string, unknown>): string {
 	const header = (data.header as unknown[]) ?? [];
 	const rows = (data.rows as unknown[][]) ?? [];
@@ -94,6 +117,9 @@ export function toMarkdown(
 				break;
 			case 'table':
 				out.push(tableToMarkdown(d), '');
+				break;
+			case 'database':
+				out.push(databaseToMarkdown(d), '');
 				break;
 			case 'whiteboard':
 			case 'excalidraw':

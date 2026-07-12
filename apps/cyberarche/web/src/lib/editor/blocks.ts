@@ -1,5 +1,6 @@
 /** Registers the built-in block types (12.1: adding one = one entry here). */
 
+import DatabaseBlock from '$lib/components/editor/blocks/DatabaseBlock.svelte';
 import DividerBlock from '$lib/components/editor/blocks/DividerBlock.svelte';
 import CodeBlock from '$lib/components/editor/blocks/CodeBlock.svelte';
 import EmbedBlock from '$lib/components/editor/blocks/EmbedBlock.svelte';
@@ -159,6 +160,15 @@ export function registerBuiltinBlocks(): void {
 			rows: [['', '']]
 		}),
 		component: TableBlock
+	});
+	registerBlock({
+		type: 'database',
+		label: 'Database',
+		icon: '▤',
+		group: 'technical',
+		hint: 'Typed rows with table & board views',
+		create: () => ({ db: { properties: [], rows: [] } }),
+		component: DatabaseBlock
 	});
 	registerBlock({
 		type: 'image',

@@ -96,6 +96,8 @@ async def test_unknown_block_type_is_rejected():
     assert validate_block_type("latex") == "latex"
     # Native Excalidraw canvas block is whitelisted.
     assert validate_block_type("excalidraw") == "excalidraw"
+    # Database block (typed rows + views) is whitelisted.
+    assert validate_block_type("database") == "database"
 
 
 # ---- purge (permanent delete from trash) -----------------------------------
