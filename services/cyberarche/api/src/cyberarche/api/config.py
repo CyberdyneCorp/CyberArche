@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     redis_url: str = ""  # shared queue + realtime fanout for multi-replica
     blob_dir: str = ""  # filesystem blob storage; empty = in-memory
     cors_origins: list[str] = ["http://localhost:5173"]
+    # Autonomous agents: the in-process scheduler that runs due tasks (postgres
+    # deployments only). Disable to run the API without background execution.
+    enable_scheduler: bool = True
+    scheduler_interval_seconds: int = 60
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(

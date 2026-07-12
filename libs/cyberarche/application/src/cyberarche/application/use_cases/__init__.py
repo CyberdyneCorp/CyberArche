@@ -20,6 +20,7 @@ from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
     TeamspaceUseCases,
 )
+from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
@@ -48,3 +49,4 @@ class UseCases:
     notifications: NotificationUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases
+    scheduled_agents: ScheduledAgentUseCases

@@ -25,6 +25,9 @@ from cyberarche.adapters.inbound.http.routers.knowledge import (
 from cyberarche.adapters.inbound.http.routers.notifications import (
     router as notifications_router,
 )
+from cyberarche.adapters.inbound.http.routers.scheduled_agents import (
+    router as scheduled_agents_router,
+)
 from cyberarche.adapters.inbound.http.routers.sharing import router as sharing_router
 from cyberarche.adapters.inbound.http.routers.teamspaces import router as teamspaces_router
 from cyberarche.adapters.inbound.http.routers.templates import router as templates_router
@@ -41,6 +44,7 @@ all_routers = [
     agent_router,
     agent_persona_router,
     agent_skills_router,
+    scheduled_agents_router,
     connectors_router,
     sharing_router,
     teamspaces_router,

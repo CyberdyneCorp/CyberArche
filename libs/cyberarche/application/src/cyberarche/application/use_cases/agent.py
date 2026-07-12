@@ -15,6 +15,7 @@ import re
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
@@ -120,6 +121,17 @@ class AgentAnswer:
     text: str
     blocks: list[dict]
     tool_calls: list[ToolCallLog] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundResult:
+    """The outcome of an autonomous (no-live-user) agent run."""
+
+    text: str
+    outcome: str  # succeeded | stopped_rounds | stopped_actions | stopped_timeout
+    edited: bool
+    tools_used: list[str] = field(default_factory=list)
+    workspace_id: WorkspaceId | None = None
 
 
 _MAX_HISTORY_TURNS = 10
@@ -241,7 +253,7 @@ class AgentUseCases:
                 ),
             )
         )
-        text, edited, tool_calls = await self._run_loop(
+        text, edited, tool_calls, _outcome = await self._run_loop(
             caller,
             document_id,
             document.workspace_id,
@@ -256,6 +268,62 @@ class AgentUseCases:
         # again (that produced a duplicate block); otherwise carry insertables.
         blocks = [] if edited else _answer_blocks(self._ids, text)
         return AgentAnswer(text=text, blocks=blocks, tool_calls=tool_calls)
+
+    async def run_background(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        *,
+        instruction: str,
+        max_tool_rounds: int = MAX_TOOL_ROUNDS,
+        max_actions: int | None = None,
+        max_wall_seconds: int | None = None,
+    ) -> "BackgroundResult":
+        """Run the agent with no live user (autonomous-agents spec): destructive
+        tools disabled, per-run limits enforced. Authority is the `caller`
+        (the task's stored owner); `_document_context` raises NotAuthorized if
+        the owner has lost access. Returns the text + outcome + tools used."""
+        document, context = await self._document_context(caller, document_id)
+        system_prompt = _SYSTEM_PROMPT
+        if self._persona is not None:
+            system_prompt += await self._persona.build_context(
+                caller, document.workspace_id, instruction
+            )
+        messages = [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(
+                role="user",
+                content=(
+                    f"Open document '{document.title}' (id: {document.id}).\n"
+                    f"Its blocks:\n{context}\n\n{instruction}"
+                ),
+            ),
+        ]
+        deadline = (
+            self._clock.now() + timedelta(seconds=max_wall_seconds)
+            if max_wall_seconds is not None
+            else None
+        )
+        text, edited, tool_calls, outcome = await self._run_loop(
+            caller,
+            document_id,
+            document.workspace_id,
+            instruction,
+            messages,
+            access_token=None,
+            reasoning_effort="minimal",
+            background=True,
+            max_rounds=max_tool_rounds,
+            max_actions=max_actions,
+            deadline=deadline,
+        )
+        return BackgroundResult(
+            text=text,
+            outcome=outcome,
+            edited=edited,
+            tools_used=[c.name for c in tool_calls],
+            workspace_id=document.workspace_id,
+        )
 
     async def summarize(
         self,
@@ -417,17 +485,34 @@ class AgentUseCases:
         session_connectors: set[str] | None = None,
         access_token: str | None = None,
         reasoning_effort: str | None = None,
-    ) -> tuple[str, bool, list[ToolCallLog]]:
+        *,
+        background: bool = False,
+        max_rounds: int = MAX_TOOL_ROUNDS,
+        max_actions: int | None = None,
+        deadline: datetime | None = None,
+    ) -> tuple[str, bool, list[ToolCallLog], str]:
         tools_used: list[str] = []
         call_log: list[ToolCallLog] = []
+        outcome = "succeeded"
         tools = await self._available_tools(
-            caller, workspace_id, document_id, session_connectors, access_token
+            caller,
+            workspace_id,
+            document_id,
+            session_connectors,
+            access_token,
+            background=background,
         )
         response = await self._llm.complete(
             messages, tools=tools, reasoning_effort=reasoning_effort
         )
-        for _ in range(MAX_TOOL_ROUNDS):
+        for _ in range(max(1, max_rounds)):
             if not response.wants_tools:
+                break
+            if deadline is not None and self._clock.now() >= deadline:
+                outcome = "stopped_timeout"
+                break
+            if max_actions is not None and len(tools_used) >= max_actions:
+                outcome = "stopped_actions"
                 break
             messages.append(
                 LLMMessage(
@@ -437,6 +522,9 @@ class AgentUseCases:
                 )
             )
             for call in response.tool_calls:
+                if max_actions is not None and len(tools_used) >= max_actions:
+                    outcome = "stopped_actions"
+                    break
                 tools_used.append(call.name)
                 result = await self._dispatch(
                     caller,
@@ -445,6 +533,7 @@ class AgentUseCases:
                     call,
                     session_connectors,
                     access_token,
+                    background=background,
                 )
                 kind, connector = _classify_tool(call.name)
                 call_log.append(
@@ -463,9 +552,14 @@ class AgentUseCases:
                         tool_result=ToolResult(call_id=call.id, content=result),
                     )
                 )
+            if outcome == "stopped_actions":
+                break
             response = await self._llm.complete(
                 messages, tools=tools, reasoning_effort=reasoning_effort
             )
+        else:
+            if response.wants_tools:
+                outcome = "stopped_rounds"
         await self._record(
             caller,
             document_id,
@@ -478,7 +572,7 @@ class AgentUseCases:
         # the answer's content is in the doc, and offering a manual Insert would
         # duplicate it.
         edited = any(name in _EDITING_TOOL_NAMES for name in tools_used)
-        return response.text, edited, call_log
+        return response.text, edited, call_log, outcome
 
     async def _available_tools(
         self,
@@ -487,11 +581,17 @@ class AgentUseCases:
         document_id: DocumentId,
         session_connectors: set[str] | None,
         access_token: str | None = None,
+        *,
+        background: bool = False,
     ) -> list[ToolSpec]:
         """Document-bound editing tools, the built-in tools, and the external
         MCP tools active for this document + session (namespaced by connector)."""
         tools = (
-            [spec for spec, _ in _editing_tools()]
+            [
+                spec
+                for spec, _ in _editing_tools()
+                if not (background and spec.name in _BG_DISABLED_TOOLS)
+            ]
             + [_mindmap_tool_spec()]
             + self._tools.specs()
         )
@@ -526,9 +626,14 @@ class AgentUseCases:
         call: ToolCall,
         session_connectors: set[str] | None = None,
         access_token: str | None = None,
+        *,
+        background: bool = False,
     ) -> str:
         """Editing tools bind to the OPEN document (design D-2), so a
         hallucinated id can never reach another document."""
+        if background and call.name in _BG_DISABLED_TOOLS:
+            # No human to confirm a destructive action in a background run.
+            return "error: destructive tools are disabled for background runs"
         if call.name in _MEETING_TOOL_NAMES:
             return await self._run_meetings_tool(call, access_token)
         if call.name in _WEB_MEDIA_TOOL_NAMES:
@@ -907,6 +1012,10 @@ class AgentUseCases:
         document_id = DocumentId(str(arguments["document_id"]))
         document, rendered = await self._document_context(caller, document_id)
         return f"# {document.title}\n{rendered}"
+
+
+# Destructive tools refused in background (no human to confirm) — ai-agent spec.
+_BG_DISABLED_TOOLS = {"delete_block"}
 
 
 _EDITING_TOOL_NAMES = {

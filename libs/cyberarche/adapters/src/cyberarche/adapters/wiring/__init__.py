@@ -41,6 +41,7 @@ from cyberarche.application.ports.agent_memory import (
     AgentMemoryRepository,
     CustomInstructionsRepository,
 )
+from cyberarche.application.ports.scheduled_agents import ScheduledAgentRepository
 from cyberarche.application.ports.skills import AgentSkillRepository
 from cyberarche.application.ports.templates import TemplateRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
@@ -74,6 +75,7 @@ from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.teamspaces import (
@@ -210,6 +212,7 @@ def _build_use_cases(
     custom_instructions: CustomInstructionsRepository,
     agent_memories: AgentMemoryRepository,
     agent_skills: AgentSkillRepository,
+    scheduled_agents: ScheduledAgentRepository,
     model_name: str,
     clock,
     ids,
@@ -230,6 +233,26 @@ def _build_use_cases(
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspaces, folders
     )
+    agent_use_cases = AgentUseCases(
+        llm,
+        documents,
+        realtime,
+        knowledge,
+        agent_runs,
+        FileExtractor(),
+        crdt_engine,
+        access,
+        clock,
+        ids,
+        model_name=model_name,
+        connectors=connector_use_cases,
+        images=images,
+        blobs=blobs,
+        code=code,
+        meetings=meetings,
+        web_media=web_media,
+        persona=persona,
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=document_use_cases,
@@ -239,25 +262,15 @@ def _build_use_cases(
         realtime=realtime,
         knowledge=knowledge,
         connectors=connector_use_cases,
-        agent=AgentUseCases(
-            llm,
-            documents,
-            realtime,
-            knowledge,
-            agent_runs,
-            FileExtractor(),
-            crdt_engine,
+        agent=agent_use_cases,
+        scheduled_agents=ScheduledAgentUseCases(
+            scheduled_agents,
+            agent_use_cases,
+            document_use_cases,
+            notifications,
             access,
             clock,
             ids,
-            model_name=model_name,
-            connectors=connector_use_cases,
-            images=images,
-            blobs=blobs,
-            code=code,
-            meetings=meetings,
-            web_media=web_media,
-            persona=persona,
         ),
         persona=persona,
         sharing=SharingUseCases(
@@ -393,6 +406,7 @@ class _Repositories:
     custom_instructions: CustomInstructionsRepository
     agent_memories: AgentMemoryRepository
     agent_skills: AgentSkillRepository
+    scheduled_agents: ScheduledAgentRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -441,6 +455,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.skills import (
         PostgresAgentSkillRepository,
     )
+    from cyberarche.adapters.outbound.postgres.scheduled_agents import (
+        PostgresScheduledAgentRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -466,6 +483,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         custom_instructions=PostgresCustomInstructionsRepository(pool),
         agent_memories=PostgresAgentMemoryRepository(pool),
         agent_skills=PostgresAgentSkillRepository(pool),
+        scheduled_agents=PostgresScheduledAgentRepository(pool),
     )
 
 
@@ -493,6 +511,7 @@ def _memory_repositories() -> _Repositories:
         custom_instructions=fakes.InMemoryCustomInstructionsRepository(),
         agent_memories=fakes.InMemoryAgentMemoryRepository(),
         agent_skills=fakes.InMemoryAgentSkillRepository(),
+        scheduled_agents=fakes.InMemoryScheduledAgentRepository(),
     )
 
 
@@ -748,6 +767,7 @@ async def build_container(
             repos.custom_instructions,
             repos.agent_memories,
             repos.agent_skills,
+            repos.scheduled_agents,
             config.llm_model,
             clock,
             ids,

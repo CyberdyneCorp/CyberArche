@@ -453,6 +453,78 @@ class InMemoryTemplateRepository:
             del self._items[str(template_id)]
 
 
+class InMemoryScheduledAgentRepository:
+    """ScheduledAgentRepository fake with lease-based single-claim semantics."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, object] = {}
+        self._runs: list = []
+
+    async def add(self, task) -> None:
+        self._tasks[str(task.id)] = task
+
+    async def get(self, tenant_id, task_id):
+        t = self._tasks.get(str(task_id))
+        return t if t and str(t.tenant_id) == str(tenant_id) else None
+
+    async def list_for_workspace(self, tenant_id, workspace_id):
+        mine = [
+            t
+            for t in self._tasks.values()
+            if str(t.tenant_id) == str(tenant_id)
+            and str(t.workspace_id) == str(workspace_id)
+        ]
+        mine.sort(key=lambda t: t.created_at, reverse=True)
+        return mine
+
+    async def update(self, task) -> None:
+        self._tasks[str(task.id)] = task
+
+    async def delete(self, tenant_id, task_id) -> None:
+        t = self._tasks.get(str(task_id))
+        if t and str(t.tenant_id) == str(tenant_id):
+            del self._tasks[str(task_id)]
+
+    async def claim_due(self, now, lease_until):
+        import dataclasses
+
+        due = [
+            t
+            for t in self._tasks.values()
+            if t.enabled
+            and t.next_run_at is not None
+            and t.next_run_at <= now
+            and (not t.running or (t.lease_until is not None and t.lease_until < now))
+        ]
+        if not due:
+            return None
+        due.sort(key=lambda t: t.next_run_at)
+        claimed = dataclasses.replace(due[0], running=True, lease_until=lease_until)
+        self._tasks[str(claimed.id)] = claimed
+        return claimed
+
+    async def release(self, task_id, *, next_run_at):
+        import dataclasses
+
+        t = self._tasks.get(str(task_id))
+        if t:
+            self._tasks[str(task_id)] = dataclasses.replace(
+                t, running=False, lease_until=None, next_run_at=next_run_at
+            )
+
+    async def record_run(self, run) -> None:
+        self._runs.append(run)
+
+    async def list_runs(self, tenant_id, task_id, *, limit: int = 20):
+        mine = [
+            r
+            for r in self._runs
+            if str(r.tenant_id) == str(tenant_id) and str(r.task_id) == str(task_id)
+        ]
+        mine.sort(key=lambda r: r.started_at, reverse=True)
+        return mine[: max(0, limit)]
+
+
 class InMemoryAgentSkillRepository:
     """AgentSkillRepository fake."""
 

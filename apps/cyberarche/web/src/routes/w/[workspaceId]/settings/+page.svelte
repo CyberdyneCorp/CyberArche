@@ -10,6 +10,10 @@
 		createAgentSkills,
 		type AgentSkillsVM
 	} from '$lib/viewmodels/agentSkills.svelte';
+	import {
+		createScheduledAgents,
+		type ScheduledAgentsVM
+	} from '$lib/viewmodels/scheduledAgents.svelte';
 
 	const workspaceId = $derived(page.params.workspaceId!);
 
@@ -19,6 +23,11 @@
 	let skills = $state<AgentSkillsVM | null>(null);
 	let skillName = $state('');
 	let skillInstruction = $state('');
+
+	let tasks = $state<ScheduledAgentsVM | null>(null);
+	let taskName = $state('');
+	let taskInstruction = $state('');
+	let taskCron = $state('0 9 * * *');
 
 	let connectors = $state<ConnectorsVM | null>(null);
 	let name = $state('');
@@ -44,7 +53,18 @@
 		const skillsVm = createAgentSkills(workspaceId);
 		skills = skillsVm;
 		skillsVm.load();
+		const tasksVm = createScheduledAgents(workspaceId);
+		tasks = tasksVm;
+		tasksVm.load();
 	});
+
+	async function addTask(event: SubmitEvent) {
+		event.preventDefault();
+		if (tasks && (await tasks.create(taskName.trim(), taskInstruction.trim(), taskCron.trim()))) {
+			taskName = '';
+			taskInstruction = '';
+		}
+	}
 
 	async function addMemory(event: SubmitEvent) {
 		event.preventDefault();
@@ -271,6 +291,67 @@
 		</section>
 	{/if}
 
+	{#if tasks}
+		<section class="card">
+			<h2>Scheduled agents</h2>
+			<p class="hint">
+				Autonomous tasks the agent runs on a schedule (5-field cron), in the
+				background, with no live user. Results are written to a document and you
+				get a notification. Destructive edits (deleting blocks) are disabled in
+				background runs.
+			</p>
+			<form class="skill-add" onsubmit={addTask}>
+				<input placeholder="Task name (e.g. Daily standup digest)" bind:value={taskName} />
+				<textarea
+					rows="2"
+					placeholder="Instruction — e.g. Summarize yesterday’s changes as a status update."
+					bind:value={taskInstruction}
+				></textarea>
+				<label class="cron-row">
+					<span>Cron</span>
+					<input class="cron" placeholder="0 9 * * *" bind:value={taskCron} />
+					<span class="cron-hint">min hour dom mon dow — e.g. “0 9 * * 1-5” = 9am weekdays</span>
+				</label>
+				<button
+					type="submit"
+					disabled={tasks.busy || !taskName.trim() || !taskInstruction.trim() || !taskCron.trim()}
+					>Create task</button
+				>
+			</form>
+			{#each tasks.tasks as task (task.id)}
+				<div class="task">
+					<label class="task-toggle" title={task.enabled ? 'Enabled' : 'Disabled'}>
+						<input
+							type="checkbox"
+							checked={task.enabled}
+							onchange={() => tasks?.toggle(task)}
+						/>
+					</label>
+					<div class="task-body">
+						<strong>{task.name}</strong>
+						<span class="task-meta"
+							>{task.schedule_cron} · next {task.next_run_at
+								? new Date(task.next_run_at).toLocaleString()
+								: '—'}</span
+						>
+						<span class="task-instr">{task.instruction}</span>
+					</div>
+					<button
+						class="mem-remove"
+						title="Delete task"
+						aria-label="Delete task"
+						onclick={() => tasks?.remove(task.id)}>×</button
+					>
+				</div>
+			{:else}
+				<p class="none">No scheduled tasks yet.</p>
+			{/each}
+			{#if tasks.error}
+				<p class="error" role="alert">{tasks.error}</p>
+			{/if}
+		</section>
+	{/if}
+
 	{#if connectors}
 		<section class="card">
 			<h2>Attach an MCP server</h2>
@@ -464,6 +545,51 @@
 	}
 	.skill-add button:disabled {
 		opacity: 0.5;
+	}
+	.cron-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.cron-row span:first-child {
+		font-size: 13px;
+		color: var(--tx2);
+	}
+	.cron {
+		width: 140px;
+		font-family: var(--font-mono, ui-monospace, monospace);
+	}
+	.cron-hint {
+		font-size: 11px;
+		color: var(--tx3);
+	}
+	.task {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 8px 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+		margin-top: 6px;
+	}
+	.task-toggle {
+		padding-top: 2px;
+	}
+	.task-body {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.task-meta {
+		font-size: 11px;
+		color: var(--tx3);
+	}
+	.task-instr {
+		font-size: 12px;
+		color: var(--tx2);
 	}
 	.head h1 {
 		margin: 0;

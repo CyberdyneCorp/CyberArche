@@ -18,6 +18,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryAgentMemoryRepository,
     InMemoryAgentRunRepository,
     InMemoryAgentSkillRepository,
+    InMemoryScheduledAgentRepository,
     InMemoryApiKeyRepository,
     InMemoryCustomInstructionsRepository,
     InMemoryBlobStorage,
@@ -50,6 +51,7 @@ from cyberarche.application.testing.fakes import (
 from cyberarche.application.use_cases import UseCases
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
+from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
@@ -117,6 +119,11 @@ def web_media() -> ScriptedWebMedia:
 
 
 @pytest.fixture
+def scheduled_repo() -> InMemoryScheduledAgentRepository:
+    return InMemoryScheduledAgentRepository()
+
+
+@pytest.fixture
 def inferred_links() -> InMemoryInferredLinkRepository:
     return InMemoryInferredLinkRepository()
 
@@ -177,6 +184,7 @@ def use_cases(
     code_exec: ScriptedCodeExecutor,
     meetings: ScriptedMeetings,
     web_media: ScriptedWebMedia,
+    scheduled_repo: InMemoryScheduledAgentRepository,
     inferred_links: InMemoryInferredLinkRepository,
     agent_runs: InMemoryAgentRunRepository,
     mcp_client: FakeMcpClient,
@@ -232,6 +240,26 @@ def use_cases(
         clock,
         ids,
     )
+    agent_use_cases = AgentUseCases(
+        llm,
+        documents,
+        realtime,
+        knowledge,
+        agent_runs,
+        FileExtractor(),
+        engine,
+        access,
+        clock,
+        ids,
+        model_name="scripted-test-model",
+        connectors=connectors,
+        images=images,
+        blobs=blobs,
+        code=code_exec,
+        meetings=meetings,
+        web_media=web_media,
+        persona=persona,
+    )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
         documents=document_use_cases,
@@ -241,25 +269,15 @@ def use_cases(
         realtime=realtime,
         knowledge=knowledge,
         connectors=connectors,
-        agent=AgentUseCases(
-            llm,
-            documents,
-            realtime,
-            knowledge,
-            agent_runs,
-            FileExtractor(),
-            engine,
+        agent=agent_use_cases,
+        scheduled_agents=ScheduledAgentUseCases(
+            scheduled_repo,
+            agent_use_cases,
+            document_use_cases,
+            notification_repo,
             access,
             clock,
             ids,
-            model_name="scripted-test-model",
-            connectors=connectors,
-            images=images,
-            blobs=blobs,
-            code=code_exec,
-            meetings=meetings,
-            web_media=web_media,
-            persona=persona,
         ),
         persona=persona,
         skills=AgentSkillUseCases(InMemoryAgentSkillRepository(), access, clock, ids),
