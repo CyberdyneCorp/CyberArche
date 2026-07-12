@@ -37,6 +37,7 @@ from cyberarche.application.testing.fakes import (
     ScriptedImageGenerator,
     ScriptedLLM,
     InMemoryInferredLinkRepository,
+    InMemoryNotificationRepository,
     ScriptedMeetings,
     SequentialIds,
     StaticTokenPort,
@@ -49,6 +50,7 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
+from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -195,6 +197,7 @@ def use_cases(
     connectors = ConnectorUseCases(
         connector_repo, mcp_client, secret_box, access, clock, ids
     )
+    notification_repo = InMemoryNotificationRepository()
     sharing = SharingUseCases(
         documents,
         memberships,
@@ -203,6 +206,7 @@ def use_cases(
         access,
         clock,
         ids,
+        notifications=notification_repo,
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
@@ -248,6 +252,7 @@ def use_cases(
             inferred_links=inferred_links,
             clock=clock,
         ),
+        notifications=NotificationUseCases(notification_repo),
     )
 
 

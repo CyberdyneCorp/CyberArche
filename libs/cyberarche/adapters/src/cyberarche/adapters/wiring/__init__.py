@@ -35,6 +35,7 @@ from cyberarche.application.ports.code_exec import CodeExecutionPort
 from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
+from cyberarche.application.ports.notifications import NotificationRepository
 from cyberarche.application.ports.llm import LLMConfig, LLMPort
 from cyberarche.application.ports.mcp import (
     ConnectorRepository,
@@ -63,6 +64,7 @@ from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
@@ -188,6 +190,7 @@ def _build_use_cases(
     peer_bus: PeerBusPort,
     api_keys: ApiKeyRepository,
     inferred_links: InferredLinkRepository,
+    notifications: NotificationRepository,
     model_name: str,
     clock,
     ids,
@@ -230,7 +233,14 @@ def _build_use_cases(
             meetings=meetings,
         ),
         sharing=SharingUseCases(
-            documents, memberships, share_links, comments, access, clock, ids
+            documents,
+            memberships,
+            share_links,
+            comments,
+            access,
+            clock,
+            ids,
+            notifications=notifications,
         ),
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
         teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
@@ -246,6 +256,7 @@ def _build_use_cases(
             inferred_links=inferred_links,
             clock=clock,
         ),
+        notifications=NotificationUseCases(notifications),
     )
 
 
@@ -326,6 +337,7 @@ class _Repositories:
     favorites: FavoriteRepository
     folders: FolderRepository
     inferred_links: InferredLinkRepository
+    notifications: NotificationRepository
 
 
 async def _postgres_repositories(config: WiringConfig, closers: list) -> _Repositories:
@@ -361,6 +373,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.inferred_links import (
         PostgresInferredLinkRepository,
     )
+    from cyberarche.adapters.outbound.postgres.notifications import (
+        PostgresNotificationRepository,
+    )
     from cyberarche.adapters.outbound.postgres.update_log import PostgresUpdateLog
 
     pool = await asyncpg.create_pool(config.database_url)
@@ -381,6 +396,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         favorites=PostgresFavoriteRepository(pool),
         folders=PostgresFolderRepository(pool),
         inferred_links=PostgresInferredLinkRepository(pool),
+        notifications=PostgresNotificationRepository(pool),
     )
 
 
@@ -403,6 +419,7 @@ def _memory_repositories() -> _Repositories:
         favorites=fakes.InMemoryFavoriteRepository(),
         folders=fakes.InMemoryFolderRepository(),
         inferred_links=fakes.InMemoryInferredLinkRepository(),
+        notifications=fakes.InMemoryNotificationRepository(),
     )
 
 
@@ -647,6 +664,7 @@ async def build_container(
             peer_bus,
             repos.api_keys,
             repos.inferred_links,
+            repos.notifications,
             config.llm_model,
             clock,
             ids,

@@ -424,6 +424,56 @@ class ScriptedImageGenerator:
         return GeneratedImage(content=_STUB_PNG, content_type="image/png")
 
 
+class InMemoryNotificationRepository:
+    """NotificationRepository fake: an in-process per-user inbox."""
+
+    def __init__(self) -> None:
+        self._items: list = []
+
+    async def add(self, notification) -> None:
+        self._items.append(notification)
+
+    async def list_for_user(self, tenant_id, user_id, *, limit: int = 50):
+        mine = [
+            n
+            for n in self._items
+            if str(n.tenant_id) == str(tenant_id) and str(n.recipient_id) == str(user_id)
+        ]
+        mine.sort(key=lambda n: n.created_at, reverse=True)
+        return mine[:limit]
+
+    async def unread_count(self, tenant_id, user_id) -> int:
+        return sum(
+            1
+            for n in self._items
+            if str(n.tenant_id) == str(tenant_id)
+            and str(n.recipient_id) == str(user_id)
+            and not n.read
+        )
+
+    async def mark_read(self, tenant_id, user_id, notification_id) -> None:
+        from dataclasses import replace
+
+        self._items = [
+            replace(n, read=True)
+            if str(n.id) == str(notification_id)
+            and str(n.recipient_id) == str(user_id)
+            and str(n.tenant_id) == str(tenant_id)
+            else n
+            for n in self._items
+        ]
+
+    async def mark_all_read(self, tenant_id, user_id) -> None:
+        from dataclasses import replace
+
+        self._items = [
+            replace(n, read=True)
+            if str(n.recipient_id) == str(user_id) and str(n.tenant_id) == str(tenant_id)
+            else n
+            for n in self._items
+        ]
+
+
 class InMemoryInferredLinkRepository:
     """InferredLinkRepository fake: an in-process cache of inferred relations."""
 

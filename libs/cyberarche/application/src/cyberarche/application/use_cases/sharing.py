@@ -6,10 +6,12 @@ enforce identically — no surface bypasses access control.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
+from cyberarche.application.ports.notifications import NotificationRepository
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
     MembershipRepository,
@@ -18,7 +20,14 @@ from cyberarche.application.ports.sharing import CommentRepository, ShareLinkRep
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthorized, NotFound
-from cyberarche.domain.ids import DocumentId, ShareLinkId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    DocumentId,
+    NotificationId,
+    ShareLinkId,
+    UserId,
+    WorkspaceId,
+)
+from cyberarche.domain.notifications import Notification
 from cyberarche.domain.memberships import (
     DocumentGrant,
     Role,
@@ -26,6 +35,9 @@ from cyberarche.domain.memberships import (
     role_at_least,
 )
 from cyberarche.domain.sharing import Comment, ShareLink, SharePermission
+
+
+_MENTION = re.compile(r"@\[([^\]\s]+)\]")
 
 
 class SharingUseCases:
@@ -38,6 +50,7 @@ class SharingUseCases:
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
+        notifications: NotificationRepository | None = None,
     ) -> None:
         self._documents = documents
         self._memberships = memberships
@@ -46,6 +59,7 @@ class SharingUseCases:
         self._access = access
         self._clock = clock
         self._ids = ids
+        self._notifications = notifications
 
     # ---- invites ------------------------------------------------------------
 
@@ -176,7 +190,36 @@ class SharingUseCases:
             created_at=self._clock.now(),
         )
         await self._comments.add(comment)
+        await self._notify_mentions(caller, document, comment)
         return comment
+
+    async def _notify_mentions(self, caller, document, comment) -> None:
+        """Notify each `@[user-id]` in the comment who is a member of the
+        document's workspace (never the author, never a non-member)."""
+        if self._notifications is None:
+            return
+        snippet = comment.body[:140]
+        notified: set[str] = set()
+        for match in _MENTION.finditer(comment.body):
+            user_id = UserId(match.group(1))
+            if str(user_id) == str(caller.user_id) or str(user_id) in notified:
+                continue
+            if await self._memberships.workspace_role(document.workspace_id, user_id) is None:
+                continue
+            notified.add(str(user_id))
+            await self._notifications.add(
+                Notification(
+                    id=NotificationId(self._ids.new_id()),
+                    tenant_id=caller.tenant_id,
+                    recipient_id=user_id,
+                    kind="mention",
+                    actor_id=caller.user_id,
+                    document_id=document.id,
+                    comment_id=comment.id,
+                    snippet=snippet,
+                    created_at=self._clock.now(),
+                )
+            )
 
     async def list_comments(
         self, caller: CallerContext, document_id: DocumentId

@@ -32,6 +32,7 @@ export function createSharing(workspaceId: string, documentId: string) {
 	}
 
 	return {
+		documentId,
 		get links() {
 			return links;
 		},

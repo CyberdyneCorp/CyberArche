@@ -10,6 +10,7 @@
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
+	import NotificationsBell from './NotificationsBell.svelte';
 	import TeamspaceMembersDialog from './TeamspaceMembersDialog.svelte';
 	import TreeItem from './TreeItem.svelte';
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
@@ -620,6 +621,7 @@
 	{/if}
 
 	<footer class="footer">
+		<NotificationsBell {workspaceId} />
 		<a class="foot-btn" href={`/w/${workspaceId}/settings`} data-testid="open-settings">
 			⚙ Settings &amp; connectors
 		</a>

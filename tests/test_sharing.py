@@ -283,3 +283,49 @@ async def test_grant_reaches_a_private_document(use_cases, alice):
     # ...but a viewer grant is read-only.
     with pytest.raises(NotAuthorized):
         await use_cases.agent.apply_blocks(BOB, private.id, [BLOCK])
+
+
+async def test_comment_mention_notifies_workspace_member(use_cases: UseCases, alice):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+    # Alice mentions Bob (a member) and Dave (an outsider) in one comment.
+    await use_cases.sharing.add_comment(
+        alice,
+        document.id,
+        block_id="b1",
+        body=f"hey @[{BOB.user_id}] and @[{OUTSIDER.user_id}] look at this",
+    )
+    # Bob is notified; the outsider (not a workspace member) is not.
+    bob_inbox = await use_cases.notifications.list(BOB)
+    assert len(bob_inbox) == 1
+    assert bob_inbox[0].kind == "mention"
+    assert bob_inbox[0].actor_id == alice.user_id
+    assert bob_inbox[0].document_id == document.id
+    assert await use_cases.notifications.unread_count(BOB) == 1
+    assert await use_cases.notifications.list(OUTSIDER) == []
+
+
+async def test_self_mention_creates_no_notification(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.sharing.add_comment(
+        alice, document.id, block_id="b1", body=f"note to self @[{alice.user_id}]"
+    )
+    assert await use_cases.notifications.list(alice) == []
+
+
+async def test_marking_a_notification_read_clears_unread(use_cases: UseCases, alice):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.EDITOR
+    )
+    await use_cases.sharing.add_comment(
+        alice, document.id, block_id="b1", body=f"@[{BOB.user_id}] hi"
+    )
+    inbox = await use_cases.notifications.list(BOB)
+    await use_cases.notifications.mark_read(BOB, inbox[0].id)
+    assert await use_cases.notifications.unread_count(BOB) == 0
+    # A different user cannot mark Bob's notification (it isn't theirs) — no-op.
+    await use_cases.notifications.mark_all_read(CAROL)
+    assert (await use_cases.notifications.list(BOB))[0].read is True
