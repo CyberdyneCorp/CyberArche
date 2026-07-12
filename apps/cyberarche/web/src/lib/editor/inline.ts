@@ -1,5 +1,6 @@
 /** Inline rich renderer (block-editor spec): turns a stored source string into
- * display HTML — inline math `$…$`, `**bold**`, `*italic*`/`_italic_`. Used by
+ * display HTML — inline math `$…$`, `**bold**`, `*italic*`/`_italic_`, inline
+ * `` `code` ``, and `~~strikethrough~~`. Used by
  * paragraph/heading text and table cells when they are NOT being edited; the
  * raw source is shown for editing and stored verbatim, so this is display-only
  * and never mutates content.
@@ -27,9 +28,12 @@ function renderMath(source: string, displayMode: boolean): string {
 	}
 }
 
-/** Apply emphasis to an already-HTML-escaped fragment. */
+/** Apply emphasis to an already-HTML-escaped fragment. Inline code is rendered
+ * first so markers inside a code span are shown literally, not as emphasis. */
 function renderEmphasis(escaped: string): string {
 	return escaped
+		.replace(/`([^`]+)`/g, '<code>$1</code>')
+		.replace(/~~([^~]+)~~/g, '<del>$1</del>')
 		.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
 		.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>')
 		.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');

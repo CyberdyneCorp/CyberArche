@@ -30,6 +30,36 @@ SHALL merge it into the previous block, joining their text.
 - **WHEN** a user activates the delete control on a block
 - **THEN** the block SHALL be removed from the document
 
+### Requirement: Block and text context menu
+Right-clicking a block SHALL open a context menu for changing its properties. For
+a text-family block (paragraph, heading, list, to-do, quote, callout) the menu
+SHALL let the user turn the block into another text-family type and, for a
+heading, choose its level (H1–H4) with the current level marked. When the
+right-click occurs over a non-empty text selection within a text block, the menu
+SHALL additionally offer inline formatting — bold, italic, inline code, and
+strikethrough — applied to the selection by wrapping it in the corresponding
+markdown markers, and toggled off when the selection is already wrapped. Every
+block SHALL offer duplicate and delete from the menu. Formatting SHALL preserve
+the selection so multiple marks can be applied in succession.
+
+#### Scenario: Change a heading's level from the menu
+- **WHEN** a user right-clicks a heading and chooses a different level
+- **THEN** the heading SHALL re-render at that level's size
+
+#### Scenario: Turn a block into another type
+- **WHEN** a user right-clicks a paragraph and chooses a list type
+- **THEN** the block SHALL become that type, preserving its text
+
+#### Scenario: Bold a selection from the menu
+- **WHEN** a user selects text in a block, right-clicks, and chooses Bold
+- **THEN** the selection SHALL be wrapped in `**…**` and render bold when not
+  being edited
+- **AND** choosing Bold again on the same selection SHALL remove the markers
+
+#### Scenario: Inline code and strikethrough render
+- **WHEN** text contains `` `code` `` or `~~struck~~`
+- **THEN** the editor SHALL render it as inline code or strikethrough
+
 ### Requirement: Heading levels
 The editor SHALL support four heading levels (H1–H4), each rendered at a
 visually distinct size so the document hierarchy reads at a glance. Typing a

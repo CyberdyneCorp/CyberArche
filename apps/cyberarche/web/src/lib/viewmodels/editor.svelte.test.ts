@@ -138,6 +138,73 @@ describe('editor ViewModel', () => {
 		expect(vm.focusedId).toBe(vm.blocks[0].id);
 	});
 
+	it('setHeadingLevel changes an existing heading and promotes a paragraph', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'Title' });
+
+		vm.setHeadingLevel(id, 3);
+		expect(vm.blocks[0].type).toBe('heading');
+		expect(vm.blocks[0].data.level).toBe(3);
+		expect(vm.blocks[0].data.text).toBe('Title'); // text preserved
+
+		vm.setHeadingLevel(id, 1);
+		expect(vm.blocks[0].data.level).toBe(1);
+	});
+
+	it('turnInto changes type while preserving text', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'a task' });
+
+		vm.turnInto(id, 'todo');
+		expect(vm.blocks[0].type).toBe('todo');
+		expect(vm.blocks[0].data.text).toBe('a task');
+		expect(vm.blocks[0].data.checked).toBe(false); // default merged in
+	});
+
+	it('duplicate inserts a fresh-id copy just after the block', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		vm.updateData(first, { text: 'copy me' });
+
+		const copyId = vm.duplicate(first);
+		expect(copyId).toBeTruthy();
+		expect(vm.blocks).toHaveLength(2);
+		expect(copyId).not.toBe(first);
+		expect(vm.blocks[1].id).toBe(copyId);
+		expect(vm.blocks[1].data.text).toBe('copy me');
+		// Independent data object (mutating the copy must not touch the original).
+		vm.updateData(copyId!, { text: 'changed' });
+		expect(vm.blocks[0].data.text).toBe('copy me');
+	});
+
+	it('toggleMark wraps and unwraps a selection with a markdown marker', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'the quick fox' });
+
+		// Wrap "quick" (offsets 4..9) in bold.
+		let sel = vm.toggleMark(id, '**', 4, 9);
+		expect(vm.blocks[0].data.text).toBe('the **quick** fox');
+		expect(sel).toEqual({ start: 6, end: 11 });
+
+		// Re-applying over the returned selection unwraps (markers just outside).
+		sel = vm.toggleMark(id, '**', sel.start, sel.end);
+		expect(vm.blocks[0].data.text).toBe('the quick fox');
+		expect(sel).toEqual({ start: 4, end: 9 });
+	});
+
+	it('toggleMark unwraps when markers sit inside the selection', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'a `code` b' });
+		// Select including the backticks (offsets 2..8 = "`code`").
+		const sel = vm.toggleMark(id, '`', 2, 8);
+		expect(vm.blocks[0].data.text).toBe('a code b');
+		expect(sel).toEqual({ start: 2, end: 6 });
+	});
+
 	it('undo/redo round-trips local edits', () => {
 		const vm = editor();
 		vm.insertAfter(null, 'paragraph');

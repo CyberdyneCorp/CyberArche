@@ -193,6 +193,21 @@ textarea {
 	color: var(--ai);
 }
 
+/* Inline code and strikethrough rendered inline by the editor. */
+.editable code,
+.rendered code {
+	font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+	font-size: 0.88em;
+	background: var(--bg2);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 0.05em 0.35em;
+}
+.editable del,
+.rendered del {
+	color: var(--tx3);
+}
+
 /* Wikilinks ([[Document]]) rendered inline by the editor. */
 .wikilink {
 	color: var(--acc-strong);

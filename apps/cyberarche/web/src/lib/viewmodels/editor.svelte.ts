@@ -170,6 +170,76 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			focusedId = id;
 		},
 
+		/** Change a heading's level (H1–H4), turning a non-heading into a heading
+		 * first while preserving its text. */
+		setHeadingLevel(id: string, level: number): void {
+			const block = blocks.find((b) => b.id === id);
+			if (!block) return;
+			if (block.type === 'heading') {
+				vm.updateData(id, { level });
+			} else {
+				const text = String((block.data as { text?: string })?.text ?? '');
+				vm.transform(id, 'heading', { text, level });
+			}
+			focusedId = id;
+		},
+
+		/** Turn a text-family block into another text-family type, preserving its
+		 * text (Text/list/to-do/quote/callout — all keyed on `data.text`). */
+		turnInto(id: string, type: string): void {
+			const block = blocks.find((b) => b.id === id);
+			if (!block) return;
+			const text = String((block.data as { text?: string })?.text ?? '');
+			vm.transform(id, type, { ...newBlock(type).data, text });
+		},
+
+		/** Insert a copy of a block just after it, with a fresh id. One undo step. */
+		duplicate(id: string): string | null {
+			const index = indexOf(id);
+			if (index < 0) return null;
+			const snapshot = yblocks.get(index).toJSON() as BlockData;
+			const copy: BlockData = {
+				id: crypto.randomUUID().replaceAll('-', ''),
+				type: snapshot.type,
+				data: structuredClone(snapshot.data)
+			};
+			undoManager.stopCapturing();
+			transact(() => yblocks.insert(index + 1, [toYMap(copy)]));
+			undoManager.stopCapturing();
+			focusedId = copy.id;
+			return copy.id;
+		},
+
+		/** Toggle a wrapping inline marker (e.g. `**` bold, `*` italic, `` ` ``
+		 * code, `~~` strike) around the `[start, end)` slice of a text block's
+		 * markdown source. Unwraps when the slice is already wrapped (markers just
+		 * inside or just outside the selection). Returns the selection offsets over
+		 * the updated source so the caller can restore the highlight. */
+		toggleMark(
+			id: string,
+			marker: string,
+			start: number,
+			end: number
+		): { start: number; end: number } {
+			if (start >= end) return { start, end };
+			const block = blocks.find((b) => b.id === id);
+			const text = String((block?.data as { text?: string })?.text ?? '');
+			const len = marker.length;
+			const before = text.slice(0, start);
+			const sel = text.slice(start, end);
+			const after = text.slice(end);
+			if (sel.length >= 2 * len && sel.startsWith(marker) && sel.endsWith(marker)) {
+				vm.updateData(id, { text: before + sel.slice(len, -len) + after });
+				return { start, end: end - 2 * len };
+			}
+			if (before.endsWith(marker) && after.startsWith(marker)) {
+				vm.updateData(id, { text: before.slice(0, -len) + sel + after.slice(len) });
+				return { start: start - len, end: end - len };
+			}
+			vm.updateData(id, { text: before + marker + sel + marker + after });
+			return { start: start + len, end: end + len };
+		},
+
 		remove(id: string): { previousId: string | null } {
 			const index = indexOf(id);
 			if (index < 0) return { previousId: null };

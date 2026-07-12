@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import CommentThread from '$lib/components/CommentThread.svelte';
+	import ContextMenu, { type MenuItem } from '$lib/components/ContextMenu.svelte';
 	import { blockDefinition } from '$lib/editor/registry';
 	import { colorFor, type EditorVM } from '$lib/viewmodels/editor.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
@@ -13,6 +14,157 @@
 		$props();
 
 	let commentsFor = $state<string | null>(null);
+
+	// ---- block / selection context menu (right-click) ----------------------
+	// Text-family blocks share `data.text`, so they can turn into one another and
+	// carry inline formatting; other types only get duplicate/delete.
+	const TEXT_TYPES = new Set([
+		'paragraph',
+		'heading',
+		'bulleted_list',
+		'numbered_list',
+		'todo',
+		'quote',
+		'callout'
+	]);
+	const TURN_INTO = [
+		{ type: 'paragraph', label: 'Text', icon: '¶' },
+		{ type: 'bulleted_list', label: 'Bulleted list', icon: '•' },
+		{ type: 'numbered_list', label: 'Numbered list', icon: '1.' },
+		{ type: 'todo', label: 'To-do', icon: '☐' },
+		{ type: 'quote', label: 'Quote', icon: '❝' },
+		{ type: 'callout', label: 'Callout', icon: '◆' }
+	];
+
+	type BlockMenu = {
+		x: number;
+		y: number;
+		blockId: string;
+		editable: HTMLElement | null;
+		range: { start: number; end: number } | null;
+	};
+	let menu = $state<BlockMenu | null>(null);
+
+	/** Absolute character offset of (node, off) within `el`'s text. */
+	function offsetOf(el: HTMLElement, node: Node, off: number): number {
+		const range = document.createRange();
+		range.selectNodeContents(el);
+		range.setEnd(node, off);
+		return range.toString().length;
+	}
+	function selectionOffsets(el: HTMLElement): { start: number; end: number } | null {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) return null;
+		const range = sel.getRangeAt(0);
+		const start = offsetOf(el, range.startContainer, range.startOffset);
+		const end = offsetOf(el, range.endContainer, range.endOffset);
+		return start <= end ? { start, end } : { start: end, end: start };
+	}
+
+	function onContextMenu(event: MouseEvent, block: { id: string; data: unknown }) {
+		if (editor.readOnly) return;
+		const editable = (event.target as HTMLElement).closest('.editable') as HTMLElement | null;
+		let range: { start: number; end: number } | null = null;
+		const sel = window.getSelection();
+		if (
+			editable &&
+			sel &&
+			!sel.isCollapsed &&
+			sel.anchorNode &&
+			editable.contains(sel.anchorNode)
+		) {
+			// Offsets are over the editable's text, which equals the stored markdown
+			// source only while editing (raw source shown); guard so we never map a
+			// rendered-HTML selection onto source offsets.
+			const source = String((block.data as { text?: string })?.text ?? '');
+			if ((editable.textContent ?? '') === source) range = selectionOffsets(editable);
+		}
+		event.preventDefault();
+		menu = { x: event.clientX, y: event.clientY, blockId: block.id, editable, range };
+	}
+
+	/** Wrap/unwrap the stored selection in a markdown marker, then restore the
+	 * highlight in the (raw-source) editable so the user can keep formatting. */
+	function applyMark(marker: string) {
+		if (!menu || !menu.range) return;
+		const { blockId, editable, range } = menu;
+		const res = editor.toggleMark(blockId, marker, range.start, range.end);
+		menu = null;
+		if (!editable) return;
+		const fresh = String(
+			(editor.blocks.find((b) => b.id === blockId)?.data as { text?: string })?.text ?? ''
+		);
+		editable.focus(); // onfocus flips to raw-source editing mode…
+		editable.textContent = fresh; // …then we override with the updated source
+		const node = editable.firstChild;
+		if (node) {
+			const restore = document.createRange();
+			restore.setStart(node, Math.min(res.start, fresh.length));
+			restore.setEnd(node, Math.min(res.end, fresh.length));
+			const sel = window.getSelection();
+			sel?.removeAllRanges();
+			sel?.addRange(restore);
+		}
+	}
+
+	function menuItems(): MenuItem[] {
+		if (!menu) return [];
+		const block = editor.blocks.find((b) => b.id === menu!.blockId);
+		if (!block) return [];
+		const items: MenuItem[] = [];
+		if (menu.range) {
+			items.push({ label: 'Format', heading: true });
+			items.push({ label: 'Bold', icon: 'B', onSelect: () => applyMark('**') });
+			items.push({ label: 'Italic', icon: 'I', onSelect: () => applyMark('*') });
+			items.push({ label: 'Code', icon: '‹›', onSelect: () => applyMark('`') });
+			items.push({ label: 'Strikethrough', icon: 'S', onSelect: () => applyMark('~~') });
+			items.push({ separator: true });
+		}
+		if (block.type === 'heading') {
+			items.push({ label: 'Heading level', heading: true });
+			const level = Math.round(Number((block.data as { level?: number }).level) || 1);
+			for (const lvl of [1, 2, 3, 4]) {
+				items.push({
+					label: `Heading ${lvl}`,
+					active: level === lvl,
+					onSelect: () => editor.setHeadingLevel(block.id, lvl)
+				});
+			}
+			items.push({ separator: true });
+		}
+		if (TEXT_TYPES.has(block.type)) {
+			items.push({ label: 'Turn into', heading: true });
+			if (block.type !== 'heading') {
+				items.push({
+					label: 'Heading',
+					icon: 'H',
+					onSelect: () => editor.setHeadingLevel(block.id, 2)
+				});
+			}
+			for (const target of TURN_INTO) {
+				if (target.type === 'paragraph' && block.type === 'paragraph') continue;
+				items.push({
+					label: target.label,
+					icon: target.icon,
+					active: block.type === target.type,
+					onSelect: () => editor.turnInto(block.id, target.type)
+				});
+			}
+			items.push({ separator: true });
+		}
+		items.push({
+			label: 'Duplicate',
+			icon: '⧉',
+			onSelect: () => editor.duplicate(menu!.blockId)
+		});
+		items.push({
+			label: 'Delete',
+			icon: '🗑',
+			danger: true,
+			onSelect: () => editor.remove(menu!.blockId)
+		});
+		return items;
+	}
 
 	// Wikilink clicks: navigate to a resolved doc, or create one for a broken link.
 	async function onEditorClick(event: MouseEvent) {
@@ -101,7 +253,12 @@
 					onclick={() => editor.remove(block.id)}>🗑</button
 				>
 			</div>
-			<div class="body" class:peered={peer !== null}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="body"
+				class:peered={peer !== null}
+				oncontextmenu={(event) => onContextMenu(event, block)}
+			>
 				{#if peer}
 					<span class="peer-label" style:background={peer.color}>{peer.user_id}</span>
 				{/if}
@@ -131,6 +288,10 @@
 		＋ Add a block
 	</button>
 </div>
+
+{#if menu}
+	<ContextMenu x={menu.x} y={menu.y} items={menuItems()} onclose={() => (menu = null)} />
+{/if}
 
 <style>
 	.editor {

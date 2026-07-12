@@ -14,6 +14,18 @@ describe('renderInline', () => {
 		expect(renderInline('_also_')).toContain('<em>also</em>');
 	});
 
+	it('renders inline code and strikethrough', () => {
+		expect(renderInline('use `npm ci` now')).toContain('<code>npm ci</code>');
+		expect(renderInline('~~gone~~')).toContain('<del>gone</del>');
+	});
+
+	it('does not apply emphasis to markers inside inline code', () => {
+		// The `**` inside the code span is literal, not bold.
+		const html = renderInline('`a**b`');
+		expect(html).toContain('<code>a**b</code>');
+		expect(html).not.toContain('<strong>');
+	});
+
 	it('does not treat bold as italic', () => {
 		const html = renderInline('**strong**');
 		expect(html).toContain('<strong>strong</strong>');
