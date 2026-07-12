@@ -541,6 +541,73 @@ async def test_meeting_tools_require_a_caller_token(use_cases, alice):
     }
 
 
+async def test_agent_updates_a_table_block(use_cases, llm, alice):
+    # Regression: update_block cannot edit a table (it only writes text); the
+    # agent must use update_table, which rewrites header/rows.
+    _, document = await make_document(use_cases, alice)
+    await use_cases.agent.apply_blocks(
+        alice,
+        document.id,
+        [
+            {
+                "id": "t1",
+                "type": "table",
+                "data": {
+                    "header": ["Name", "Description"],
+                    "rows": [["Cyberfluids", "CFD library"]],
+                },
+            }
+        ],
+    )
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="update_table",
+                    arguments={
+                        "block_id": "t1",
+                        "header": ["Name", "Description"],
+                        "rows": [
+                            [
+                                "[Cyberfluids](https://github.com/x/cyberfluids)",
+                                "CFD library",
+                            ]
+                        ],
+                    },
+                ),
+            ),
+        ),
+        LLMResponse(text="Linked the names.", model="m"),
+    ]
+
+    await use_cases.agent.ask(alice, document.id, instruction="link the names")
+
+    state = await use_cases.realtime.current_state(alice, document.id)
+    table = next(
+        b for b in use_cases.agent._engine.read_blocks(state) if b["type"] == "table"
+    )
+    assert table["data"]["rows"][0][0] == "[Cyberfluids](https://github.com/x/cyberfluids)"
+
+
+async def test_agent_sees_table_cells_in_its_context():
+    # The agent's context renders a table's cells (so it can target them),
+    # not an empty body.
+    from cyberarche.application.use_cases.agent import _render_block
+
+    rendered = _render_block(
+        {
+            "id": "t1",
+            "type": "table",
+            "data": {"header": ["Name"], "rows": [["Cyberfluids"], ["CalculixPP"]]},
+        }
+    )
+    assert "[block:t1] (table)" in rendered
+    assert "Cyberfluids" in rendered and "CalculixPP" in rendered
+    assert "| Name |" in rendered
+
+
 async def test_web_media_tools_require_a_caller_token(use_cases, alice):
     _, document = await make_document(use_cases, alice)
     # No access token → the per-caller web/media tools are not offered.

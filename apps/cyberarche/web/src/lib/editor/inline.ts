@@ -46,21 +46,39 @@ function escapeAttr(text: string): string {
 /** Resolve a wikilink title to an href, or null if no document matches. */
 export type LinkResolver = (title: string) => string | null;
 
-/** Render a plain-text segment: `[[Title]]` wikilinks become links (resolved or
- * a distinct broken link); the rest gets HTML-escaped emphasis. */
+/** Only http(s)/mailto external links are rendered; anything else (javascript:,
+ * data:, …) falls back to text so a cell can never inject a dangerous href. */
+function safeHref(url: string): string | null {
+	return /^(https?:\/\/|mailto:)/i.test(url.trim()) ? url.trim() : null;
+}
+
+/** Render a plain-text segment: `[[Title]]` wikilinks and `[label](url)`
+ * external links become links; the rest gets HTML-escaped emphasis. */
 function renderTextSegment(text: string, resolve?: LinkResolver): string {
+	// Split on wikilinks OR markdown links, keeping the delimiters.
 	return text
-		.split(/(\[\[[^[\]]+\]\])/g)
+		.split(/(\[\[[^[\]]+\]\]|\[[^\][]+\]\([^\s()]+\))/g)
 		.map((part) => {
-			const link = /^\[\[([^[\]]+)\]\]$/.exec(part);
-			if (!link) return renderEmphasis(escapeHtml(part));
-			const title = link[1].trim();
-			const label = escapeHtml(title);
-			const href = resolve?.(title) ?? null;
-			const attr = `data-wikilink="${escapeAttr(title)}" contenteditable="false"`;
-			return href
-				? `<a class="wikilink" href="${escapeAttr(href)}" ${attr}>${label}</a>`
-				: `<span class="wikilink broken" ${attr}>${label}</span>`;
+			const wiki = /^\[\[([^[\]]+)\]\]$/.exec(part);
+			if (wiki) {
+				const title = wiki[1].trim();
+				const label = escapeHtml(title);
+				const href = resolve?.(title) ?? null;
+				const attr = `data-wikilink="${escapeAttr(title)}" contenteditable="false"`;
+				return href
+					? `<a class="wikilink" href="${escapeAttr(href)}" ${attr}>${label}</a>`
+					: `<span class="wikilink broken" ${attr}>${label}</span>`;
+			}
+			const md = /^\[([^\][]+)\]\(([^\s()]+)\)$/.exec(part);
+			if (md) {
+				const href = safeHref(md[2]);
+				const label = renderEmphasis(escapeHtml(md[1].trim()));
+				return href
+					? `<a class="ext-link" href="${escapeAttr(href)}" target="_blank" ` +
+							`rel="noopener noreferrer">${label}</a>`
+					: renderEmphasis(escapeHtml(part));
+			}
+			return renderEmphasis(escapeHtml(part));
 		})
 		.join('');
 }

@@ -60,6 +60,21 @@ the selection so multiple marks can be applied in succession.
 - **WHEN** text contains `` `code` `` or `~~struck~~`
 - **THEN** the editor SHALL render it as inline code or strikethrough
 
+### Requirement: Inline links
+The editor's inline renderer SHALL render `[[Title]]` as an internal wikilink and
+`[label](url)` as an external link opening in a new tab. Only `http`, `https`,
+and `mailto` URL schemes SHALL be linked; any other scheme SHALL render as plain
+text so a cell or paragraph can never inject a dangerous href. External links
+SHALL be available anywhere the inline renderer runs, including table cells.
+
+#### Scenario: Render an external markdown link
+- **WHEN** text contains `[Example](https://example.com)` and is not being edited
+- **THEN** the editor SHALL render it as a link to `https://example.com`
+
+#### Scenario: Reject an unsafe scheme
+- **WHEN** text contains a link whose URL uses a non-http(s)/mailto scheme
+- **THEN** the editor SHALL render it as plain text, not a link
+
 ### Requirement: Heading levels
 The editor SHALL support four heading levels (H1–H4), each rendered at a
 visually distinct size so the document hierarchy reads at a glance. Typing a

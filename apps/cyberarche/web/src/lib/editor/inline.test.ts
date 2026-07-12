@@ -26,6 +26,25 @@ describe('renderInline', () => {
 		expect(html).not.toContain('<strong>');
 	});
 
+	it('renders [label](url) external links with a safe target', () => {
+		const html = renderInline('see [Cyberfluids](https://github.com/cyberarche/cyberfluids)');
+		expect(html).toContain(
+			'<a class="ext-link" href="https://github.com/cyberarche/cyberfluids" target="_blank" rel="noopener noreferrer">Cyberfluids</a>'
+		);
+	});
+
+	it('does not render an unsafe scheme as a link (falls back to text)', () => {
+		const html = renderInline('[x](javascript:alert)');
+		expect(html).not.toContain('<a'); // no anchor emitted
+		expect(html).not.toContain('href='); // and certainly no dangerous href
+	});
+
+	it('renders a wikilink and an external link in the same text', () => {
+		const html = renderInline('[[Home]] and [GH](https://github.com)', () => '/w/1/d/2');
+		expect(html).toContain('class="wikilink"');
+		expect(html).toContain('class="ext-link"');
+	});
+
 	it('does not treat bold as italic', () => {
 		const html = renderInline('**strong**');
 		expect(html).toContain('<strong>strong</strong>');

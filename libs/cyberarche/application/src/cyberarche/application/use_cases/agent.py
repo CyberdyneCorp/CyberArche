@@ -132,8 +132,10 @@ _SYSTEM_PROMPT = (
     "document content and knowledge-base results; cite block ids (e.g. "
     "[block:abc123]) or source filenames for every claim you take from them. "
     "The open document and its block ids are given to you — never look it up "
-    "by title. To change it, call insert_blocks / update_block / delete_block; "
-    "these act on the open document only. When asked to produce content "
+    "by title. To change it, call insert_blocks / update_block / update_table / "
+    "delete_block; these act on the open document only. To edit a `(table)` "
+    "block, use update_table (update_block only changes text blocks). When asked "
+    "to produce content "
     "without editing, return plain paragraphs separated by blank lines. The "
     "editor renders your answer: write math as $inline$ or $$display$$, "
     "diagrams as ```mermaid fenced blocks, and code as ```language fenced "
@@ -591,6 +593,18 @@ class AgentUseCases:
                     {"text": str(arguments["text"])},
                 )
                 return f"updated block {arguments['block_id']}"
+            if operation == "update_table":
+                block_id = str(arguments["block_id"])
+                data: dict = {
+                    "rows": [
+                        [str(cell) for cell in row]
+                        for row in arguments.get("rows", [])
+                    ]
+                }
+                if arguments.get("header") is not None:
+                    data["header"] = [str(col) for col in arguments["header"]]
+                await self.update_block(caller, document_id, block_id, data)
+                return f"updated table {block_id}"
             if operation == "delete_block":
                 await self.delete_block(caller, document_id, str(arguments["block_id"]))
                 return f"deleted block {arguments['block_id']}"
@@ -898,6 +912,7 @@ class AgentUseCases:
 _EDITING_TOOL_NAMES = {
     "insert_blocks",
     "update_block",
+    "update_table",
     "delete_block",
     "generate_image",
     "create_mindmap",
@@ -1361,6 +1376,40 @@ def _editing_tools() -> list[tuple[ToolSpec, str]]:
         ),
         (
             ToolSpec(
+                name="update_table",
+                description=(
+                    "Edit an existing TABLE block (by the block id shown in the "
+                    "context — a `(table)` block). Provide the FULL new `rows` (a "
+                    "list of rows, each a list of cell strings) and optionally a "
+                    "new `header` (list of column names). This replaces the "
+                    "table's cells, so include every row/column, not just the "
+                    "changed ones. Cell text may contain inline markdown, "
+                    "including links written as [label](https://example.com). "
+                    "update_block does NOT work on tables — always use this."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "block_id": {"type": "string"},
+                        "header": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "rows": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                    },
+                    "required": ["block_id", "rows"],
+                },
+            ),
+            "update_table",
+        ),
+        (
+            ToolSpec(
                 name="delete_block",
                 description="Delete a block of the open document by its id.",
                 parameters={
@@ -1381,9 +1430,29 @@ def _render_block(block: dict) -> str:
         body = describe_scene(data.get("scene", ""))
     elif block_type in _SOURCE_BLOCKS:
         body = (data.get("source") or "").strip()
+    elif block_type == "table":
+        # Render the cells so the agent can see and edit them (via update_table).
+        body = "\n" + _table_to_text(
+            data.get("header") or [], data.get("rows") or []
+        )
     else:
         body = data.get("text", "")
     return f"[block:{block.get('id', '?')}] ({block_type}) {body}"
+
+
+def _table_to_text(header: list, rows: list) -> str:
+    """A markdown rendering of a table block's cells for the agent's context."""
+
+    def cell(value: object) -> str:
+        return str(value).replace("\n", " ").strip()
+
+    lines = []
+    if header:
+        lines.append("| " + " | ".join(cell(h) for h in header) + " |")
+        lines.append("| " + " | ".join("---" for _ in header) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(cell(c) for c in row) + " |")
+    return "\n".join(lines) if lines else "(empty table)"
 
 
 def _connector_ids(session_connectors: set[str] | None) -> set[ConnectorId] | None:

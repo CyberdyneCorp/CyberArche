@@ -223,6 +223,14 @@ textarea {
 	border-bottom: 1px dashed color-mix(in srgb, var(--rose) 45%, transparent);
 }
 
+/* External links [label](https://…) rendered inline by the editor. */
+.editable .ext-link,
+.rendered .ext-link {
+	color: var(--acc-strong);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
 /* PDF export = browser print: show only the document canvas (title + blocks),
  * hiding the sidebar, top bar, agent panel, dialogs, and toasts. Math, mermaid,
  * and images print as rendered on screen. */

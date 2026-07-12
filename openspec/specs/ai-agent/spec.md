@@ -108,6 +108,13 @@ change through the CRDT so collaborators see it live.
 - **WHEN** the agent is asked to remove a block it can identify
 - **THEN** the block SHALL be removed from the document
 
+#### Scenario: Edit a table block's cells
+- **GIVEN** the open document contains a `table` block
+- **WHEN** the agent is asked to change the table's contents
+- **THEN** the agent's context SHALL show the table's current header and rows
+- **AND** the agent SHALL rewrite the cells through a table-editing tool
+  (updating a text field SHALL NOT be treated as editing the table)
+
 #### Scenario: Editing requires edit permission
 - **WHEN** a caller with view-only permission asks the agent to change the document
 - **THEN** the edit SHALL be denied and no change SHALL be applied
