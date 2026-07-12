@@ -34,9 +34,56 @@ export const OPTION_COLORS = [
 	'#e11d48', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#0ea5e9', '#ec4899', '#64748b'
 ];
 
+export interface Filter {
+	id: string;
+	propertyId: string;
+	op: string;
+	value: CellValue;
+}
+
+/** Operators offered per property type; `needsValue` false means the operator
+ * takes no comparison value (e.g. "is empty"). */
+export const OPERATORS: Record<
+	PropertyType,
+	{ value: string; label: string; needsValue: boolean }[]
+> = {
+	text: [
+		{ value: 'contains', label: 'contains', needsValue: true },
+		{ value: 'equals', label: 'is', needsValue: true },
+		{ value: 'empty', label: 'is empty', needsValue: false },
+		{ value: 'not_empty', label: 'is not empty', needsValue: false }
+	],
+	number: [
+		{ value: 'eq', label: '=', needsValue: true },
+		{ value: 'ne', label: '≠', needsValue: true },
+		{ value: 'gt', label: '>', needsValue: true },
+		{ value: 'lt', label: '<', needsValue: true },
+		{ value: 'gte', label: '≥', needsValue: true },
+		{ value: 'lte', label: '≤', needsValue: true },
+		{ value: 'empty', label: 'is empty', needsValue: false }
+	],
+	select: [
+		{ value: 'is', label: 'is', needsValue: true },
+		{ value: 'is_not', label: 'is not', needsValue: true },
+		{ value: 'empty', label: 'is empty', needsValue: false }
+	],
+	checkbox: [
+		{ value: 'checked', label: 'is checked', needsValue: false },
+		{ value: 'unchecked', label: 'is unchecked', needsValue: false }
+	],
+	date: [
+		{ value: 'is', label: 'is', needsValue: true },
+		{ value: 'before', label: 'before', needsValue: true },
+		{ value: 'after', label: 'after', needsValue: true },
+		{ value: 'empty', label: 'is empty', needsValue: false }
+	]
+};
+
 const LOCAL = 'local';
 const MIRROR_MS = 400;
 const SCHEMA_KEY = '__schema';
+const FILTERS_KEY = '__filters';
+const RESERVED = new Set([SCHEMA_KEY, FILTERS_KEY]);
 
 function newId(): string {
 	return crypto.randomUUID().replaceAll('-', '').slice(0, 12);
@@ -71,12 +118,14 @@ export function createDatabase(
 	const ymap = doc.getMap<unknown>(`db:${blockId}`);
 	let properties = $state<Property[]>([]);
 	let rows = $state<Row[]>([]);
+	let filters = $state<Filter[]>([]);
 	let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function mirror(): void {
 		properties = ((ymap.get(SCHEMA_KEY) as Property[]) ?? []).map((p) => ({ ...p }));
+		filters = ((ymap.get(FILTERS_KEY) as Filter[]) ?? []).map((f) => ({ ...f }));
 		rows = [...ymap.entries()]
-			.filter(([key]) => key !== SCHEMA_KEY)
+			.filter(([key]) => !RESERVED.has(key))
 			.map(([, row]) => row as Row)
 			.sort((a, b) => a.order - b.order);
 	}
@@ -104,7 +153,7 @@ export function createDatabase(
 			options.onMirror!({
 				properties: (ymap.get(SCHEMA_KEY) as Property[]) ?? [],
 				rows: [...ymap.entries()]
-					.filter(([k]) => k !== SCHEMA_KEY)
+					.filter(([k]) => !RESERVED.has(k))
 					.map(([, r]) => {
 						const { order: _order, ...rest } = r as Row;
 						return rest;
@@ -125,12 +174,42 @@ export function createDatabase(
 		scheduleMirror();
 	}
 
+	function currentFilters(): Filter[] {
+		return (ymap.get(FILTERS_KEY) as Filter[]) ?? [];
+	}
+	function setFilters(next: Filter[]): void {
+		doc.transact(() => ymap.set(FILTERS_KEY, next), LOCAL);
+	}
+
 	const vm = {
 		get properties() {
 			return properties;
 		},
 		get rows() {
 			return rows;
+		},
+		get filters() {
+			return filters;
+		},
+
+		addFilter(propertyId?: string): void {
+			const property = schema().find((p) => p.id === propertyId) ?? schema()[0];
+			if (!property) return;
+			setFilters([
+				...currentFilters(),
+				{
+					id: newId(),
+					propertyId: property.id,
+					op: OPERATORS[property.type][0].value,
+					value: null
+				}
+			]);
+		},
+		removeFilter(id: string): void {
+			setFilters(currentFilters().filter((f) => f.id !== id));
+		},
+		updateFilter(id: string, patch: Partial<Filter>): void {
+			setFilters(currentFilters().map((f) => (f.id === id ? { ...f, ...patch } : f)));
 		},
 
 		addProperty(type: PropertyType = 'text'): Property {
@@ -207,6 +286,57 @@ export function createDatabase(
 }
 
 export type DatabaseVM = ReturnType<typeof createDatabase>;
+
+function matchOne(value: CellValue, op: string, fv: CellValue): boolean {
+	const empty = value == null || value === '';
+	switch (op) {
+		case 'empty':
+			return empty;
+		case 'not_empty':
+			return !empty;
+		case 'checked':
+			return value === true;
+		case 'unchecked':
+			return value !== true;
+		case 'contains':
+			return String(value ?? '').toLowerCase().includes(String(fv ?? '').toLowerCase());
+		case 'equals':
+		case 'is':
+			return String(value ?? '') === String(fv ?? '');
+		case 'is_not':
+			return String(value ?? '') !== String(fv ?? '');
+		case 'eq':
+			return Number(value) === Number(fv);
+		case 'ne':
+			return Number(value) !== Number(fv);
+		case 'gt':
+			return Number(value) > Number(fv);
+		case 'lt':
+			return Number(value) < Number(fv);
+		case 'gte':
+			return Number(value) >= Number(fv);
+		case 'lte':
+			return Number(value) <= Number(fv);
+		case 'before':
+			return !empty && String(value) < String(fv ?? '');
+		case 'after':
+			return !empty && String(value) > String(fv ?? '');
+		default:
+			return true;
+	}
+}
+
+/** Rows passing every filter (AND). Unknown properties are ignored. */
+export function applyFilters(rows: Row[], filters: Filter[], properties: Property[]): Row[] {
+	if (!filters.length) return rows;
+	const byId = new Map(properties.map((p) => [p.id, p]));
+	return rows.filter((row) =>
+		filters.every((f) => {
+			if (!byId.has(f.propertyId)) return true;
+			return matchOne(row.values[f.propertyId] ?? null, f.op, f.value);
+		})
+	);
+}
 
 /** Rows sorted by a property (display-only; does not mutate stored order). */
 export function sortRows(rows: Row[], propertyId: string, dir: 'asc' | 'desc'): Row[] {

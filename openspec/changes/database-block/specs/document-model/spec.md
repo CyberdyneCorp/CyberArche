@@ -38,3 +38,21 @@ row to a group.
 
 - **WHEN** the user sorts the table by a column
 - **THEN** the rows SHALL be ordered by that column's values
+
+### Requirement: Database filters
+
+The `database` block SHALL let the user filter rows by conditions on properties,
+with type-appropriate operators (e.g. text contains/is, number comparisons,
+select is/is-not, checkbox checked/unchecked, date before/after, and is-empty).
+Multiple filters SHALL combine with AND and SHALL apply to both the table and
+board views. Filters SHALL persist in the document.
+
+#### Scenario: Filter rows
+
+- **WHEN** the user adds a filter (e.g. Status is Done)
+- **THEN** only rows matching every active filter SHALL be shown in both views
+
+#### Scenario: Filters persist
+
+- **WHEN** filters are set and the document is reopened
+- **THEN** the same filters SHALL still apply

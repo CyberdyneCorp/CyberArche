@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
-import { createDatabase, sortRows } from './database.svelte';
+import { applyFilters, createDatabase, sortRows, type Property } from './database.svelte';
 
 vi.stubGlobal('crypto', {
 	randomUUID: () => `${Math.random().toString(16).slice(2)}-x-x-x-x`
@@ -48,6 +48,54 @@ describe('database view-model', () => {
 		const b = createDatabase(doc, 'blk2'); // reopen the same block
 		expect(b.rows.length).toBe(1);
 		expect(b.rows[0].values[name.id]).toBe('Persisted');
+	});
+
+	it('filters rows by typed operators (AND across filters)', () => {
+		const props: Property[] = [
+			{ id: 'name', name: 'Name', type: 'text' },
+			{ id: 'n', name: 'N', type: 'number' },
+			{ id: 'done', name: 'Done', type: 'checkbox' },
+			{
+				id: 'status',
+				name: 'Status',
+				type: 'select',
+				options: [{ id: 'op1', name: 'Doing', color: '#000' }]
+			}
+		];
+		const rows = [
+			{ id: 'a', order: 0, values: { name: 'Alpha', n: 5, done: true, status: 'op1' } },
+			{ id: 'b', order: 1, values: { name: 'Beta', n: 2, done: false, status: null } },
+			{ id: 'c', order: 2, values: { name: 'Alpine', n: 9, done: true, status: 'op1' } }
+		];
+
+		// text contains
+		expect(applyFilters(rows, [{ id: 'f', propertyId: 'name', op: 'contains', value: 'alp' }], props).map((r) => r.id)).toEqual(['a', 'c']);
+		// number greater-than
+		expect(applyFilters(rows, [{ id: 'f', propertyId: 'n', op: 'gt', value: 4 }], props).map((r) => r.id)).toEqual(['a', 'c']);
+		// checkbox unchecked
+		expect(applyFilters(rows, [{ id: 'f', propertyId: 'done', op: 'unchecked', value: null }], props).map((r) => r.id)).toEqual(['b']);
+		// select is empty
+		expect(applyFilters(rows, [{ id: 'f', propertyId: 'status', op: 'empty', value: null }], props).map((r) => r.id)).toEqual(['b']);
+		// two filters AND: contains "alp" AND n < 8
+		expect(
+			applyFilters(
+				rows,
+				[
+					{ id: 'f1', propertyId: 'name', op: 'contains', value: 'alp' },
+					{ id: 'f2', propertyId: 'n', op: 'lt', value: 8 }
+				],
+				props
+			).map((r) => r.id)
+		).toEqual(['a']);
+	});
+
+	it('persists filters in the doc', () => {
+		const doc = new Y.Doc();
+		const a = createDatabase(doc, 'blkf');
+		a.addFilter(a.properties[0].id);
+		expect(a.filters.length).toBe(1);
+		const b = createDatabase(doc, 'blkf');
+		expect(b.filters.length).toBe(1);
 	});
 
 	it('sorts rows by a property without mutating stored order', () => {

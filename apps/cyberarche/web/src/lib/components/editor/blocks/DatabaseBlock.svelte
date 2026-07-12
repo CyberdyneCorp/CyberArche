@@ -5,7 +5,9 @@
 	import type { BlockComponentProps } from '$lib/editor/registry';
 	import type { EditorVM } from '$lib/viewmodels/editor.svelte';
 	import {
+		applyFilters,
 		createDatabase,
+		OPERATORS,
 		sortRows,
 		type DatabaseVM,
 		type DbSnapshot,
@@ -28,6 +30,16 @@
 	let sort = $state<{ id: string; dir: 'asc' | 'desc' } | null>(null);
 	let optionsFor = $state<string | null>(null); // property id whose options popover is open
 	let newOption = $state('');
+	let filtersOpen = $state(false);
+
+	const propById = $derived(new Map(db.properties.map((p) => [p.id, p])));
+	function opsFor(propertyId: string) {
+		const p = propById.get(propertyId);
+		return p ? OPERATORS[p.type] : OPERATORS.text;
+	}
+	function needsValue(propertyId: string, op: string): boolean {
+		return opsFor(propertyId).find((o) => o.value === op)?.needsValue ?? false;
+	}
 
 	const TYPES: { value: PropertyType; label: string }[] = [
 		{ value: 'text', label: 'Text' },
@@ -37,14 +49,24 @@
 		{ value: 'date', label: 'Date' }
 	];
 
-	const displayRows = $derived(
-		sort ? sortRows(db.rows, sort.id, sort.dir) : db.rows
-	);
 	const selectProps = $derived(db.properties.filter((p) => p.type === 'select'));
 	let boardProp = $state<string>('');
 	$effect(() => {
 		// Default the board grouping to the first select property.
 		if (!boardProp && selectProps.length) boardProp = selectProps[0].id;
+	});
+
+	const filteredRows = $derived(applyFilters(db.rows, db.filters, db.properties));
+	const displayRows = $derived(
+		sort ? sortRows(filteredRows, sort.id, sort.dir) : filteredRows
+	);
+	const boardGroups = $derived.by(() => {
+		const groups = new Map<string, Row[]>();
+		for (const row of filteredRows) {
+			const key = (row.values[boardProp] as string) || '';
+			(groups.get(key) ?? groups.set(key, []).get(key)!).push(row);
+		}
+		return groups;
 	});
 
 	function toggleSort(id: string): void {
@@ -90,6 +112,53 @@
 					{#each selectProps as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
 				</select>
 			</label>
+		{/if}
+		{#if !ro}
+			<div class="filter-wrap">
+				<button
+					class="filter-btn"
+					class:on={db.filters.length > 0}
+					data-testid="db-filter"
+					onclick={() => (filtersOpen = !filtersOpen)}
+					>⚑ Filter{db.filters.length ? ` (${db.filters.length})` : ''}</button
+				>
+				{#if filtersOpen}
+					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+					<div class="filter-scrim" role="presentation" onclick={() => (filtersOpen = false)}></div>
+					<div class="filter-pop">
+						{#each db.filters as f (f.id)}
+							{@const p = propById.get(f.propertyId)}
+							<div class="filter-row">
+								<select value={f.propertyId} onchange={(e) => {
+									const pid = (e.target as HTMLSelectElement).value;
+									db.updateFilter(f.id, { propertyId: pid, op: opsFor(pid)[0].value, value: null });
+								}}>
+									{#each db.properties as prop (prop.id)}<option value={prop.id}>{prop.name}</option>{/each}
+								</select>
+								<select value={f.op} onchange={(e) => db.updateFilter(f.id, { op: (e.target as HTMLSelectElement).value })}>
+									{#each opsFor(f.propertyId) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+								</select>
+								{#if needsValue(f.propertyId, f.op)}
+									{#if p?.type === 'select'}
+										<select value={(f.value as string) ?? ''} onchange={(e) => db.updateFilter(f.id, { value: (e.target as HTMLSelectElement).value || null })}>
+											<option value="">—</option>
+											{#each p.options ?? [] as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
+										</select>
+									{:else}
+										<input
+											type={p?.type === 'number' ? 'number' : p?.type === 'date' ? 'date' : 'text'}
+											value={(f.value as string | number) ?? ''}
+											oninput={(e) => db.updateFilter(f.id, { value: (e.target as HTMLInputElement).value })}
+										/>
+									{/if}
+								{/if}
+								<button class="mini danger" title="Remove" onclick={() => db.removeFilter(f.id)}>×</button>
+							</div>
+						{/each}
+						<button class="add-filter" onclick={() => db.addFilter()}>＋ Add filter</button>
+					</div>
+				{/if}
+			</div>
 		{/if}
 	</header>
 
@@ -169,8 +238,8 @@
 			{#each [...(boardProperty.options ?? []), { id: '', name: 'No ' + boardProperty.name, color: 'var(--tx3)' }] as col (col.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="board-col" ondragover={(e) => e.preventDefault()} ondrop={() => onDrop(col.id)}>
-					<div class="col-head"><span class="dot" style={`background:${col.color}`}></span>{col.name}<span class="count">{db.groupBy(boardProp).get(col.id)?.length ?? 0}</span></div>
-					{#each db.groupBy(boardProp).get(col.id) ?? [] as row (row.id)}
+					<div class="col-head"><span class="dot" style={`background:${col.color}`}></span>{col.name}<span class="count">{boardGroups.get(col.id)?.length ?? 0}</span></div>
+					{#each boardGroups.get(col.id) ?? [] as row (row.id)}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div class="card" draggable={!ro} ondragstart={() => (dragRow = row.id)} data-testid="db-card">{cardTitle(row)}</div>
 					{/each}
@@ -220,6 +289,69 @@
 		display: flex;
 		align-items: center;
 		gap: 5px;
+	}
+	.filter-wrap {
+		position: relative;
+		margin-left: auto;
+	}
+	.filter-btn {
+		padding: 3px 9px;
+		border-radius: var(--r-control);
+		border: 1px solid var(--line);
+		color: var(--tx2);
+		font-size: 12px;
+	}
+	.filter-btn:hover {
+		background: var(--bg3);
+		color: var(--tx);
+	}
+	.filter-btn.on {
+		background: var(--accbg2);
+		border-color: var(--acc);
+		color: var(--acc-strong);
+	}
+	.filter-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 9;
+	}
+	.filter-pop {
+		position: absolute;
+		top: calc(100% + 6px);
+		right: 0;
+		z-index: 10;
+		width: 340px;
+		max-width: 86vw;
+		padding: 10px;
+		background: var(--bg1);
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		box-shadow: var(--sh3);
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.filter-row {
+		display: flex;
+		gap: 5px;
+		align-items: center;
+	}
+	.filter-row select,
+	.filter-row input {
+		flex: 1;
+		min-width: 0;
+		font-size: 12px;
+		padding: 4px 6px;
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		background: var(--bg2);
+		color: var(--tx);
+	}
+	.add-filter {
+		text-align: left;
+		color: var(--acc);
+		font-size: 12.5px;
+		padding: 4px 2px;
 	}
 	.group-by select,
 	.col-type {
