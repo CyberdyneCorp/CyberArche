@@ -24,16 +24,37 @@ mcp and workers services wait for `api: service_healthy`.
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 CYBERARCHE_AUTH_BASE_URL / _CLIENT_ID / _CLIENT_SECRET   # cyberarche-backend client
-CYBERARCHE_RAG_BASE_URL / _RAG_WEBHOOK_SECRET
-CYBERARCHE_LLM_PROVIDER / _MODEL / _API_KEY
+CYBERARCHE_RAG_BASE_URL / _RAG_API_TOKEN / _RAG_WEBHOOK_SECRET
+CYBERARCHE_LLM_PROVIDER / _MODEL / _API_KEY / _BASE_URL  # _BASE_URL for OpenAI-compatible endpoints
+CYBERARCHE_MEETINGS_URL                                  # Cyberflies transcripts; defaults to prod URL
 CYBERARCHE_CONNECTOR_SECRET_KEY                          # Fernet key for connector creds
 CYBERARCHE_MCP_ALLOWED_HOSTS=cyberarche.mcp.coolify.cyberdynecorp.ai
 CYBERARCHE_CORS_ORIGINS=["https://cyberarche.coolify.cyberdynecorp.ai"]  # literal
 VITE_API_URL=https://cyberarche.backend.coolify.cyberdynecorp.ai         # BUILD arg
+NPM_GITHUB_TOKEN                                         # BUILD arg: private npm registry (web)
 ```
 
-`VITE_API_URL` is baked into the SPA bundle at **build** time — changing it
-requires a rebuild, not a restart.
+`VITE_API_URL` and `NPM_GITHUB_TOKEN` are consumed at **build** time —
+changing them requires a rebuild, not a restart.
+
+The backend settings surface (`services/cyberarche/api/src/cyberarche/api/config.py`,
+prefix `CYBERARCHE_`) is larger than the list above. Settings not mapped in
+`docker-compose.yml`'s `environment:` block fall back to their in-code
+defaults and **cannot be overridden from Coolify** until a mapping is added:
+
+- `CYBERARCHE_DAO_URL` — DAO backend for agent web search + YouTube tools
+  (defaults to the production URL; caller-token forwarded, works out of the box).
+- `CYBERARCHE_INTERPRETER_URL` — Cyberdyne Python interpreter for the agent's
+  `run_python` tool (defaults to the production URL).
+- `CYBERARCHE_GOOGLE_CLIENT_ID / _SECRET / _REDIRECT_URI` — Google Workspace
+  connector OAuth. Default empty = **disabled**; enabling it in production
+  requires adding these to the compose `environment:` block.
+- `CYBERARCHE_IMAGE_API_KEY / _MODEL / _BASE_URL` — agent `generate_image`
+  tool. Default empty = **disabled**; same compose caveat as Google.
+- `CYBERARCHE_ENABLE_SCHEDULER` / `_SCHEDULER_INTERVAL_SECONDS` — autonomous
+  scheduled agents (default on, 60 s).
+- `CYBERARCHE_AUTH_AUDIENCE` / `_AUTH_TENANT_CLAIM` — token validation tuning
+  (defaults: none / `org_id`).
 
 ## Deploy
 

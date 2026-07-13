@@ -1,8 +1,10 @@
 # Design Brief: CyberArche — AI-Centric Collaborative Document Workspace
 
-> Prompt to hand to a design assistant (e.g. Claude) to produce the visual
-> design system and key screens for the CyberArche frontend. Grounded in the
-> `bootstrap-cyberarche` OpenSpec change (see `openspec/changes/bootstrap-cyberarche/`).
+> Historical prompt handed to a design assistant to produce the visual design
+> system and key screens for the CyberArche frontend. Grounded in the
+> `bootstrap-cyberarche` OpenSpec change (now archived at
+> `openspec/changes/archive/2026-07-08-bootstrap-cyberarche/`); it describes the
+> bootstrap-era product only. For the current feature set see `openspec/specs/`.
 
 ## Role
 
