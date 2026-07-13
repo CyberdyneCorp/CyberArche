@@ -55,6 +55,28 @@ class LinkGraph:
     edges: list[GraphEdge]
 
 
+class _EdgeAccumulator:
+    """Collects graph edges, dropping self-links, links leaving the scope, and
+    duplicates (keyed by source/target/type). Shared by the explicit and
+    inferred graph builders so the dedup rule lives in one place."""
+
+    def __init__(self, in_scope: set[str]) -> None:
+        self._in_scope = in_scope
+        self._seen: set[tuple[str, str, str]] = set()
+        self.edges: list[GraphEdge] = []
+
+    def add(self, edge: GraphEdge) -> None:
+        key = (edge.source, edge.target, edge.type)
+        if (
+            edge.target
+            and edge.target != edge.source
+            and edge.target in self._in_scope
+            and key not in self._seen
+        ):
+            self._seen.add(key)
+            self.edges.append(edge)
+
+
 def _block_texts(block: dict) -> list[str]:
     data = block.get("data")
     if not isinstance(data, dict):
@@ -227,37 +249,13 @@ class LinksUseCases:
         Nodes are the in-scope documents the caller may view; edges are resolved
         links between two in-scope documents (self-links and links leaving the
         scope are dropped; duplicates collapse)."""
-        if teamspace_id is not None:
-            scope = await self._documents.list_for_teamspace(
-                caller.tenant_id, teamspace_id
-            )
-        elif folder_id is not None:
-            scope = await self._documents.list_for_folder(caller.tenant_id, folder_id)
-        else:
-            raise ValidationFailed("teamspace_id or folder_id required")
-
-        visible = [
-            doc
-            for doc in scope
-            if not doc.trashed
-            and await self._access.document_role(caller, doc) is not None
-        ]
+        visible = await self._visible_documents(
+            caller, teamspace_id=teamspace_id, folder_id=folder_id
+        )
         if not visible:
             return LinkGraph(nodes=[], edges=[])
-
-        # Title -> id resolution across the workspace (same rule as wikilinks).
-        title_to_id: dict[str, str] = {}
-        for doc in await self._documents.list_in_workspace(
-            caller.tenant_id, visible[0].workspace_id
-        ):
-            key = doc.title.strip().lower()
-            if key and key not in title_to_id:
-                title_to_id[key] = str(doc.id)
-
-        in_scope = {str(doc.id) for doc in visible}
-        nodes = [GraphNode(id=str(doc.id), title=doc.title) for doc in visible]
-        seen: set[tuple[str, str]] = set()
-        edges: list[GraphEdge] = []
+        title_to_id = await self._title_index(caller, visible[0].workspace_id)
+        acc = _EdgeAccumulator({str(doc.id) for doc in visible})
         for doc in visible:
             source = str(doc.id)
             try:
@@ -266,13 +264,53 @@ class LinksUseCases:
                 continue
             for title in _outgoing_titles(self._engine.read_blocks(state)):
                 target = title_to_id.get(title)
-                if target is None or target == source or target not in in_scope:
-                    continue
-                if (source, target) in seen:
-                    continue
-                seen.add((source, target))
-                edges.append(GraphEdge(source=source, target=target))
-        return LinkGraph(nodes=nodes, edges=edges)
+                if target:
+                    acc.add(GraphEdge(source=source, target=target))
+        nodes = [GraphNode(id=str(doc.id), title=doc.title) for doc in visible]
+        return LinkGraph(nodes=nodes, edges=acc.edges)
+
+    async def _resolve_scope(
+        self,
+        caller: CallerContext,
+        *,
+        teamspace_id: TeamspaceId | None,
+        folder_id: FolderId | None,
+    ) -> list[Document]:
+        if teamspace_id is not None:
+            return await self._documents.list_for_teamspace(
+                caller.tenant_id, teamspace_id
+            )
+        if folder_id is not None:
+            return await self._documents.list_for_folder(caller.tenant_id, folder_id)
+        raise ValidationFailed("teamspace_id or folder_id required")
+
+    async def _visible_documents(
+        self,
+        caller: CallerContext,
+        *,
+        teamspace_id: TeamspaceId | None,
+        folder_id: FolderId | None,
+    ) -> list[Document]:
+        """In-scope, non-trashed documents the caller may view."""
+        scope = await self._resolve_scope(
+            caller, teamspace_id=teamspace_id, folder_id=folder_id
+        )
+        visible: list[Document] = []
+        for doc in scope:
+            if not doc.trashed and await self._access.document_role(caller, doc) is not None:
+                visible.append(doc)
+        return visible
+
+    async def _title_index(
+        self, caller: CallerContext, workspace_id: str
+    ) -> dict[str, str]:
+        """Title -> id resolution across the workspace (same rule as wikilinks)."""
+        index: dict[str, str] = {}
+        for doc in await self._documents.list_in_workspace(caller.tenant_id, workspace_id):
+            key = doc.title.strip().lower()
+            if key and key not in index:
+                index[key] = str(doc.id)
+        return index
 
     async def inferred_graph(
         self,
@@ -289,24 +327,33 @@ class LinksUseCases:
             return await self.graph(
                 caller, teamspace_id=teamspace_id, folder_id=folder_id
             )
-        if teamspace_id is not None:
-            scope = await self._documents.list_for_teamspace(
-                caller.tenant_id, teamspace_id
-            )
-        elif folder_id is not None:
-            scope = await self._documents.list_for_folder(caller.tenant_id, folder_id)
-        else:
-            raise ValidationFailed("teamspace_id or folder_id required")
-
-        visible = [
-            doc
-            for doc in scope
-            if not doc.trashed
-            and await self._access.document_role(caller, doc) is not None
-        ]
+        visible = await self._visible_documents(
+            caller, teamspace_id=teamspace_id, folder_id=folder_id
+        )
         if not visible:
             return LinkGraph(nodes=[], edges=[])
 
+        texts, explicit = await self._read_texts_and_links(caller, visible)
+        title_to_id = await self._title_index(caller, visible[0].workspace_id)
+        acc = _EdgeAccumulator({str(doc.id) for doc in visible})
+
+        # Explicit `[[links]]`.
+        for doc in visible:
+            source = str(doc.id)
+            for title in explicit.get(source, set()):
+                target = title_to_id.get(title)
+                if target:
+                    acc.add(GraphEdge(source=source, target=target))
+
+        await self._add_inferred_edges(caller, visible, texts, title_to_id, acc)
+
+        nodes = [GraphNode(id=str(doc.id), title=doc.title) for doc in visible]
+        return LinkGraph(nodes=nodes, edges=acc.edges)
+
+    async def _read_texts_and_links(
+        self, caller: CallerContext, visible: list[Document]
+    ) -> tuple[dict[str, str], dict[str, set[str]]]:
+        """Per-document plain text (for classification) and explicit `[[links]]`."""
         texts: dict[str, str] = {}
         explicit: dict[str, set[str]] = {}
         for doc in visible:
@@ -318,71 +365,62 @@ class LinksUseCases:
                 continue
             texts[str(doc.id)] = _document_text(blocks)
             explicit[str(doc.id)] = _outgoing_titles(blocks)
+        return texts, explicit
 
-        title_to_id: dict[str, str] = {}
-        for doc in await self._documents.list_in_workspace(
-            caller.tenant_id, visible[0].workspace_id
-        ):
-            key = doc.title.strip().lower()
-            if key and key not in title_to_id:
-                title_to_id[key] = str(doc.id)
-        in_scope = {str(doc.id) for doc in visible}
+    async def _inferred_relations(
+        self,
+        caller: CallerContext,
+        doc: Document,
+        text: str,
+        visible: list[Document],
+        cached: dict,
+        classified: int,
+    ) -> tuple[tuple[InferredRelation, ...], bool]:
+        """Relations for one document: a fresh cache hit, or classify+cache when
+        under the per-request cap. Returns (relations, did_classify)."""
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        record = cached.get(str(doc.id))
+        if record is not None and record.content_hash == content_hash:
+            return record.relations, False
+        if classified >= _MAX_INFER_DOCS:
+            return (), False  # over the cap; classified on a later request
+        relations = await self._classify(doc, text, visible)
+        await self._inferred.put(
+            caller.tenant_id,
+            InferredLinkRecord(
+                source_document_id=str(doc.id),
+                content_hash=content_hash,
+                computed_at=self._clock.now(),
+                relations=relations,
+            ),
+        )
+        return relations, True
 
-        nodes = [GraphNode(id=str(doc.id), title=doc.title) for doc in visible]
-        edges: list[GraphEdge] = []
-        seen: set[tuple[str, str, str]] = set()
-
-        def add_edge(edge: GraphEdge) -> None:
-            key = (edge.source, edge.target, edge.type)
-            if (
-                edge.target
-                and edge.target != edge.source
-                and edge.target in in_scope
-                and key not in seen
-            ):
-                seen.add(key)
-                edges.append(edge)
-
-        # Explicit `[[links]]`.
-        for doc in visible:
-            source = str(doc.id)
-            for title in explicit.get(source, set()):
-                target = title_to_id.get(title)
-                if target:
-                    add_edge(GraphEdge(source=source, target=target))
-
-        # Inferred edges — cache hit, or classify + cache.
+    async def _add_inferred_edges(
+        self,
+        caller: CallerContext,
+        visible: list[Document],
+        texts: dict[str, str],
+        title_to_id: dict[str, str],
+        acc: _EdgeAccumulator,
+    ) -> None:
+        """Add AI-inferred typed edges (cache hit, or classify + cache)."""
         cached = await self._inferred.get_many(
             caller.tenant_id, [doc.id for doc in visible]
         )
         classified = 0
         for doc in visible:
-            source = str(doc.id)
-            text = texts.get(source, "")
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            record = cached.get(source)
-            if record is not None and record.content_hash == content_hash:
-                relations = record.relations
-            elif classified < _MAX_INFER_DOCS:
-                relations = await self._classify(doc, text, visible)
-                await self._inferred.put(
-                    caller.tenant_id,
-                    InferredLinkRecord(
-                        source_document_id=source,
-                        content_hash=content_hash,
-                        computed_at=self._clock.now(),
-                        relations=relations,
-                    ),
-                )
+            relations, did_classify = await self._inferred_relations(
+                caller, doc, texts.get(str(doc.id), ""), visible, cached, classified
+            )
+            if did_classify:
                 classified += 1
-            else:
-                relations = ()  # over the per-request cap; classified next time
             for rel in relations:
                 target = title_to_id.get(rel.target_title.strip().lower())
                 if target:
-                    add_edge(
+                    acc.add(
                         GraphEdge(
-                            source=source,
+                            source=str(doc.id),
                             target=target,
                             type=rel.type,
                             confidence=rel.confidence,
@@ -390,7 +428,6 @@ class LinksUseCases:
                             inferred=True,
                         )
                     )
-        return LinkGraph(nodes=nodes, edges=edges)
 
     async def _classify(
         self, doc: Document, text: str, others: list[Document]
