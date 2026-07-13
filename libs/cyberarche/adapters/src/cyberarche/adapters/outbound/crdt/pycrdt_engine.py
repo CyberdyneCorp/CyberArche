@@ -128,46 +128,71 @@ class PycrdtEngine:
         """
         doc = _load(state)
         before = doc.get_state()
-        changed = False
         with doc.transaction():
             array = doc.get("blocks", type=Array)
             # A block with no id has no identity to reconcile against; it can
             # only be inserted. System-recorded snapshots always carry ids.
             wanted = {b["id"]: b for b in blocks if b.get("id") is not None}
-
-            # Drop blocks the snapshot does not have, and blocks whose type
-            # changed (merging data across types is meaningless — D-2).
-            for index in range(len(array) - 1, -1, -1):
-                item = array[index]
-                block_id = item.get("id")
-                target = wanted.get(block_id)
-                if target is None or target.get("type") != item.get("type"):
-                    del array[index]
-                    changed = True
-
-            # Merge survivors, insert the rest, in the snapshot's order.
-            for position, block in enumerate(blocks):
-                block_id = block.get("id")
-                index = _index_of(array, block_id) if block_id is not None else None
-                if index is None:
-                    array.insert(min(position, len(array)), Map(block))
-                    changed = True
-                    continue
-                existing = array[index]
-                data = {**(existing.get("data") or {}), **(block.get("data") or {})}
-                if existing.get("data") != data:
-                    existing["data"] = data
-                    changed = True
-                if index != position:
-                    moved = _plain(existing)
-                    del array[index]
-                    array.insert(min(position, len(array)), Map(moved))
-                    changed = True
+            # `_reconcile_blocks` always runs (it is the left operand of `or`,
+            # always evaluated); the right operand is a pure read, so the
+            # short-circuit changes nothing.
+            changed = _drop_stale_blocks(array, wanted)
+            changed = _reconcile_blocks(array, blocks) or changed
 
         # `get_update(sv)` re-emits the document's whole delete set, so a doc
         # holding any tombstone yields a non-empty blob even when this call
         # mutated nothing. Report the canonical empty update instead (D-5).
         return doc.get_update(before) if changed else _EMPTY_UPDATE
+
+
+def _drop_stale_blocks(array: Array, wanted: dict[str, dict[str, Any]]) -> bool:
+    """Delete blocks the snapshot lacks, and blocks whose type changed.
+
+    Merging data across types is meaningless (D-2). Iterate back to front so
+    deletions do not shift the indices still to visit. Returns whether the
+    array was mutated.
+    """
+    changed = False
+    for index in range(len(array) - 1, -1, -1):
+        item = array[index]
+        target = wanted.get(item.get("id"))
+        if target is None or target.get("type") != item.get("type"):
+            del array[index]
+            changed = True
+    return changed
+
+
+def _reconcile_blocks(array: Array, blocks: list[dict[str, Any]]) -> bool:
+    """Merge survivors, insert new blocks, and reorder to the snapshot order.
+
+    Runs after `_drop_stale_blocks`, so every surviving block still shares its
+    type with its snapshot counterpart. Returns whether the array was mutated.
+    """
+    changed = False
+    for position, block in enumerate(blocks):
+        block_id = block.get("id")
+        index = _index_of(array, block_id) if block_id is not None else None
+        if index is None:
+            array.insert(min(position, len(array)), Map(block))
+            changed = True
+            continue
+        if _merge_block_data(array[index], block):
+            changed = True
+        if index != position:
+            moved = _plain(array[index])
+            del array[index]
+            array.insert(min(position, len(array)), Map(moved))
+            changed = True
+    return changed
+
+
+def _merge_block_data(existing: Map, block: dict[str, Any]) -> bool:
+    """Merge `block`'s data into `existing`. Returns whether data changed."""
+    data = {**(existing.get("data") or {}), **(block.get("data") or {})}
+    if existing.get("data") != data:
+        existing["data"] = data
+        return True
+    return False
 
 
 def _plain(item: Map) -> dict[str, Any]:

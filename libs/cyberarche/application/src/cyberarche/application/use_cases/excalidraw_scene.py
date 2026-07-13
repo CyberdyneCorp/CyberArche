@@ -242,10 +242,9 @@ def build_mindmap(central: str, branches: list[Any]) -> dict[str, Any]:
     }
 
 
-def describe_scene(scene: Any) -> str:
-    """A compact description of an `.excalidraw` scene: shape labels and the
-    connections between them. Accepts a JSON string or a parsed dict; tolerant of
-    partial/user-authored scenes."""
+def _scene_elements(scene: Any) -> list[dict] | str:
+    """Parse a scene into its live (non-deleted) elements, or return a
+    human-readable placeholder string when there is nothing to describe."""
     if isinstance(scene, str):
         if not scene.strip():
             return "(empty canvas)"
@@ -255,45 +254,71 @@ def describe_scene(scene: Any) -> str:
             return "(unreadable canvas)"
     if not isinstance(scene, dict):
         return "(empty canvas)"
-    elements = [e for e in scene.get("elements", []) if isinstance(e, dict) and not e.get("isDeleted")]
-    if not elements:
-        return "(empty canvas)"
+    elements = [
+        e
+        for e in scene.get("elements", [])
+        if isinstance(e, dict) and not e.get("isDeleted")
+    ]
+    return elements or "(empty canvas)"
 
-    # A shape's label is its bound text (containerId) or overlapping free text.
+
+def _collect_labels(elements: list[dict]) -> tuple[dict[str, str], list[str]]:
+    """A shape's label is its bound text (containerId); free text is unattached."""
     label_by_container: dict[str, str] = {}
     free_labels: list[str] = []
     for el in elements:
-        if el.get("type") == "text":
-            text = (el.get("text") or "").strip()
-            if not text:
-                continue
-            container = el.get("containerId")
-            if container:
-                label_by_container[container] = text
-            else:
-                free_labels.append(text)
+        if el.get("type") != "text":
+            continue
+        text = (el.get("text") or "").strip()
+        if not text:
+            continue
+        container = el.get("containerId")
+        if container:
+            label_by_container[container] = text
+        else:
+            free_labels.append(text)
+    return label_by_container, free_labels
 
-    def label_of(element_id: str | None) -> str:
-        if not element_id:
-            return "?"
-        return label_by_container.get(element_id, element_id)
 
-    shapes = [
-        label_by_container.get(el["id"], "(unlabelled)")
+def _label_of(labels: dict[str, str], element_id: str | None) -> str:
+    if not element_id:
+        return "?"
+    return labels.get(element_id, element_id)
+
+
+def _shape_names(elements: list[dict], labels: dict[str, str]) -> list[str]:
+    return [
+        labels.get(el["id"], "(unlabelled)")
         for el in elements
         if el.get("type") in {"rectangle", "ellipse", "diamond"}
     ]
-    connections = []
+
+
+def _connections(elements: list[dict], labels: dict[str, str]) -> list[str]:
+    connections: list[str] = []
     for el in elements:
         if el.get("type") != "arrow":
             continue
         start = (el.get("startBinding") or {}).get("elementId")
         end = (el.get("endBinding") or {}).get("elementId")
         if start or end:
-            connections.append(f"{label_of(start)} → {label_of(end)}")
+            connections.append(f"{_label_of(labels, start)} → {_label_of(labels, end)}")
+    return connections
+
+
+def describe_scene(scene: Any) -> str:
+    """A compact description of an `.excalidraw` scene: shape labels and the
+    connections between them. Accepts a JSON string or a parsed dict; tolerant of
+    partial/user-authored scenes."""
+    elements = _scene_elements(scene)
+    if isinstance(elements, str):
+        return elements  # a placeholder ("(empty canvas)" / "(unreadable canvas)")
+
+    labels, free_labels = _collect_labels(elements)
+    named = _shape_names(elements, labels) + free_labels
+    connections = _connections(elements, labels)
 
     parts: list[str] = []
-    named = shapes + free_labels
     if named:
         parts.append("shapes: " + ", ".join(named))
     if connections:

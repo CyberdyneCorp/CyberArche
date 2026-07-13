@@ -42,6 +42,7 @@ from cyberarche.application.ports.web_media import (
 from cyberarche.application.ports.llm import (
     LLMMessage,
     LLMPort,
+    LLMResponse,
     ToolCall,
     ToolResult,
     ToolSpec,
@@ -525,45 +526,21 @@ class AgentUseCases:
             if max_actions is not None and len(tools_used) >= max_actions:
                 outcome = "stopped_actions"
                 break
-            messages.append(
-                LLMMessage(
-                    role="assistant",
-                    content=response.text,
-                    tool_calls=response.tool_calls,
-                )
+            round_outcome = await self._run_tool_round(
+                caller,
+                workspace_id,
+                document_id,
+                response,
+                messages,
+                tools_used,
+                call_log,
+                session_connectors,
+                access_token,
+                background=background,
+                max_actions=max_actions,
             )
-            for call in response.tool_calls:
-                if max_actions is not None and len(tools_used) >= max_actions:
-                    outcome = "stopped_actions"
-                    break
-                tools_used.append(call.name)
-                result = await self._dispatch(
-                    caller,
-                    workspace_id,
-                    document_id,
-                    call,
-                    session_connectors,
-                    access_token,
-                    background=background,
-                )
-                kind, connector = _classify_tool(call.name)
-                call_log.append(
-                    ToolCallLog(
-                        name=call.name,
-                        kind=kind,
-                        connector=connector,
-                        arguments=dict(call.arguments or {}),
-                        result=result[:_MAX_TOOL_RESULT_CHARS],
-                        ok=not result.startswith("error:"),
-                    )
-                )
-                messages.append(
-                    LLMMessage(
-                        role="tool",
-                        tool_result=ToolResult(call_id=call.id, content=result),
-                    )
-                )
-            if outcome == "stopped_actions":
+            if round_outcome is not None:
+                outcome = round_outcome
                 break
             response = await self._llm.complete(
                 messages, tools=tools, reasoning_effort=reasoning_effort
@@ -584,6 +561,63 @@ class AgentUseCases:
         # duplicate it.
         edited = any(name in _EDITING_TOOL_NAMES for name in tools_used)
         return response.text, edited, call_log, outcome
+
+    async def _run_tool_round(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
+        response: LLMResponse,
+        messages: list[LLMMessage],
+        tools_used: list[str],
+        call_log: list[ToolCallLog],
+        session_connectors: set[str] | None,
+        access_token: str | None,
+        *,
+        background: bool,
+        max_actions: int | None,
+    ) -> str | None:
+        """Execute one round of the model's tool calls, appending the assistant
+        turn and each tool result to `messages`. Returns a "stopped_actions"
+        outcome if the per-run action cap is hit mid-round, else None."""
+        messages.append(
+            LLMMessage(
+                role="assistant",
+                content=response.text,
+                tool_calls=response.tool_calls,
+            )
+        )
+        for call in response.tool_calls:
+            if max_actions is not None and len(tools_used) >= max_actions:
+                return "stopped_actions"
+            tools_used.append(call.name)
+            result = await self._dispatch(
+                caller,
+                workspace_id,
+                document_id,
+                call,
+                session_connectors,
+                access_token,
+                background=background,
+            )
+            kind, connector = _classify_tool(call.name)
+            call_log.append(
+                ToolCallLog(
+                    name=call.name,
+                    kind=kind,
+                    connector=connector,
+                    arguments=dict(call.arguments or {}),
+                    result=result[:_MAX_TOOL_RESULT_CHARS],
+                    ok=not result.startswith("error:"),
+                )
+            )
+            messages.append(
+                LLMMessage(
+                    role="tool",
+                    tool_result=ToolResult(call_id=call.id, content=result),
+                )
+            )
+        return None
 
     async def _available_tools(
         self,
@@ -671,6 +705,20 @@ class AgentUseCases:
             )
         if call.name == "create_mindmap":
             return await self._run_create_mindmap(caller, document_id, call.arguments)
+        return await self._dispatch_editing_or_external(
+            caller, workspace_id, document_id, call, session_connectors
+        )
+
+    async def _dispatch_editing_or_external(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        document_id: DocumentId,
+        call: ToolCall,
+        session_connectors: set[str] | None,
+    ) -> str:
+        """A built-in editing tool, an attached external MCP connector, or the
+        default tool dispatcher — in that order."""
         for spec, operation in _editing_tools():
             if spec.name == call.name:
                 return await self._run_editing_tool(
@@ -697,48 +745,66 @@ class AgentUseCases:
         operation: str,
         arguments: dict,
     ) -> str:
+        handlers = {
+            "insert_blocks": self._op_insert_blocks,
+            "update_block": self._op_update_block,
+            "update_table": self._op_update_table,
+            "delete_block": self._op_delete_block,
+        }
+        handler = handlers.get(operation)
+        if handler is None:
+            return f"error: unknown operation {operation}"
         try:
-            if operation == "insert_blocks":
-                blocks = [
-                    {
-                        "id": self._ids.new_id(),
-                        "type": block.get("type", "paragraph"),
-                        "data": block.get("data", {}),
-                    }
-                    for block in arguments.get("blocks", [])
-                ]
-                if not blocks:
-                    return "error: no blocks provided"
-                await self.apply_blocks(caller, document_id, blocks)
-                return f"inserted {len(blocks)} block(s): {[b['id'] for b in blocks]}"
-            if operation == "update_block":
-                await self.update_block(
-                    caller,
-                    document_id,
-                    str(arguments["block_id"]),
-                    {"text": str(arguments["text"])},
-                )
-                return f"updated block {arguments['block_id']}"
-            if operation == "update_table":
-                block_id = str(arguments["block_id"])
-                data: dict = {
-                    "rows": [
-                        [str(cell) for cell in row]
-                        for row in arguments.get("rows", [])
-                    ]
-                }
-                if arguments.get("header") is not None:
-                    data["header"] = [str(col) for col in arguments["header"]]
-                await self.update_block(caller, document_id, block_id, data)
-                return f"updated table {block_id}"
-            if operation == "delete_block":
-                await self.delete_block(caller, document_id, str(arguments["block_id"]))
-                return f"deleted block {arguments['block_id']}"
+            return await handler(caller, document_id, arguments)
         except NotAuthorized:
             return "error: you do not have permission to edit this document"
         except Exception as error:
             return f"error: {error}"
-        return f"error: unknown operation {operation}"
+
+    async def _op_insert_blocks(
+        self, caller: CallerContext, document_id: DocumentId, arguments: dict
+    ) -> str:
+        blocks = [
+            {
+                "id": self._ids.new_id(),
+                "type": block.get("type", "paragraph"),
+                "data": block.get("data", {}),
+            }
+            for block in arguments.get("blocks", [])
+        ]
+        if not blocks:
+            return "error: no blocks provided"
+        await self.apply_blocks(caller, document_id, blocks)
+        return f"inserted {len(blocks)} block(s): {[b['id'] for b in blocks]}"
+
+    async def _op_update_block(
+        self, caller: CallerContext, document_id: DocumentId, arguments: dict
+    ) -> str:
+        await self.update_block(
+            caller,
+            document_id,
+            str(arguments["block_id"]),
+            {"text": str(arguments["text"])},
+        )
+        return f"updated block {arguments['block_id']}"
+
+    async def _op_update_table(
+        self, caller: CallerContext, document_id: DocumentId, arguments: dict
+    ) -> str:
+        block_id = str(arguments["block_id"])
+        data: dict = {
+            "rows": [[str(cell) for cell in row] for row in arguments.get("rows", [])]
+        }
+        if arguments.get("header") is not None:
+            data["header"] = [str(col) for col in arguments["header"]]
+        await self.update_block(caller, document_id, block_id, data)
+        return f"updated table {block_id}"
+
+    async def _op_delete_block(
+        self, caller: CallerContext, document_id: DocumentId, arguments: dict
+    ) -> str:
+        await self.delete_block(caller, document_id, str(arguments["block_id"]))
+        return f"deleted block {arguments['block_id']}"
 
     async def _run_generate_image(
         self,
@@ -916,70 +982,98 @@ class AgentUseCases:
         action through the HTTP router."""
         if self._google is None:
             return "error: Google Workspace is not configured"
-        args = call.arguments or {}
+        handlers = {
+            "google_gmail_search": self._g_gmail_search,
+            "google_gmail_read": self._g_gmail_read,
+            "google_gmail_draft": self._g_gmail_draft,
+            "google_calendar_list": self._g_calendar_list,
+            "google_free_busy": self._g_free_busy,
+            "google_drive_search": self._g_drive_search,
+            "google_import_doc": self._g_import_doc,
+        }
+        handler = handlers.get(call.name)
+        if handler is None:
+            return f"error: unknown Google tool {call.name}"
         try:
-            if call.name == "google_gmail_search":
-                msgs = await self._google.gmail_search(
-                    caller, workspace_id, str(args.get("query", ""))
-                )
-                return _render_gmail(msgs)
-            if call.name == "google_gmail_read":
-                msg = await self._google.gmail_read(
-                    caller, workspace_id, str(args.get("message_id", ""))
-                )
-                return f"{msg.subject} — from {msg.sender}\n\n{msg.body}"
-            if call.name == "google_gmail_draft":
-                draft_id = await self._google.gmail_draft(
-                    caller,
-                    workspace_id,
-                    to=str(args.get("to", "")),
-                    subject=str(args.get("subject", "")),
-                    body=str(args.get("body", "")),
-                )
-                return (
-                    f"draft created (id={draft_id}) — review and send it yourself; "
-                    "the agent does not send mail"
-                )
-            if call.name == "google_calendar_list":
-                events = await self._google.calendar_list(
-                    caller,
-                    workspace_id,
-                    time_min=str(args.get("time_min", "")),
-                    time_max=str(args.get("time_max", "")),
-                )
-                return _render_events(events)
-            if call.name == "google_free_busy":
-                busy = await self._google.calendar_free_busy(
-                    caller,
-                    workspace_id,
-                    time_min=str(args.get("time_min", "")),
-                    time_max=str(args.get("time_max", "")),
-                )
-                if not busy:
-                    return "no busy periods in that window"
-                return "busy periods:\n" + "\n".join(
-                    f"- {b.start} → {b.end}" for b in busy
-                )
-            if call.name == "google_drive_search":
-                files = await self._google.drive_search(
-                    caller, workspace_id, str(args.get("query", ""))
-                )
-                if not files:
-                    return "no files found"
-                return "drive files:\n" + "\n".join(
-                    f"- id={f.id} | {f.name}" for f in files
-                )
-            if call.name == "google_import_doc":
-                blocks = await self._google.import_doc(
-                    caller, workspace_id, str(args.get("doc_id", ""))
-                )
-                if not blocks:
-                    return "the doc was empty"
-                await self.apply_blocks(caller, document_id, blocks)
-                return f"imported {len(blocks)} block(s) from the Google Doc"
+            return await handler(caller, workspace_id, document_id, call.arguments or {})
         except Exception as error:
             return f"error: {error}"
-        return f"error: unknown Google tool {call.name}"
+
+    async def _g_gmail_search(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        msgs = await self._google.gmail_search(
+            caller, workspace_id, str(args.get("query", ""))
+        )
+        return _render_gmail(msgs)
+
+    async def _g_gmail_read(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        msg = await self._google.gmail_read(
+            caller, workspace_id, str(args.get("message_id", ""))
+        )
+        return f"{msg.subject} — from {msg.sender}\n\n{msg.body}"
+
+    async def _g_gmail_draft(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        draft_id = await self._google.gmail_draft(
+            caller,
+            workspace_id,
+            to=str(args.get("to", "")),
+            subject=str(args.get("subject", "")),
+            body=str(args.get("body", "")),
+        )
+        return (
+            f"draft created (id={draft_id}) — review and send it yourself; "
+            "the agent does not send mail"
+        )
+
+    async def _g_calendar_list(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        events = await self._google.calendar_list(
+            caller,
+            workspace_id,
+            time_min=str(args.get("time_min", "")),
+            time_max=str(args.get("time_max", "")),
+        )
+        return _render_events(events)
+
+    async def _g_free_busy(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        busy = await self._google.calendar_free_busy(
+            caller,
+            workspace_id,
+            time_min=str(args.get("time_min", "")),
+            time_max=str(args.get("time_max", "")),
+        )
+        if not busy:
+            return "no busy periods in that window"
+        return "busy periods:\n" + "\n".join(f"- {b.start} → {b.end}" for b in busy)
+
+    async def _g_drive_search(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        files = await self._google.drive_search(
+            caller, workspace_id, str(args.get("query", ""))
+        )
+        if not files:
+            return "no files found"
+        return "drive files:\n" + "\n".join(f"- id={f.id} | {f.name}" for f in files)
+
+    async def _g_import_doc(
+        self, caller: CallerContext, workspace_id: WorkspaceId, document_id: DocumentId, args: dict
+    ) -> str:
+        blocks = await self._google.import_doc(
+            caller, workspace_id, str(args.get("doc_id", ""))
+        )
+        if not blocks:
+            return "the doc was empty"
+        await self.apply_blocks(caller, document_id, blocks)
+        return f"imported {len(blocks)} block(s) from the Google Doc"
 
     async def _run_python(
         self,
@@ -1889,6 +1983,60 @@ def _normalize_block(block: dict) -> dict:
     return {**block, "data": data}
 
 
+def _flush_paragraph(ids: IdPort, blocks: list[dict], buffer: list[str]) -> None:
+    """Emit the buffered prose lines as one paragraph block, then clear them."""
+    if not buffer:
+        return
+    body = _inline_math("\n".join(buffer).strip())
+    if body:
+        blocks.append({"id": ids.new_id(), "type": "paragraph", "data": {"text": body}})
+    buffer.clear()
+
+
+def _emit_paragraphs(ids: IdPort, blocks: list[dict], chunk: str) -> None:
+    # Line-based: a blank line or a block-markdown line (heading/list/quote/
+    # divider) ends the current paragraph; consecutive prose lines join.
+    buffer: list[str] = []
+    for raw in chunk.split("\n"):
+        line = raw.strip()
+        if not line:
+            _flush_paragraph(ids, blocks, buffer)
+            continue
+        block = _line_block(ids, line)
+        if block is not None:
+            _flush_paragraph(ids, blocks, buffer)
+            blocks.append(block)
+        else:
+            buffer.append(raw)
+    _flush_paragraph(ids, blocks, buffer)
+
+
+def _emit_display_math(ids: IdPort, blocks: list[dict], segment: str) -> None:
+    """Prose interleaved with display math ($$…$$ or \\[…\\]) -> paragraphs + latex."""
+    last = 0
+    for m in _DISPLAY_MATH_RE.finditer(segment):
+        _emit_paragraphs(ids, blocks, segment[last : m.start()])
+        source = (m.group(1) or m.group(2) or "").strip()
+        blocks.append({"id": ids.new_id(), "type": "latex", "data": {"source": source}})
+        last = m.end()
+    _emit_paragraphs(ids, blocks, segment[last:])
+
+
+def _emit_fence(ids: IdPort, blocks: list[dict], fence: re.Match) -> None:
+    lang = (fence.group(1) or "").strip().lower()
+    source = fence.group(2).rstrip("\n")
+    if lang == "mermaid":
+        blocks.append({"id": ids.new_id(), "type": "mermaid", "data": {"source": source}})
+    else:
+        blocks.append(
+            {
+                "id": ids.new_id(),
+                "type": "code",
+                "data": {"source": source, "language": lang or "text"},
+            }
+        )
+
+
 def _answer_blocks(ids: IdPort, text: str) -> list[dict]:
     """Parse an agent answer into typed, renderable blocks.
 
@@ -1899,69 +2047,13 @@ def _answer_blocks(ids: IdPort, text: str) -> list[dict]:
     answer show as more than raw source.
     """
     blocks: list[dict] = []
-
-    def paragraphs(chunk: str) -> None:
-        # Line-based: a blank line or a block-markdown line (heading/list/quote/
-        # divider) ends the current paragraph; consecutive prose lines join.
-        buffer: list[str] = []
-
-        def flush() -> None:
-            if buffer:
-                body = _inline_math("\n".join(buffer).strip())
-                if body:
-                    blocks.append(
-                        {
-                            "id": ids.new_id(),
-                            "type": "paragraph",
-                            "data": {"text": body},
-                        }
-                    )
-                buffer.clear()
-
-        for raw in chunk.split("\n"):
-            line = raw.strip()
-            if not line:
-                flush()
-                continue
-            block = _line_block(ids, line)
-            if block is not None:
-                flush()
-                blocks.append(block)
-            else:
-                buffer.append(raw)
-        flush()
-
-    def emit_display_math(segment: str) -> None:
-        last = 0
-        for m in _DISPLAY_MATH_RE.finditer(segment):
-            paragraphs(segment[last : m.start()])
-            source = (m.group(1) or m.group(2) or "").strip()
-            blocks.append(
-                {"id": ids.new_id(), "type": "latex", "data": {"source": source}}
-            )
-            last = m.end()
-        paragraphs(segment[last:])
-
     # Split on fenced blocks first; the gaps between fences are prose+math.
     cursor = 0
     for fence in _FENCE_RE.finditer(text):
-        emit_display_math(text[cursor : fence.start()])
-        lang = (fence.group(1) or "").strip().lower()
-        source = fence.group(2).rstrip("\n")
-        if lang == "mermaid":
-            blocks.append(
-                {"id": ids.new_id(), "type": "mermaid", "data": {"source": source}}
-            )
-        else:
-            blocks.append(
-                {
-                    "id": ids.new_id(),
-                    "type": "code",
-                    "data": {"source": source, "language": lang or "text"},
-                }
-            )
+        _emit_display_math(ids, blocks, text[cursor : fence.start()])
+        _emit_fence(ids, blocks, fence)
         cursor = fence.end()
-    emit_display_math(text[cursor:])
+    _emit_display_math(ids, blocks, text[cursor:])
 
     # Never return nothing: fall back to the raw text as one paragraph.
     if not blocks and text.strip():
