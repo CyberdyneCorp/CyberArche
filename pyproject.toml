@@ -66,6 +66,11 @@ skip_covered = true
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+# Test modules group imports beside the section that uses them; import position
+# is stylistic here, not a correctness concern.
+"tests/*" = ["E402"]
+
 # Hexagonal dependency rule (architecture-quality spec):
 #   domain <- application <- adapters; inbound never imports outbound.
 # Enforced in CI via `lint-imports`.

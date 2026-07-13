@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
 from cyberarche.api.bootstrap import create_app
 from cyberarche.api.config import Settings

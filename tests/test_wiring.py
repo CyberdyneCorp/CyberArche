@@ -95,7 +95,6 @@ async def test_filesystem_blobs_selected_by_config(tmp_path):
 # ---- auth stack, RAG, and optional tool adapters -----------------------------
 
 import httpx
-import pytest
 
 from cyberarche.adapters.outbound.auth.cyberdyne import (
     CyberdyneAuthGateway,
@@ -105,13 +104,11 @@ from cyberarche.adapters.outbound.rag.cyberdyne_rag import CyberdyneRagAdapter
 from cyberarche.adapters.wiring import (
     SystemClock,
     UuidIds,
-    WiringConfig,
     _build_code_executor,
     _build_google_port,
     _build_image_generator,
     _build_meetings,
     _build_web_media,
-    build_container,
 )
 from cyberarche.application.use_cases.api_keys import CompositeTokenVerifier
 from cyberarche.application.testing.fakes import InMemoryRag, ScriptedLLM

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.testing.fakes import (
     FixedClock,
@@ -17,7 +18,7 @@ from cyberarche.application.use_cases.api_keys import (
     ApiKeyUseCases,
     CompositeTokenVerifier,
 )
-from cyberarche.domain.api_keys import KEY_PREFIX, hash_secret
+from cyberarche.domain.api_keys import KEY_PREFIX, ApiKey, hash_secret
 from cyberarche.domain.errors import NotAuthenticated
 from cyberarche.domain.ids import TenantId, UserId
 
@@ -159,11 +160,6 @@ def test_api_key_authenticates_http_and_mcp_like_surfaces(api):
 
 
 # --- PostgresApiKeyRepository: SQL translation over a recorded stub pool ---
-
-from datetime import UTC, datetime
-
-from cyberarche.adapters.outbound.postgres.api_keys import PostgresApiKeyRepository
-from cyberarche.domain.api_keys import ApiKey
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
