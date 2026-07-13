@@ -4,3 +4,7 @@ build/
 test-results/
 playwright-report/
 vite.config.ts.timestamp-*
+.coverage
+coverage/
+coverage.json
+e2e/.auth/

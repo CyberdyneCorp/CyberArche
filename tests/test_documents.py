@@ -187,3 +187,182 @@ async def test_purge_requires_edit_permission(use_cases: UseCases, alice):
     # Still in the trash, restorable by an editor.
     restored = await use_cases.documents.restore(alice, document.id)
     assert restored.trashed is False
+
+
+# ---- HTTP surface (routers/documents.py) ------------------------------------
+
+import base64  # noqa: E402
+
+
+def _auth(token: str = "alice-token") -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _make_workspace_http(api, headers, name="Docs") -> dict:
+    return api.post("/api/v1/workspaces", json={"name": name}, headers=headers).json()
+
+
+def test_create_document_in_a_teamspace_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    ts = api.post(
+        f"/api/v1/workspaces/{ws['id']}/teamspaces", json={"name": "Team"}, headers=headers
+    ).json()
+
+    response = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Shared", "teamspace_id": ts["id"]},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    assert response.json()["teamspace_id"] == ts["id"]
+
+
+def test_retitle_document_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Draft"},
+        headers=headers,
+    ).json()
+
+    response = api.patch(
+        f"/api/v1/documents/{doc['id']}/title", json={"title": "Final"}, headers=headers
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Final"
+    # Persisted, not just echoed.
+    assert (
+        api.get(f"/api/v1/documents/{doc['id']}", headers=headers).json()["title"]
+        == "Final"
+    )
+
+
+def test_retitle_unknown_document_is_404(api):
+    response = api.patch(
+        "/api/v1/documents/nope/title", json={"title": "X"}, headers=_auth()
+    )
+    assert response.status_code == 404
+
+
+def test_move_document_over_http_reorders_and_reparents(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    docs = [
+        api.post(
+            "/api/v1/documents",
+            json={"workspace_id": ws["id"], "title": t},
+            headers=headers,
+        ).json()
+        for t in ("one", "two", "three")
+    ]
+
+    # Reorder at the root (parent_id omitted -> None branch).
+    moved = api.post(
+        f"/api/v1/documents/{docs[2]['id']}/move",
+        json={"position": 0},
+        headers=headers,
+    )
+    assert moved.status_code == 200
+    roots = api.get(
+        "/api/v1/documents", params={"workspace_id": ws["id"]}, headers=headers
+    ).json()
+    assert [d["title"] for d in roots] == ["three", "one", "two"]
+
+    # Reparent (parent_id set branch).
+    nested = api.post(
+        f"/api/v1/documents/{docs[1]['id']}/move",
+        json={"parent_id": docs[0]["id"], "position": 0},
+        headers=headers,
+    ).json()
+    assert nested["parent_id"] == docs[0]["id"]
+    children = api.get(
+        "/api/v1/documents",
+        params={"workspace_id": ws["id"], "parent_id": docs[0]["id"]},
+        headers=headers,
+    ).json()
+    assert [d["id"] for d in children] == [docs[1]["id"]]
+
+
+def test_document_blocks_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Content"},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{doc['id']}/agent/blocks",
+        json={"blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "hello"}}]},
+        headers=headers,
+    )
+
+    response = api.get(f"/api/v1/documents/{doc['id']}/blocks", headers=headers)
+    assert response.status_code == 200
+    assert [b["id"] for b in response.json()["blocks"]] == ["b1"]
+
+
+def test_document_backlinks_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    target = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Target Doc"},
+        headers=headers,
+    ).json()
+    linker = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Linker"},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{linker['id']}/agent/blocks",
+        json={
+            "blocks": [
+                {"id": "b1", "type": "paragraph", "data": {"text": "see [[Target Doc]]"}}
+            ]
+        },
+        headers=headers,
+    )
+
+    back = api.get(f"/api/v1/documents/{target['id']}/backlinks", headers=headers)
+    assert back.status_code == 200
+    assert [d["id"] for d in back.json()] == [linker["id"]]
+
+
+def test_list_snapshots_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Versioned"},
+        headers=headers,
+    ).json()
+
+    first = api.post(
+        f"/api/v1/documents/{doc['id']}/snapshots",
+        json={"content": {"blocks": []}},
+        headers=headers,
+    )
+    assert first.status_code == 201
+    # A snapshot carrying an encoded state vector decodes on the way in.
+    second = api.post(
+        f"/api/v1/documents/{doc['id']}/snapshots",
+        json={
+            "content": {"blocks": []},
+            "state_vector_b64": base64.b64encode(b"sv").decode(),
+        },
+        headers=headers,
+    )
+    assert second.status_code == 201
+
+    listed = api.get(f"/api/v1/documents/{doc['id']}/snapshots", headers=headers)
+    assert listed.status_code == 200
+    assert [s["id"] for s in listed.json()] == [first.json()["id"], second.json()["id"]]
+    assert all(s["document_id"] == doc["id"] for s in listed.json())
+
+
+def test_get_unknown_document_is_404_over_http(api):
+    assert api.get("/api/v1/documents/missing", headers=_auth()).status_code == 404

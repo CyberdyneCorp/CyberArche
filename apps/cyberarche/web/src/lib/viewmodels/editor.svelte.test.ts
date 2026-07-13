@@ -1,21 +1,29 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // The editor VM opens a WebSocket via ArcheProvider — stub it out; these
-// tests exercise the Y.Doc binding and commands locally.
+// tests exercise the Y.Doc binding and commands locally. Instances are
+// recorded so provider-driven callbacks (status, presence, denial, sync)
+// can be fired from tests.
 class FakeSocket {
+	static instances: FakeSocket[] = [];
 	onopen: (() => void) | null = null;
 	binaryType = '';
 	readyState = 0;
 	send() {}
 	close() {}
-	onmessage = null;
-	onclose = null;
-	onerror = null;
+	onmessage: ((event: MessageEvent) => void) | null = null;
+	onclose: ((event: CloseEvent) => void) | null = null;
+	onerror: (() => void) | null = null;
+	constructor() {
+		FakeSocket.instances.push(this);
+	}
 }
+
+import * as Y from 'yjs';
 
 import { registerBuiltinBlocks } from '$lib/editor/blocks';
 import { allBlockDefinitions, newBlock, registerBlock } from '$lib/editor/registry';
-import { createEditor } from './editor.svelte';
+import { colorFor, createEditor } from './editor.svelte';
 
 beforeAll(() => {
 	vi.stubGlobal('WebSocket', FakeSocket as unknown as typeof WebSocket);
@@ -31,6 +39,26 @@ function editor() {
 		{ getAccessToken: () => 'token', tryRefresh: async () => false },
 		'alice'
 	);
+}
+
+function lastSocket() {
+	return FakeSocket.instances[FakeSocket.instances.length - 1];
+}
+
+/** A relay frame: 0x00 = CRDT update, 0x01 = awareness/presence JSON. */
+function binaryFrame(kind: 0x00 | 0x01, payload: Uint8Array): MessageEvent {
+	const frame = new Uint8Array(payload.length + 1);
+	frame[0] = kind;
+	frame.set(payload, 1);
+	return new MessageEvent('message', { data: frame.buffer });
+}
+
+function syncFrame(): MessageEvent {
+	return binaryFrame(0x00, Y.encodeStateAsUpdate(new Y.Doc()));
+}
+
+function presenceFrame(peer: { user_id: string; block_id: string | null; color: string }) {
+	return binaryFrame(0x01, new TextEncoder().encode(JSON.stringify(peer)));
 }
 
 describe('block registry (12.1)', () => {
@@ -339,6 +367,231 @@ describe('editor ViewModel', () => {
 
 		// One undo step removes all three inserted blocks.
 		vm.undo();
+		expect(vm.blocks).toHaveLength(1);
+	});
+});
+
+describe('editor ViewModel — provider wiring', () => {
+	it('colorFor deterministically assigns a palette colour', () => {
+		expect(colorFor('alice')).toBe(colorFor('alice'));
+		expect(colorFor('alice')).toMatch(/^var\(--/);
+	});
+
+	it('reflects connection status and seeds an empty doc on first sync', () => {
+		const vm = editor();
+		const sock = lastSocket();
+		expect(vm.status).toBe('connecting');
+
+		sock.onopen!();
+		expect(vm.status).toBe('connected');
+		expect(vm.blocks).toHaveLength(0);
+
+		sock.onmessage!(syncFrame());
+		expect(vm.blocks).toHaveLength(1); // seeded so typing can start
+		expect(vm.blocks[0].type).toBe('paragraph');
+	});
+
+	it('does not seed a document that already has content on sync', () => {
+		const vm = editor();
+		vm.insertAfter(null, 'paragraph');
+
+		lastSocket().onmessage!(syncFrame());
+		expect(vm.blocks).toHaveLength(1);
+	});
+
+	it('exposes remote peers, excluding the local user', () => {
+		const vm = editor(); // userId 'alice'
+		const sock = lastSocket();
+
+		sock.onmessage!(presenceFrame({ user_id: 'bob', block_id: null, color: 'red' }));
+		expect(vm.peers.map((p) => p.user_id)).toEqual(['bob']);
+
+		sock.onmessage!(presenceFrame({ user_id: 'alice', block_id: null, color: 'blue' }));
+		expect(vm.peers.map((p) => p.user_id)).toEqual(['bob']); // own echo filtered
+	});
+
+	it('a NotAuthorized control message flips the editor read-only', () => {
+		const vm = editor();
+		expect(vm.readOnly).toBe(false);
+
+		lastSocket().onmessage!(
+			new MessageEvent('message', {
+				data: JSON.stringify({ type: 'error', error: 'NotAuthorized' })
+			})
+		);
+		expect(vm.readOnly).toBe(true);
+	});
+
+	it('exposes the shared Y.Doc and the local user id', () => {
+		const vm = editor();
+		expect(vm.userId).toBe('alice');
+		expect(vm.doc).toBeInstanceOf(Y.Doc);
+	});
+});
+
+describe('editor ViewModel — edge cases', () => {
+	it('insertAfter with an unknown afterId appends at the end', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		const id = vm.insertAfter('missing', 'paragraph');
+
+		expect(vm.blocks.map((b) => b.id)).toEqual([first, id]);
+		expect(vm.focusedId).toBe(id);
+	});
+
+	it('insertBlocks with an empty list is a no-op', () => {
+		const vm = editor();
+		vm.insertBlocks([]);
+		expect(vm.blocks).toHaveLength(0);
+		expect(vm.canUndo).toBe(false);
+	});
+
+	it('mutating commands ignore unknown block ids', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'keep' });
+
+		vm.updateData('missing', { text: 'x' });
+		vm.transform('missing', 'code', {});
+		vm.setHeadingLevel('missing', 2);
+		vm.turnInto('missing', 'todo');
+		vm.move('missing', 1);
+		expect(vm.duplicate('missing')).toBeNull();
+		expect(vm.remove('missing')).toEqual({ previousId: null });
+		expect(vm.mergeWithPrevious('missing')).toBeNull();
+		expect(vm.toggleMark('missing', '**', 0, 1)).toEqual({ start: 2, end: 3 });
+
+		expect(vm.blocks).toHaveLength(1);
+		expect(vm.blocks[0].type).toBe('paragraph');
+		expect(vm.blocks[0].data.text).toBe('keep');
+	});
+
+	it('move is a no-op at the document edges', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		const second = vm.insertAfter(first, 'paragraph');
+
+		vm.move(first, -1);
+		vm.move(second, 1);
+		expect(vm.blocks.map((b) => b.id)).toEqual([first, second]);
+	});
+
+	it('removing the first block returns no previous id', () => {
+		const vm = editor();
+		const only = vm.insertAfter(null, 'paragraph');
+
+		expect(vm.remove(only)).toEqual({ previousId: null });
+		expect(vm.focusedId).toBeNull();
+		expect(vm.blocks).toHaveLength(0);
+	});
+
+	it('toggleMark leaves a collapsed selection untouched', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'abc' });
+
+		expect(vm.toggleMark(id, '**', 2, 2)).toEqual({ start: 2, end: 2 });
+		expect(vm.blocks[0].data.text).toBe('abc');
+	});
+
+	it('setHeadingLevel defaults missing text to empty when promoting', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'divider'); // no data.text
+
+		vm.setHeadingLevel(id, 2);
+		expect(vm.blocks[0].type).toBe('heading');
+		expect(vm.blocks[0].data.text).toBe('');
+	});
+
+	it('focus closes menus opened on other blocks but keeps its own', () => {
+		const vm = editor();
+		const first = vm.insertAfter(null, 'paragraph');
+		const second = vm.insertAfter(first, 'paragraph');
+
+		vm.handleTextInput(first, '/co');
+		vm.focus(first); // same block: the slash menu stays open
+		expect(vm.slashFor).toBe(first);
+
+		vm.focus(second); // another block: menu closes
+		expect(vm.slashFor).toBeNull();
+		expect(vm.focusedId).toBe(second);
+	});
+
+	it('applySlash without an open menu is a no-op', () => {
+		const vm = editor();
+		vm.insertAfter(null, 'paragraph');
+		vm.applySlash('code');
+		expect(vm.blocks[0].type).toBe('paragraph');
+	});
+
+	it('slashMatches filters out non-matching queries', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.handleTextInput(id, '/nosuchblock');
+
+		expect(vm.slashQuery).toBe('nosuchblock');
+		expect(vm.slashMatches).toHaveLength(0);
+	});
+
+	it('an unclosed [[ opens the link menu and applyLink completes it', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+
+		vm.handleTextInput(id, 'see [[cal');
+		expect(vm.linkFor).toBe(id);
+		expect(vm.linkQuery).toBe('cal');
+		expect(vm.blocks[0].data.text).toBe('see [[cal');
+		expect(Array.isArray(vm.linkMatches)).toBe(true);
+
+		const before = vm.historyRevision;
+		vm.applyLink('Calculus');
+		expect(vm.blocks[0].data.text).toBe('see [[Calculus]]');
+		expect(vm.linkFor).toBeNull();
+		expect(vm.linkQuery).toBe('');
+		expect(vm.historyRevision).toBe(before + 1); // focused field re-syncs
+		expect(vm.focusedId).toBe(id);
+	});
+
+	it('opening [[ closes the slash menu, and closing ]] clears the link menu', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+
+		vm.handleTextInput(id, '/co');
+		expect(vm.slashFor).toBe(id);
+
+		vm.handleTextInput(id, '[[doc');
+		expect(vm.slashFor).toBeNull();
+		expect(vm.linkFor).toBe(id);
+
+		vm.handleTextInput(id, '[[doc]] done');
+		expect(vm.linkFor).toBeNull();
+		expect(vm.blocks[0].data.text).toBe('[[doc]] done');
+	});
+
+	it('applyLink without an open menu is a no-op', () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'plain' });
+
+		vm.applyLink('Calculus');
+		expect(vm.blocks[0].data.text).toBe('plain');
+	});
+
+	it('ensureNotEmpty seeds a paragraph only when the doc is empty', () => {
+		const vm = editor();
+		vm.ensureNotEmpty();
+		expect(vm.blocks).toHaveLength(1);
+
+		vm.ensureNotEmpty();
+		expect(vm.blocks).toHaveLength(1);
+	});
+
+	it('destroy detaches the CRDT mirror', () => {
+		const vm = editor();
+		vm.insertAfter(null, 'paragraph');
+		vm.destroy();
+
+		vm.insertAfter(null, 'paragraph'); // no longer mirrored into state
 		expect(vm.blocks).toHaveLength(1);
 	});
 });

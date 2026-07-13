@@ -35,4 +35,40 @@ describe('link index', () => {
 		expect(idx.matches('alg').map((d) => d.id)).toEqual(['d2']);
 		expect(idx.matches('').length).toBe(2); // empty query = all
 	});
+
+	it('refresh is a no-op before load and refetches after', async () => {
+		let results = [doc('d1', 'One')];
+		const fetchMock = vi.fn(async () => ({
+			ok: true,
+			status: 200,
+			json: async () => results
+		}));
+		vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+		const idx = createLinkIndex();
+		await idx.refresh(); // no workspace loaded yet
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(idx.all).toEqual([]);
+
+		await idx.load('w1');
+		expect(idx.all.map((d) => d.id)).toEqual(['d1']);
+
+		results = [doc('d1', 'One'), doc('d2', 'Two')];
+		await idx.refresh();
+		expect(idx.all.map((d) => d.id)).toEqual(['d1', 'd2']);
+	});
+
+	it('matches caps results at the limit', async () => {
+		const many = Array.from({ length: 10 }, (_, i) => doc(`d${i}`, `Note ${i}`));
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ ok: true, status: 200, json: async () => many })) as unknown as typeof fetch
+		);
+
+		const idx = createLinkIndex();
+		await idx.load('w1');
+
+		expect(idx.matches('note')).toHaveLength(8); // default cap
+		expect(idx.matches('note', 2)).toHaveLength(2);
+	});
 });

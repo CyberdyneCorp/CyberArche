@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { hasTables, internalImageUrls, safeFilename, tablesToCsv, toMarkdown } from './export';
+import {
+	blobToDataUrl,
+	downloadTextFile,
+	hasTables,
+	internalImageUrls,
+	safeFilename,
+	tablesToCsv,
+	toMarkdown
+} from './export';
 import type { BlockData } from './registry';
 
 const block = (type: string, data: Record<string, unknown>): BlockData => ({
@@ -63,6 +71,121 @@ describe('toMarkdown', () => {
 		expect(md).toContain('| --- | --- |');
 		expect(md).toContain('| 1 | 2 |');
 	});
+
+	it('serializes quotes, callouts, and whiteboard placeholders', () => {
+		const md = toMarkdown('', [
+			block('quote', { text: 'wise words' }),
+			block('callout', { text: 'heads up' }),
+			block('whiteboard', {}),
+			block('excalidraw', {})
+		]);
+		expect(md).toContain('> wise words');
+		expect(md).toContain('> heads up');
+		expect(md.match(/_\(whiteboard — open in CyberArche to view\)_/g)).toHaveLength(2);
+	});
+
+	it('clamps heading levels to 1..6 and renders unchecked todos', () => {
+		const md = toMarkdown('', [
+			block('heading', { text: 'Deep', level: 9 }),
+			block('heading', { text: 'Top' }),
+			block('todo', { text: 'later', checked: false })
+		]);
+		expect(md).toContain('###### Deep');
+		expect(md).toContain('# Top');
+		expect(md).toContain('- [ ] later');
+	});
+
+	it('skips unknown blocks without text and tolerates missing data', () => {
+		const md = toMarkdown('Title', [
+			block('mystery', {}),
+			{ id: 'x', type: 'mystery', data: null as unknown as Record<string, unknown> },
+			block('mystery', { text: 'still shown' })
+		]);
+		expect(md).toBe('# Title\n\nstill shown\n');
+	});
+
+	it('renders a database block with select, checkbox, and missing values', () => {
+		const md = toMarkdown('', [
+			block('database', {
+				db: {
+					properties: [
+						{ id: 'p1', name: 'Name', type: 'text' },
+						{ id: 'p2', name: 'Status', type: 'select', options: [{ id: 'o1', name: 'Open' }] },
+						{ id: 'p3', name: 'Done', type: 'checkbox' },
+						{ id: 'p4', name: 'Tag', type: 'select' } // no options
+					],
+					rows: [
+						{ values: { p1: 'Task A', p2: 'o1', p3: true, p4: 'o9' } },
+						{ values: { p1: 'Task B', p2: 'missing', p3: false } },
+						{} // row without values
+					]
+				}
+			})
+		]);
+		expect(md).toContain('| Name | Status | Done | Tag |');
+		expect(md).toContain('| --- | --- | --- | --- |');
+		expect(md).toContain('| Task A | Open | ✓ |  |');
+		expect(md).toContain('| Task B |  |  |  |');
+		expect(md).toContain('|  |  |  |  |');
+	});
+
+	it('renders empty output for databases without properties or rows', () => {
+		expect(toMarkdown('', [block('database', {})])).toBe('\n');
+		expect(toMarkdown('', [block('database', { db: { properties: [], rows: [] } })])).toBe('\n');
+		const headerOnly = toMarkdown('', [
+			block('database', { db: { properties: [{ id: 'p', name: 'N', type: 'text' }] } })
+		]);
+		expect(headerOnly).toBe('| N |\n| --- |\n');
+	});
+
+	it('escapes pipes/newlines in table cells and drops headerless tables', () => {
+		const md = toMarkdown('', [
+			block('table', { header: ['a|b', 'line1\nline2'], rows: [['x|y', 'p\nq']] }),
+			block('table', { header: [], rows: [['ignored']] }),
+			block('table', { header: ['only'] }) // no rows
+		]);
+		expect(md).toContain('| a\\|b | line1 line2 |');
+		expect(md).toContain('| x\\|y | p q |');
+		expect(md).not.toContain('ignored');
+		expect(md).toContain('| only |\n| --- |');
+	});
+});
+
+describe('internalImageUrls', () => {
+	it('dedupes urls and ignores non-image or external blocks', () => {
+		const urls = internalImageUrls([
+			block('image', { url: '/api/v1/files/1' }),
+			block('image', { url: '/api/v1/files/1' }),
+			block('image', { url: 'https://ext.example/x.png' }),
+			{ id: 'i', type: 'image', data: null as unknown as Record<string, unknown> },
+			block('paragraph', { text: '/api/v1/files/2' })
+		]);
+		expect(urls).toEqual(['/api/v1/files/1']);
+	});
+});
+
+describe('blobToDataUrl', () => {
+	it('resolves a base64 data URI', async () => {
+		const dataUrl = await blobToDataUrl(new Blob(['hi'], { type: 'text/plain' }));
+		expect(dataUrl).toBe('data:text/plain;base64,aGk=');
+	});
+
+	it('rejects when the reader errors', async () => {
+		class FailingReader {
+			onload: (() => void) | null = null;
+			onerror: (() => void) | null = null;
+			error = new Error('read failed');
+			readAsDataURL() {
+				queueMicrotask(() => this.onerror?.());
+			}
+		}
+		vi.stubGlobal('FileReader', FailingReader);
+		try {
+			await expect(blobToDataUrl(new Blob(['x']))).rejects.toThrow('read failed');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 });
 
 describe('tablesToCsv', () => {
@@ -78,11 +201,51 @@ describe('tablesToCsv', () => {
 		expect(csv).toContain('grace,"say ""hi"""');
 		expect(tablesToCsv([block('paragraph', { text: 'x' })])).toBe('');
 	});
+
+	it('separates multiple tables, quotes newlines, and drops empty tables', () => {
+		expect(hasTables([block('paragraph', { text: 'x' })])).toBe(false);
+		const csv = tablesToCsv([
+			block('table', { header: ['a'], rows: [['line1\nline2']] }),
+			block('table', {}), // no header/rows -> empty, filtered out
+			block('table', { header: ['b'], rows: [['2']] })
+		]);
+		expect(csv).toBe('a\r\n"line1\nline2"\r\n\r\nb\r\n2');
+	});
+});
+
+describe('downloadTextFile', () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it('creates, clicks, and cleans up a download link', () => {
+		let captured: Blob | undefined;
+		URL.createObjectURL = vi.fn((blob: Blob) => {
+			captured = blob;
+			return 'blob:doc';
+		});
+		URL.revokeObjectURL = vi.fn();
+		let clicked: HTMLAnchorElement | undefined;
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+			this: HTMLAnchorElement
+		) {
+			clicked = this;
+			expect(document.body.contains(this)).toBe(true); // attached when clicked
+		});
+
+		downloadTextFile('doc.md', '# hi', 'text/markdown');
+
+		expect(clicked?.download).toBe('doc.md');
+		expect(clicked?.href).toContain('blob:doc');
+		expect(document.body.contains(clicked!)).toBe(false); // removed afterwards
+		expect(captured?.type).toBe('text/markdown;charset=utf-8');
+		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:doc');
+	});
 });
 
 describe('safeFilename', () => {
 	it('slugifies the title and falls back', () => {
 		expect(safeFilename('Calculus Introduction')).toBe('Calculus-Introduction');
 		expect(safeFilename('  ')).toBe('document');
+		expect(safeFilename('!!weird/name??')).toBe('weird-name');
+		expect(safeFilename('???')).toBe('document');
 	});
 });

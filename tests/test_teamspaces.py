@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from cyberarche.adapters.outbound.postgres.teamspaces import (
+    PostgresFavoriteRepository,
+    PostgresTeamspaceRepository,
+)
 from cyberarche.application.use_cases import UseCases
 from cyberarche.domain.errors import NotAuthorized, ValidationFailed
+from cyberarche.domain.ids import (
+    DocumentId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 from cyberarche.domain.memberships import Role
+from cyberarche.domain.teamspaces import Teamspace, TeamspaceMembership
 from tests.conftest import caller
 
 BOB = caller("bob", "acme")  # no workspace role unless granted
@@ -247,3 +261,224 @@ def test_teamspace_and_favorite_http_flow(api):
     assert api.get(
         f"/api/v1/workspaces/{workspace['id']}/teamspaces", headers=other
     ).json() == []
+
+
+# --- Postgres adapter (fake pool: records queries, replays canned rows) -----
+
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class FakePool:
+    """Minimal asyncpg.Pool stand-in: records queries, replays canned rows."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple]] = []
+        self.rows: list[dict] = []
+        self.row: dict | None = None
+        self.value: object = None
+
+    def _record(self, query: str, args: tuple) -> None:
+        self.calls.append((" ".join(query.split()), args))
+
+    async def execute(self, query: str, *args: object) -> str:
+        self._record(query, args)
+        return "OK"
+
+    async def fetch(self, query: str, *args: object) -> list[dict]:
+        self._record(query, args)
+        return self.rows
+
+    async def fetchrow(self, query: str, *args: object) -> dict | None:
+        self._record(query, args)
+        return self.row
+
+    async def fetchval(self, query: str, *args: object) -> object:
+        self._record(query, args)
+        return self.value
+
+
+def _teamspace_row(**overrides: object) -> dict:
+    row = {
+        "id": "ts-1",
+        "workspace_id": "ws-1",
+        "tenant_id": "acme",
+        "name": "Tessera",
+        "icon": "T",
+        "created_by": "alice",
+        "created_at": NOW,
+    }
+    row.update(overrides)
+    return row
+
+
+def _teamspace() -> Teamspace:
+    return Teamspace(
+        id=TeamspaceId("ts-1"),
+        workspace_id=WorkspaceId("ws-1"),
+        tenant_id=TenantId("acme"),
+        name="Tessera",
+        icon="T",
+        created_by=UserId("alice"),
+        created_at=NOW,
+    )
+
+
+async def test_pg_teamspace_add_inserts_all_columns():
+    pool = FakePool()
+    await PostgresTeamspaceRepository(pool).add(_teamspace())
+
+    query, args = pool.calls[0]
+    assert query.startswith("INSERT INTO teamspaces")
+    assert args == ("ts-1", "ws-1", "acme", "Tessera", "T", "alice", NOW)
+
+
+async def test_pg_teamspace_get_maps_row():
+    pool = FakePool()
+    pool.row = _teamspace_row()
+    found = await PostgresTeamspaceRepository(pool).get(
+        TenantId("acme"), TeamspaceId("ts-1")
+    )
+
+    assert found == _teamspace()
+    assert pool.calls[0][1] == ("ts-1", "acme")
+
+
+async def test_pg_teamspace_get_returns_none_when_missing():
+    pool = FakePool()
+    found = await PostgresTeamspaceRepository(pool).get(
+        TenantId("acme"), TeamspaceId("nope")
+    )
+    assert found is None
+
+
+async def test_pg_teamspace_list_for_workspace_maps_rows():
+    pool = FakePool()
+    pool.rows = [_teamspace_row(), _teamspace_row(id="ts-2", name="Beta")]
+    listed = await PostgresTeamspaceRepository(pool).list_for_workspace(
+        TenantId("acme"), WorkspaceId("ws-1")
+    )
+
+    assert [t.id for t in listed] == ["ts-1", "ts-2"]
+    assert listed[1].name == "Beta"
+    assert pool.calls[0][1] == ("acme", "ws-1")
+
+
+async def test_pg_teamspace_add_member_upserts_role_value():
+    pool = FakePool()
+    membership = TeamspaceMembership(
+        teamspace_id=TeamspaceId("ts-1"),
+        user_id=UserId("bob"),
+        role=Role.EDITOR,
+        granted_at=NOW,
+    )
+    await PostgresTeamspaceRepository(pool).add_member(membership)
+
+    query, args = pool.calls[0]
+    assert "ON CONFLICT (teamspace_id, user_id) DO UPDATE" in query
+    assert args == ("ts-1", "bob", "editor", NOW)
+
+
+async def test_pg_teamspace_remove_member_deletes_by_pair():
+    pool = FakePool()
+    await PostgresTeamspaceRepository(pool).remove_member(
+        TeamspaceId("ts-1"), UserId("bob")
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("DELETE FROM teamspace_memberships")
+    assert args == ("ts-1", "bob")
+
+
+async def test_pg_teamspace_member_role_maps_row_or_none():
+    pool = FakePool()
+    repo = PostgresTeamspaceRepository(pool)
+    assert await repo.member_role(TeamspaceId("ts-1"), UserId("bob")) is None
+
+    pool.row = {
+        "teamspace_id": "ts-1",
+        "user_id": "bob",
+        "role": "owner",
+        "granted_at": NOW,
+    }
+    membership = await repo.member_role(TeamspaceId("ts-1"), UserId("bob"))
+    assert membership == TeamspaceMembership(
+        teamspace_id=TeamspaceId("ts-1"),
+        user_id=UserId("bob"),
+        role=Role.OWNER,
+        granted_at=NOW,
+    )
+
+
+async def test_pg_teamspace_members_maps_rows():
+    pool = FakePool()
+    pool.rows = [
+        {"teamspace_id": "ts-1", "user_id": "alice", "role": "owner", "granted_at": NOW},
+        {"teamspace_id": "ts-1", "user_id": "bob", "role": "viewer", "granted_at": NOW},
+    ]
+    members = await PostgresTeamspaceRepository(pool).members(TeamspaceId("ts-1"))
+
+    assert [(m.user_id, m.role) for m in members] == [
+        ("alice", Role.OWNER),
+        ("bob", Role.VIEWER),
+    ]
+    assert pool.calls[0][1] == ("ts-1",)
+
+
+async def test_pg_teamspaces_for_user_joins_memberships():
+    pool = FakePool()
+    pool.rows = [_teamspace_row()]
+    listed = await PostgresTeamspaceRepository(pool).teamspaces_for_user(
+        TenantId("acme"), WorkspaceId("ws-1"), UserId("bob")
+    )
+
+    assert listed == [_teamspace()]
+    query, args = pool.calls[0]
+    assert "JOIN teamspace_memberships m ON m.teamspace_id = t.id" in query
+    assert args == ("acme", "ws-1", "bob")
+
+
+async def test_pg_teamspace_delete_scopes_by_tenant():
+    pool = FakePool()
+    await PostgresTeamspaceRepository(pool).delete(
+        TenantId("acme"), TeamspaceId("ts-1")
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("DELETE FROM teamspaces")
+    assert args == ("ts-1", "acme")
+
+
+async def test_pg_favorites_add_is_idempotent_insert():
+    pool = FakePool()
+    await PostgresFavoriteRepository(pool).add(UserId("alice"), DocumentId("doc-1"))
+
+    query, args = pool.calls[0]
+    assert "ON CONFLICT (user_id, document_id) DO NOTHING" in query
+    assert args == ("alice", "doc-1")
+
+
+async def test_pg_favorites_remove_deletes_by_pair():
+    pool = FakePool()
+    await PostgresFavoriteRepository(pool).remove(UserId("alice"), DocumentId("doc-1"))
+
+    query, args = pool.calls[0]
+    assert query.startswith("DELETE FROM favorites")
+    assert args == ("alice", "doc-1")
+
+
+async def test_pg_favorites_list_for_user_maps_document_ids():
+    pool = FakePool()
+    pool.rows = [{"document_id": "doc-1"}, {"document_id": "doc-2"}]
+    listed = await PostgresFavoriteRepository(pool).list_for_user(UserId("alice"))
+
+    assert listed == [DocumentId("doc-1"), DocumentId("doc-2")]
+    assert pool.calls[0][1] == ("alice",)
+
+
+async def test_pg_favorites_is_favorite_truthiness():
+    pool = FakePool()
+    repo = PostgresFavoriteRepository(pool)
+    assert await repo.is_favorite(UserId("alice"), DocumentId("doc-1")) is False
+
+    pool.value = 1
+    assert await repo.is_favorite(UserId("alice"), DocumentId("doc-1")) is True

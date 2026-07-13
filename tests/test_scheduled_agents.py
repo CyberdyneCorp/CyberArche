@@ -4,14 +4,31 @@ limits, locking, audit, and notification (autonomous-agents spec)."""
 from __future__ import annotations
 
 import dataclasses
-from datetime import timedelta
+import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from cyberarche.adapters.outbound.postgres.scheduled_agents import (
+    PostgresScheduledAgentRepository,
+)
 from cyberarche.application.ports.llm import LLMResponse, ToolCall
 from cyberarche.domain.errors import NotAuthorized, ValidationFailed
+from cyberarche.domain.ids import (
+    AgentTaskRunId,
+    DocumentId,
+    ScheduledAgentTaskId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 from cyberarche.domain.memberships import Role, WorkspaceMembership
-from cyberarche.domain.scheduled_agents import next_cron_time, validate_cron
+from cyberarche.domain.scheduled_agents import (
+    AgentTaskRun,
+    ScheduledAgentTask,
+    next_cron_time,
+    validate_cron,
+)
 
 from tests.conftest import caller
 from tests.test_agent import make_document, seed_blocks
@@ -307,3 +324,217 @@ def test_scheduled_agents_router_rejects_bad_cron(api):
         headers=_auth(),
     )
     assert resp.status_code == 422
+
+
+# ---- Postgres adapter (stubbed pool) ----------------------------------------
+
+
+class FakePool:
+    """Records queries/args; returns pre-programmed rows (dicts stand in for
+    asyncpg.Record, which is only read via ``row[key]``)."""
+
+    def __init__(self, *, row=None, rows=()):
+        self.row = row
+        self.rows = list(rows)
+        self.calls: list[tuple[str, tuple]] = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+
+    async def fetchrow(self, query, *args):
+        self.calls.append((query, args))
+        return self.row
+
+    async def fetch(self, query, *args):
+        self.calls.append((query, args))
+        return list(self.rows)
+
+
+PG_NOW = datetime(2026, 7, 12, 9, 0, tzinfo=UTC)
+
+
+def pg_task(**overrides) -> ScheduledAgentTask:
+    fields = dict(
+        id=ScheduledAgentTaskId("task-1"),
+        tenant_id=TenantId("acme"),
+        owner_id=UserId("alice"),
+        name="Daily digest",
+        instruction="Summarize recent changes.",
+        workspace_id=WorkspaceId("ws-1"),
+        schedule_cron="0 9 * * *",
+        created_at=PG_NOW,
+        updated_at=PG_NOW,
+        document_id=DocumentId("doc-1"),
+        enabled=True,
+        next_run_at=PG_NOW,
+        running=False,
+        lease_until=None,
+    )
+    fields.update(overrides)
+    return ScheduledAgentTask(**fields)
+
+
+def pg_run(**overrides) -> AgentTaskRun:
+    fields = dict(
+        id=AgentTaskRunId("run-1"),
+        tenant_id=TenantId("acme"),
+        task_id=ScheduledAgentTaskId("task-1"),
+        owner_id=UserId("alice"),
+        trigger="schedule",
+        outcome="succeeded",
+        started_at=PG_NOW,
+        finished_at=PG_NOW + timedelta(seconds=5),
+        document_id=DocumentId("doc-1"),
+        detail="ok",
+        tools_used=["read_document", "apply_blocks"],
+    )
+    fields.update(overrides)
+    return AgentTaskRun(**fields)
+
+
+async def test_pg_add_binds_every_column_in_order():
+    pool = FakePool()
+    task = pg_task()
+    await PostgresScheduledAgentRepository(pool).add(task)
+    _, args = pool.calls[0]
+    assert args == (
+        task.id, task.tenant_id, task.owner_id, task.name, task.instruction,
+        task.workspace_id, task.document_id, task.schedule_cron, task.enabled,
+        task.next_run_at, task.running, task.lease_until, task.max_tool_rounds,
+        task.max_wall_seconds, task.max_actions, task.created_at, task.updated_at,
+    )
+
+
+async def test_pg_get_round_trips_task_row():
+    task = pg_task(lease_until=PG_NOW, running=True)
+    pool = FakePool(row=dataclasses.asdict(task))
+    repo = PostgresScheduledAgentRepository(pool)
+    assert await repo.get(task.tenant_id, task.id) == task
+    _, args = pool.calls[0]
+    assert args == (task.tenant_id, task.id)
+
+
+async def test_pg_get_returns_none_when_missing():
+    repo = PostgresScheduledAgentRepository(FakePool(row=None))
+    assert await repo.get(TenantId("acme"), ScheduledAgentTaskId("nope")) is None
+
+
+async def test_pg_task_row_with_null_document_maps_to_none():
+    task = pg_task(document_id=None)
+    pool = FakePool(row=dataclasses.asdict(task))
+    loaded = await PostgresScheduledAgentRepository(pool).get(task.tenant_id, task.id)
+    assert loaded is not None and loaded.document_id is None
+
+
+async def test_pg_list_for_workspace_maps_rows_and_scopes_query():
+    a, b = pg_task(), pg_task(id=ScheduledAgentTaskId("task-2"), document_id=None)
+    pool = FakePool(rows=[dataclasses.asdict(a), dataclasses.asdict(b)])
+    repo = PostgresScheduledAgentRepository(pool)
+    assert await repo.list_for_workspace(a.tenant_id, a.workspace_id) == [a, b]
+    _, args = pool.calls[0]
+    assert args == (a.tenant_id, a.workspace_id)
+
+
+async def test_pg_update_binds_scope_then_mutable_fields():
+    pool = FakePool()
+    task = pg_task(enabled=False, next_run_at=None)
+    await PostgresScheduledAgentRepository(pool).update(task)
+    _, args = pool.calls[0]
+    assert args == (
+        task.tenant_id, task.id, task.name, task.instruction, task.document_id,
+        task.schedule_cron, task.enabled, task.next_run_at, task.running,
+        task.lease_until, task.max_tool_rounds, task.max_wall_seconds,
+        task.max_actions, task.updated_at,
+    )
+
+
+async def test_pg_delete_is_tenant_scoped():
+    pool = FakePool()
+    await PostgresScheduledAgentRepository(pool).delete(
+        TenantId("acme"), ScheduledAgentTaskId("task-1")
+    )
+    query, args = pool.calls[0]
+    assert "DELETE FROM scheduled_agent_tasks" in query
+    assert args == (TenantId("acme"), ScheduledAgentTaskId("task-1"))
+
+
+async def test_pg_claim_due_returns_claimed_task():
+    task = pg_task(running=True, lease_until=PG_NOW + timedelta(minutes=5))
+    pool = FakePool(row=dataclasses.asdict(task))
+    claimed = await PostgresScheduledAgentRepository(pool).claim_due(
+        PG_NOW, PG_NOW + timedelta(minutes=5)
+    )
+    assert claimed == task
+    _, args = pool.calls[0]
+    assert args == (PG_NOW, PG_NOW + timedelta(minutes=5))
+
+
+async def test_pg_claim_due_returns_none_when_nothing_due():
+    pool = FakePool(row=None)
+    assert (
+        await PostgresScheduledAgentRepository(pool).claim_due(
+            PG_NOW, PG_NOW + timedelta(minutes=5)
+        )
+        is None
+    )
+
+
+async def test_pg_release_binds_task_and_next_run():
+    pool = FakePool()
+    await PostgresScheduledAgentRepository(pool).release(
+        ScheduledAgentTaskId("task-1"), next_run_at=PG_NOW
+    )
+    _, args = pool.calls[0]
+    assert args == (ScheduledAgentTaskId("task-1"), PG_NOW)
+
+
+async def test_pg_release_accepts_none_next_run():
+    pool = FakePool()
+    await PostgresScheduledAgentRepository(pool).release(
+        ScheduledAgentTaskId("task-1"), next_run_at=None
+    )
+    _, args = pool.calls[0]
+    assert args == (ScheduledAgentTaskId("task-1"), None)
+
+
+async def test_pg_record_run_serializes_tools_as_json():
+    pool = FakePool()
+    run = pg_run()
+    await PostgresScheduledAgentRepository(pool).record_run(run)
+    _, args = pool.calls[0]
+    assert args == (
+        run.id, run.tenant_id, run.task_id, run.owner_id, run.trigger,
+        run.document_id, run.outcome, run.detail,
+        json.dumps(["read_document", "apply_blocks"]),
+        run.started_at, run.finished_at,
+    )
+
+
+async def test_pg_list_runs_parses_jsonb_tools_string():
+    run = pg_run()
+    row = dataclasses.asdict(run) | {"tools_used": json.dumps(run.tools_used)}
+    pool = FakePool(rows=[row])
+    repo = PostgresScheduledAgentRepository(pool)
+    assert await repo.list_runs(run.tenant_id, run.task_id) == [run]
+    _, args = pool.calls[0]
+    assert args == (run.tenant_id, run.task_id, 20)
+
+
+async def test_pg_list_runs_maps_null_tools_and_document():
+    run = pg_run(document_id=None, finished_at=None, tools_used=[])
+    row = dataclasses.asdict(run) | {"tools_used": None}
+    pool = FakePool(rows=[row])
+    [loaded] = await PostgresScheduledAgentRepository(pool).list_runs(
+        run.tenant_id, run.task_id
+    )
+    assert loaded == run
+    assert loaded.tools_used == [] and loaded.document_id is None
+
+
+async def test_pg_list_runs_clamps_negative_limit_to_zero():
+    pool = FakePool(rows=[])
+    await PostgresScheduledAgentRepository(pool).list_runs(
+        TenantId("acme"), ScheduledAgentTaskId("task-1"), limit=-3
+    )
+    _, args = pool.calls[0]
+    assert args[-1] == 0

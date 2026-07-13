@@ -149,6 +149,288 @@ async def test_non_member_does_not_get_persona_injected(
     assert context == ""
 
 
+# ---- custom instructions CRUD -----------------------------------------------
+
+
+async def test_workspace_instructions_roundtrip_and_clear(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    assert await use_cases.persona.get_workspace_instructions(alice, workspace.id) is None
+
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "Be brief.")
+    assert (
+        await use_cases.persona.get_workspace_instructions(alice, workspace.id)
+        == "Be brief."
+    )
+
+    await use_cases.persona.clear_workspace_instructions(alice, workspace.id)
+    assert await use_cases.persona.get_workspace_instructions(alice, workspace.id) is None
+
+
+async def test_personal_instructions_roundtrip_and_clear(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    assert await use_cases.persona.get_personal_instructions(alice, workspace.id) is None
+
+    await use_cases.persona.set_personal_instructions(alice, workspace.id, "Call me Al.")
+    assert (
+        await use_cases.persona.get_personal_instructions(alice, workspace.id)
+        == "Call me Al."
+    )
+
+    await use_cases.persona.clear_personal_instructions(alice, workspace.id)
+    assert await use_cases.persona.get_personal_instructions(alice, workspace.id) is None
+
+
+async def test_viewer_may_set_their_own_personal_instructions(
+    use_cases, memberships, clock, alice
+):
+    # A personal layer is private to its author: workspace membership suffices.
+    workspace, _ = await make_document(use_cases, alice)
+    viewer = caller("carol", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+
+    await use_cases.persona.set_personal_instructions(viewer, workspace.id, "mine")
+    assert (
+        await use_cases.persona.get_personal_instructions(viewer, workspace.id)
+        == "mine"
+    )
+
+
+async def test_only_editors_clear_workspace_instructions(
+    use_cases, memberships, clock, alice
+):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "keep")
+    viewer = caller("carol", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+    with pytest.raises(NotAuthorized):
+        await use_cases.persona.clear_workspace_instructions(viewer, workspace.id)
+
+
+async def test_non_member_cannot_read_instructions(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    stranger = caller("stranger", "acme")
+    with pytest.raises(NotAuthorized):
+        await use_cases.persona.get_workspace_instructions(stranger, workspace.id)
+    with pytest.raises(NotAuthorized):
+        await use_cases.persona.get_personal_instructions(stranger, workspace.id)
+
+
+async def test_setting_blank_instructions_clears_the_record(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "old")
+
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "   ")
+
+    assert await use_cases.persona.get_workspace_instructions(alice, workspace.id) is None
+
+
+async def test_updating_instructions_keeps_the_record_id(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "v1")
+    first = await use_cases.persona._instructions.get(
+        alice.tenant_id, workspace.id, None
+    )
+
+    await use_cases.persona.set_workspace_instructions(alice, workspace.id, "v2")
+    second = await use_cases.persona._instructions.get(
+        alice.tenant_id, workspace.id, None
+    )
+
+    assert second.id == first.id and second.instructions == "v2"
+
+
+# ---- memory CRUD -------------------------------------------------------------
+
+
+async def test_add_memory_rejects_blank_text(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.add_memory(alice, workspace.id, "   ")
+
+
+async def test_update_memory_replaces_text_and_keeps_provenance(
+    use_cases, clock, alice
+):
+    workspace, _ = await make_document(use_cases, alice)
+    memory = await use_cases.persona.add_memory(alice, workspace.id, "old fact")
+    clock.tick()
+
+    updated = await use_cases.persona.update_memory(
+        alice, workspace.id, memory.id, "new fact"
+    )
+
+    assert updated.id == memory.id
+    assert updated.text == "new fact"
+    assert updated.created_by == memory.created_by
+    assert updated.created_at == memory.created_at
+    assert updated.updated_at > memory.updated_at
+    listing = await use_cases.persona.list_memories(alice, workspace.id)
+    assert [m.text for m in listing] == ["new fact"]
+
+
+async def test_update_memory_rejects_blank_and_secret_text(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    memory = await use_cases.persona.add_memory(alice, workspace.id, "fine")
+
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.update_memory(alice, workspace.id, memory.id, "  ")
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.update_memory(
+            alice, workspace.id, memory.id,
+            "the API key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX",
+        )
+
+
+async def test_update_unknown_memory_fails(use_cases, alice):
+    from cyberarche.domain.ids import AgentMemoryId
+
+    workspace, _ = await make_document(use_cases, alice)
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.update_memory(
+            alice, workspace.id, AgentMemoryId("ghost"), "text"
+        )
+
+
+async def test_memory_cannot_be_reached_through_another_workspace(use_cases, alice):
+    # The memory id must belong to the addressed workspace.
+    workspace_a, _ = await make_document(use_cases, alice)
+    workspace_b = await use_cases.workspaces.create(alice, name="Other")
+    memory = await use_cases.persona.add_memory(alice, workspace_a.id, "a-fact")
+
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.update_memory(
+            alice, workspace_b.id, memory.id, "hijack"
+        )
+    with pytest.raises(ValidationFailed):
+        await use_cases.persona.delete_memory(alice, workspace_b.id, memory.id)
+
+
+async def test_author_may_delete_their_own_memory_even_as_viewer(
+    use_cases, memberships, clock, alice
+):
+    workspace, _ = await make_document(use_cases, alice)
+    bob = caller("bob", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=bob.user_id,
+            role=Role.EDITOR, granted_at=clock.now(),
+        )
+    )
+    memory = await use_cases.persona.add_memory(bob, workspace.id, "bob's note")
+    # Bob is later downgraded to viewer; he may still delete his own memory.
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=bob.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+
+    await use_cases.persona.delete_memory(bob, workspace.id, memory.id)
+    assert await use_cases.persona.list_memories(alice, workspace.id) == []
+
+
+async def test_viewer_cannot_delete_someone_elses_memory(
+    use_cases, memberships, clock, alice
+):
+    workspace, _ = await make_document(use_cases, alice)
+    memory = await use_cases.persona.add_memory(alice, workspace.id, "alice's note")
+    viewer = caller("carol", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.persona.delete_memory(viewer, workspace.id, memory.id)
+    # Still there.
+    listing = await use_cases.persona.list_memories(alice, workspace.id)
+    assert [m.text for m in listing] == ["alice's note"]
+
+
+async def test_viewer_cannot_add_memories(use_cases, memberships, clock, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    viewer = caller("carol", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+    with pytest.raises(NotAuthorized):
+        await use_cases.persona.add_memory(viewer, workspace.id, "sneaky")
+
+
+# ---- injection budget (D-4) ---------------------------------------------------
+
+
+async def test_build_context_is_empty_without_persona_data(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    assert await use_cases.persona.build_context(alice, workspace.id, "hi") == ""
+
+
+async def test_build_context_clips_long_workspace_instructions(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.set_workspace_instructions(
+        alice, workspace.id, "style " * 1000  # ~6000 chars, over the 4000 budget
+    )
+
+    context = await use_cases.persona.build_context(alice, workspace.id, "hi")
+
+    assert "## Workspace instructions" in context
+    assert "…" in context  # clipped, not dumped wholesale
+    body = context.split("follow these)\n", 1)[1]
+    assert len(body) <= 4000
+
+
+async def test_build_context_includes_personal_layer_header(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.set_personal_instructions(
+        alice, workspace.id, "Address me as Captain."
+    )
+
+    context = await use_cases.persona.build_context(alice, workspace.id, "hi")
+
+    assert "## The current user's personal instructions" in context
+    assert "Address me as Captain." in context
+
+
+async def test_memory_over_the_char_budget_is_not_injected(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.add_memory(alice, workspace.id, "important word " * 200)
+
+    context = await use_cases.persona.build_context(alice, workspace.id, "hi")
+
+    # The only memory blows the 2000-char budget → no memory section at all.
+    assert "Remembered facts" not in context
+    assert context == ""
+
+
+async def test_memories_within_budget_are_listed_newest_first(
+    use_cases, clock, alice
+):
+    workspace, _ = await make_document(use_cases, alice)
+    await use_cases.persona.add_memory(alice, workspace.id, "first fact")
+    clock.tick()
+    await use_cases.persona.add_memory(alice, workspace.id, "second fact")
+
+    context = await use_cases.persona.build_context(alice, workspace.id, "hello")
+
+    assert "## Remembered facts about this workspace" in context
+    assert context.index("second fact") < context.index("first fact")
+
+
 # ---- HTTP router -----------------------------------------------------------
 
 

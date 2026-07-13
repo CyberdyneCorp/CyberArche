@@ -34,6 +34,7 @@ cyberarche-workers = { workspace = true }
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
     "import-linter>=2.1",
     "ruff>=0.8",
     "httpx>=0.27",
@@ -44,6 +45,22 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+# Coverage gate: `uv run pytest --cov` must stay >= fail_under.
+# The Google Workspace connector is first-party but optional (disabled unless
+# OAuth credentials are configured) and is deliberately excluded from the gate.
+[tool.coverage.run]
+source = ["cyberarche"]
+omit = [
+    "*/adapters/outbound/google/*",
+    "*/adapters/inbound/http/routers/google.py",
+    "*/use_cases/google_workspace.py",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = false
+skip_covered = true
 
 [tool.ruff]
 line-length = 100

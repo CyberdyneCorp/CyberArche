@@ -1266,3 +1266,1081 @@ async def test_answer_carries_blocks_when_agent_did_not_edit(use_cases, llm, ali
     answer = await use_cases.agent.ask(alice, document.id, instruction="explain")
 
     assert answer.blocks and answer.blocks[0]["type"] == "paragraph"
+
+
+# ---- tool registry -----------------------------------------------------------
+
+
+def _spec(name: str):
+    from cyberarche.application.ports.llm import ToolSpec
+
+    return ToolSpec(name=name, description="d", parameters={"type": "object"})
+
+
+def test_tool_registry_rejects_a_duplicate_name():
+    from cyberarche.application.use_cases.agent import ToolRegistry
+
+    registry = ToolRegistry()
+
+    async def handler(caller, arguments):
+        return "ok"
+
+    registry.register(_spec("t"), handler)
+    with pytest.raises(ValidationFailed):
+        registry.register(_spec("t"), handler)
+
+
+async def test_tool_registry_dispatch_unknown_tool_reports_error(alice):
+    from cyberarche.application.use_cases.agent import ToolRegistry
+
+    registry = ToolRegistry()
+    result = await registry.dispatch(
+        alice, ToolCall(id="c", name="nope", arguments={})
+    )
+    assert result == "error: unknown tool 'nope'"
+
+
+async def test_tool_registry_returns_handler_failures_to_the_model(alice):
+    from cyberarche.application.use_cases.agent import ToolRegistry
+
+    registry = ToolRegistry()
+
+    async def handler(caller, arguments):
+        raise RuntimeError("boom")
+
+    registry.register(_spec("t"), handler)
+    result = await registry.dispatch(alice, ToolCall(id="c", name="t", arguments={}))
+    assert result == "error: boom"
+
+
+# ---- document lookup guards ---------------------------------------------------
+
+
+async def test_ask_unknown_document_raises_not_found(use_cases, llm, alice):
+    from cyberarche.domain.errors import NotFound
+    from cyberarche.domain.ids import DocumentId
+
+    with pytest.raises(NotFound):
+        await use_cases.agent.ask(alice, DocumentId("ghost"), instruction="hi")
+
+
+async def test_ask_trashed_document_raises_not_found(use_cases, llm, alice):
+    from cyberarche.domain.errors import NotFound
+
+    _, document = await make_document(use_cases, alice)
+    await use_cases.documents.trash(alice, document.id)
+
+    with pytest.raises(NotFound):
+        await use_cases.agent.ask(alice, document.id, instruction="hi")
+
+
+async def test_history_skips_blank_turns_and_clips_long_ones(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="ok", model="m")]
+
+    await use_cases.agent.ask(
+        alice,
+        document.id,
+        instruction="hi",
+        history=[("user", "   "), ("user", "y" * 5000)],
+    )
+
+    sent = llm.requests[0]
+    assert [m.role for m in sent] == ["system", "user", "user"]  # blank skipped
+    assert len(sent[1].content) == 4000  # clipped to the history budget
+
+
+async def test_draft_prefixes_the_instruction_and_returns_blocks(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="A drafted paragraph.", model="m")]
+
+    blocks = await use_cases.agent.draft(
+        alice, document.id, instruction="a launch plan"
+    )
+
+    assert blocks and blocks[0]["type"] == "paragraph"
+    prompt = llm.requests[0][-1].content
+    assert "Draft the following as document content:" in prompt
+    assert "a launch plan" in prompt
+
+
+async def test_read_document_tool_reads_another_accessible_document(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    _, other = await make_document(use_cases, alice, title="Roadmap")
+    await seed_blocks(use_cases, alice, other.id, ["Q3 goals"])
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="read_document",
+                    arguments={"document_id": other.id},
+                ),
+            ),
+        ),
+        LLMResponse(text="ok", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="read it")
+
+    call = next(c for c in answer.tool_calls if c.name == "read_document")
+    assert call.ok
+    assert "# Roadmap" in call.result and "Q3 goals" in call.result
+
+
+async def test_read_document_tool_reports_missing_document_as_error(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="read_document",
+                    arguments={"document_id": "ghost"},
+                ),
+            ),
+        ),
+        LLMResponse(text="ok", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(alice, document.id, instruction="read it")
+
+    call = next(c for c in answer.tool_calls if c.name == "read_document")
+    assert not call.ok and call.result.startswith("error:")
+
+
+# ---- background (autonomous) runs ---------------------------------------------
+
+
+async def test_run_background_succeeds_and_reports_workspace(use_cases, llm, alice):
+    workspace, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="daily report done", model="m")]
+
+    result = await use_cases.agent.run_background(
+        alice, document.id, instruction="write the report"
+    )
+
+    assert result.text == "daily report done"
+    assert result.outcome == "succeeded"
+    assert result.edited is False
+    assert result.tools_used == []
+    assert result.workspace_id == workspace.id
+
+
+async def test_run_background_refuses_destructive_tools(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["precious"])
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(id="c1", name="delete_block", arguments={"block_id": "b1"}),
+            ),
+        ),
+        LLMResponse(text="could not delete", model="m"),
+    ]
+
+    result = await use_cases.agent.run_background(
+        alice, document.id, instruction="clean up"
+    )
+
+    # The refusal goes back to the model, and the block survives.
+    tool_reply = llm.requests[1][-1].tool_result.content
+    assert "destructive tools are disabled" in tool_reply
+    state = await use_cases.realtime.current_state(alice, document.id)
+    assert use_cases.agent._engine.read_blocks(state)[0]["data"]["text"] == "precious"
+    assert result.outcome == "succeeded"
+
+
+async def test_background_tool_list_omits_destructive_tools(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+
+    offered = {
+        spec.name
+        for spec in await use_cases.agent._available_tools(
+            alice, document.workspace_id, document.id, None, None, background=True
+        )
+    }
+    assert "delete_block" not in offered
+    assert {"insert_blocks", "update_block", "update_table"} <= offered
+
+
+async def test_run_background_stops_at_the_round_limit(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    insert = LLMResponse(
+        text="",
+        tool_calls=(
+            ToolCall(
+                id="c",
+                name="insert_blocks",
+                arguments={"blocks": [{"type": "paragraph", "data": {"text": "x"}}]},
+            ),
+        ),
+    )
+    llm._responses = [insert] * 10
+
+    result = await use_cases.agent.run_background(
+        alice, document.id, instruction="loop", max_tool_rounds=1
+    )
+
+    assert result.outcome == "stopped_rounds"
+    assert result.edited is True
+    assert result.tools_used == ["insert_blocks"]
+
+
+async def test_run_background_stops_at_the_action_limit_mid_response(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1",
+                    name="insert_blocks",
+                    arguments={"blocks": [{"type": "paragraph", "data": {"text": "a"}}]},
+                ),
+                ToolCall(
+                    id="c2",
+                    name="insert_blocks",
+                    arguments={"blocks": [{"type": "paragraph", "data": {"text": "b"}}]},
+                ),
+            ),
+        ),
+        LLMResponse(text="never reached", model="m"),
+    ]
+
+    result = await use_cases.agent.run_background(
+        alice, document.id, instruction="loop", max_actions=1
+    )
+
+    assert result.outcome == "stopped_actions"
+    assert result.tools_used == ["insert_blocks"]  # the second call never ran
+
+
+async def test_run_background_stops_at_the_deadline(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    insert = LLMResponse(
+        text="",
+        tool_calls=(
+            ToolCall(
+                id="c",
+                name="insert_blocks",
+                arguments={"blocks": [{"type": "paragraph", "data": {"text": "x"}}]},
+            ),
+        ),
+    )
+    llm._responses = [insert] * 3
+
+    result = await use_cases.agent.run_background(
+        alice, document.id, instruction="loop", max_wall_seconds=0
+    )
+
+    assert result.outcome == "stopped_timeout"
+    assert result.tools_used == []  # timed out before any tool ran
+
+
+# ---- editing tool argument handling --------------------------------------------
+
+
+async def test_insert_blocks_tool_requires_blocks(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_editing_tool(
+        alice, document.id, "insert_blocks", {"blocks": []}
+    )
+    assert result == "error: no blocks provided"
+
+
+async def test_editing_tool_reports_missing_arguments_as_error(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_editing_tool(
+        alice, document.id, "update_block", {"text": "no block id"}
+    )
+    assert result.startswith("error:")
+
+
+async def test_editing_tool_unknown_operation_is_an_error(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_editing_tool(
+        alice, document.id, "explode", {}
+    )
+    assert result == "error: unknown operation explode"
+
+
+async def test_update_table_without_header_keeps_existing_header(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    await use_cases.agent.apply_blocks(
+        alice,
+        document.id,
+        [
+            {
+                "id": "t1",
+                "type": "table",
+                "data": {"header": ["Name"], "rows": [["old"]]},
+            }
+        ],
+    )
+
+    result = await use_cases.agent._run_editing_tool(
+        alice, document.id, "update_table", {"block_id": "t1", "rows": [["new"]]}
+    )
+
+    assert result == "updated table t1"
+    state = await use_cases.realtime.current_state(alice, document.id)
+    table = next(
+        b for b in use_cases.agent._engine.read_blocks(state) if b["type"] == "table"
+    )
+    assert table["data"]["rows"] == [["new"]]
+    assert table["data"]["header"] == ["Name"]  # merged, not dropped
+
+
+# ---- image generation guard rails ----------------------------------------------
+
+
+async def test_generate_image_requires_a_prompt(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_generate_image(
+        alice, workspace.id, document.id, {"prompt": "   "}
+    )
+    assert result == "error: prompt required"
+
+
+async def test_generate_image_denies_a_viewer(use_cases, memberships, clock, alice):
+    from tests.conftest import caller
+
+    viewer = caller("carol", "acme")
+    workspace, document = await make_document(use_cases, alice)
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+
+    result = await use_cases.agent._run_generate_image(
+        viewer, workspace.id, document.id, {"prompt": "a fox"}
+    )
+    assert result == "error: you do not have permission to edit this document"
+
+
+async def test_generate_image_maps_provider_failure_to_error(use_cases, alice):
+    class _FailingImages:
+        async def generate(self, prompt, *, size="1024x1024"):
+            raise RuntimeError("provider down")
+
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._images = _FailingImages()
+
+    result = await use_cases.agent._run_generate_image(
+        alice, workspace.id, document.id, {"prompt": "a fox"}
+    )
+    assert result == "error: provider down"
+
+
+# ---- mind map guard rails --------------------------------------------------------
+
+
+async def test_create_mindmap_requires_central_and_branches(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+
+    result = await use_cases.agent._run_create_mindmap(
+        alice, document.id, {"central": "", "branches": ["a"]}
+    )
+    assert result == "error: central topic required"
+
+    result = await use_cases.agent._run_create_mindmap(
+        alice, document.id, {"central": "AI", "branches": []}
+    )
+    assert result == "error: at least one branch required"
+
+    result = await use_cases.agent._run_create_mindmap(
+        alice, document.id, {"central": "AI", "branches": "oops"}
+    )
+    assert result == "error: at least one branch required"
+
+
+async def test_create_mindmap_denies_a_viewer(use_cases, memberships, clock, alice):
+    from tests.conftest import caller
+
+    viewer = caller("carol", "acme")
+    workspace, document = await make_document(use_cases, alice)
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+
+    result = await use_cases.agent._run_create_mindmap(
+        viewer, document.id, {"central": "AI", "branches": ["ML"]}
+    )
+    assert result == "error: you do not have permission to edit this document"
+
+
+# ---- meetings tools ---------------------------------------------------------------
+
+
+async def test_agent_lists_meetings_with_delegated_token(
+    use_cases, llm, meetings, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id="c1", name="list_meetings", arguments={}),),
+        ),
+        LLMResponse(text="here they are", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice, document.id, instruction="list my meetings", access_token="tok-m"
+    )
+
+    assert meetings.tokens == ["tok-m"]
+    call = next(c for c in answer.tool_calls if c.name == "list_meetings")
+    assert call.result.startswith("meetings:")
+    assert "id=rec-1" in call.result and "Weekly standup" in call.result
+
+
+async def test_meetings_tool_requires_sign_in(use_cases, alice):
+    result = await use_cases.agent._run_meetings_tool(
+        ToolCall(id="c", name="list_meetings", arguments={}), None
+    )
+    assert result == "error: sign in required to access meetings"
+
+
+async def test_meetings_tool_validates_arguments(use_cases, alice):
+    result = await use_cases.agent._run_meetings_tool(
+        ToolCall(id="c", name="get_meeting_transcript", arguments={}), "tok"
+    )
+    assert result == "error: recording_id required"
+
+    result = await use_cases.agent._run_meetings_tool(
+        ToolCall(id="c", name="ask_meetings", arguments={"question": " "}), "tok"
+    )
+    assert result == "error: question required"
+
+    result = await use_cases.agent._run_meetings_tool(
+        ToolCall(id="c", name="bogus_meetings", arguments={}), "tok"
+    )
+    assert result == "error: unknown meetings tool bogus_meetings"
+
+
+def test_meetings_error_maps_provider_statuses():
+    from cyberarche.application.use_cases.agent import _meetings_error
+
+    class _Resp:
+        def __init__(self, status):
+            self.status_code = status
+
+    class _HttpError(Exception):
+        def __init__(self, status):
+            super().__init__(f"HTTP {status}")
+            self.response = _Resp(status)
+
+    assert "not signed in" in _meetings_error(_HttpError(401))
+    assert "not signed in" in _meetings_error(_HttpError(403))
+    assert "not found" in _meetings_error(_HttpError(404))
+    assert _meetings_error(RuntimeError("weird")) == "weird"
+    assert _meetings_error(RuntimeError("")) == "meetings service error"
+
+
+async def test_meetings_provider_failure_is_returned_as_error(use_cases, alice):
+    class _FailingMeetings:
+        async def list_recordings(self, access_token, *, limit=20):
+            raise RuntimeError("down")
+
+    use_cases.agent._meetings = _FailingMeetings()
+    result = await use_cases.agent._run_meetings_tool(
+        ToolCall(id="c", name="list_meetings", arguments={}), "tok"
+    )
+    assert result == "error: down"
+
+
+def test_render_meeting_list_and_transcript_edge_cases():
+    from cyberarche.application.ports.meetings import MeetingTranscript
+    from cyberarche.application.use_cases.agent import (
+        _render_meeting_list,
+        _render_meeting_transcript,
+    )
+
+    assert _render_meeting_list([]) == "no meetings found"
+
+    bare = MeetingTranscript(
+        id="rec-2", status="processing", captured_at=None, headline=None,
+        abstract=None, bullets=[], action_items=[], transcript=None,
+    )
+    rendered = _render_meeting_transcript(bare)
+    assert "meeting rec-2 (processing)" in rendered
+    assert "(transcript not ready yet)" in rendered
+
+
+# ---- web/media tools ---------------------------------------------------------------
+
+
+async def test_agent_youtube_playlist_forwards_token(use_cases, llm, web_media, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(
+                    id="c1", name="youtube_playlist", arguments={"playlist": "pl-1"}
+                ),
+            ),
+        ),
+        LLMResponse(text="listed", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice, document.id, instruction="list the playlist", access_token="tok-pl"
+    )
+
+    assert web_media.tokens == ["tok-pl"]
+    assert web_media.playlists == ["pl-1"]
+    call = next(c for c in answer.tool_calls if c.name == "youtube_playlist")
+    assert call.result.startswith("playlist videos:")
+    assert "Ep 1" in call.result and "https://y.test/v2" in call.result
+
+
+async def test_web_media_tool_validates_arguments(use_cases, alice):
+    result = await use_cases.agent._run_web_media_tool(
+        ToolCall(id="c", name="web_search", arguments={"query": " "}), "tok"
+    )
+    assert result == "error: query required"
+
+    result = await use_cases.agent._run_web_media_tool(
+        ToolCall(id="c", name="youtube_transcript", arguments={}), "tok"
+    )
+    assert result == "error: video required"
+
+    result = await use_cases.agent._run_web_media_tool(
+        ToolCall(id="c", name="youtube_playlist", arguments={"playlist": ""}), "tok"
+    )
+    assert result == "error: playlist required"
+
+    result = await use_cases.agent._run_web_media_tool(
+        ToolCall(id="c", name="bogus_media", arguments={}), "tok"
+    )
+    assert result == "error: unknown web/media tool bogus_media"
+
+
+def test_web_media_error_maps_auth_and_missing_statuses():
+    from cyberarche.application.use_cases.agent import _web_media_error
+
+    class _Resp:
+        def __init__(self, status):
+            self.status_code = status
+
+    class _HttpError(Exception):
+        def __init__(self, status):
+            super().__init__(f"HTTP {status}")
+            self.response = _Resp(status)
+
+    assert "not signed in" in _web_media_error(_HttpError(401))
+    assert "not found" in _web_media_error(_HttpError(404))
+    assert _web_media_error(RuntimeError("odd")) == "odd"
+    assert _web_media_error(RuntimeError("")) == "web/media service unavailable"
+
+
+async def test_web_media_provider_failure_is_returned_as_error(use_cases, alice):
+    class _FailingWebMedia:
+        async def search(self, access_token, query, *, num=10):
+            raise RuntimeError("down")
+
+    use_cases.agent._web_media = _FailingWebMedia()
+    result = await use_cases.agent._run_web_media_tool(
+        ToolCall(id="c", name="web_search", arguments={"query": "x"}), "tok"
+    )
+    assert result == "error: down"
+
+
+def test_render_web_media_edge_cases():
+    from cyberarche.application.ports.web_media import Transcript
+    from cyberarche.application.use_cases.agent import (
+        _render_playlist,
+        _render_search,
+        _render_transcript,
+    )
+
+    assert _render_search([]) == "no results found"
+    assert _render_playlist([]) == "no videos found"
+
+    silent = Transcript(video_id="v9", text="", title=None, lang=None)
+    assert _render_transcript(silent) == "transcript for video v9\n(no transcript available)"
+
+
+# ---- persona (durable memory) tools -------------------------------------------------
+
+
+async def test_persona_tools_report_unconfigured_when_absent(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    use_cases.agent._persona = None
+    result = await use_cases.agent._run_persona_tool(
+        alice, workspace.id, ToolCall(id="c", name="remember", arguments={"note": "x"})
+    )
+    assert result == "error: agent memory is not configured"
+
+
+async def test_persona_tool_validates_arguments(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+
+    result = await use_cases.agent._run_persona_tool(
+        alice, workspace.id, ToolCall(id="c", name="remember", arguments={"note": " "})
+    )
+    assert result == "error: note required"
+
+    result = await use_cases.agent._run_persona_tool(
+        alice, workspace.id, ToolCall(id="c", name="forget", arguments={})
+    )
+    assert result == "error: memory_id required"
+
+    result = await use_cases.agent._run_persona_tool(
+        alice, workspace.id, ToolCall(id="c", name="bogus_memory", arguments={})
+    )
+    assert result == "error: unknown memory tool bogus_memory"
+
+
+async def test_agent_lists_and_forgets_memories_via_tools(use_cases, llm, alice):
+    workspace, document = await make_document(use_cases, alice)
+    memory = await use_cases.persona.add_memory(
+        alice, workspace.id, "We deploy on Fridays."
+    )
+    llm._responses = [
+        LLMResponse(
+            text="",
+            tool_calls=(ToolCall(id="c1", name="list_memories", arguments={}),),
+        ),
+        LLMResponse(
+            text="",
+            tool_calls=(
+                ToolCall(id="c2", name="forget", arguments={"memory_id": memory.id}),
+            ),
+        ),
+        LLMResponse(text="forgotten", model="m"),
+    ]
+
+    answer = await use_cases.agent.ask(
+        alice, document.id, instruction="forget the deploy day"
+    )
+
+    listed = next(c for c in answer.tool_calls if c.name == "list_memories")
+    assert "We deploy on Fridays." in listed.result
+    assert f"id={memory.id}" in listed.result
+    forgot = next(c for c in answer.tool_calls if c.name == "forget")
+    assert forgot.result == f"forgot memory {memory.id}"
+    assert await use_cases.persona.list_memories(alice, workspace.id) == []
+
+
+async def test_remember_tool_rejects_a_secret_as_an_error_string(use_cases, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_persona_tool(
+        alice,
+        workspace.id,
+        ToolCall(
+            id="c",
+            name="remember",
+            arguments={"note": "the API key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX"},
+        ),
+    )
+    assert result.startswith("error:") and "secret" in result
+
+
+def test_render_memories_empty():
+    from cyberarche.application.use_cases.agent import _render_memories
+
+    assert _render_memories([]) == "no memories saved for this workspace"
+
+
+# ---- google tools (agent-side dispatch) ----------------------------------------------
+
+
+async def test_google_tools_report_unconfigured_when_absent(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._google = None
+    result = await use_cases.agent._run_google_tool(
+        alice,
+        workspace.id,
+        document.id,
+        ToolCall(id="c", name="google_gmail_search", arguments={"query": "x"}),
+    )
+    assert result == "error: Google Workspace is not configured"
+
+
+async def test_google_tool_failure_is_returned_as_error(use_cases, alice):
+    # No Google connection → the use case raises and the agent maps it to error text.
+    workspace, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_google_tool(
+        alice,
+        workspace.id,
+        document.id,
+        ToolCall(id="c", name="google_gmail_search", arguments={"query": "x"}),
+    )
+    assert result.startswith("error:")
+
+
+async def test_google_read_tools_render_results(use_cases, google_port, alice):
+    from tests.test_google_workspace import _connect
+
+    workspace, document = await make_document(use_cases, alice)
+    await _connect(
+        use_cases, google_port, alice, workspace.id,
+        ["gmail_read", "gmail_compose", "calendar", "drive"],
+    )
+
+    def call(name, arguments):
+        return use_cases.agent._run_google_tool(
+            alice, workspace.id, document.id,
+            ToolCall(id="c", name=name, arguments=arguments),
+        )
+
+    search = await call("google_gmail_search", {"query": "hello"})
+    assert search.startswith("gmail results:") and "id=m1" in search
+
+    read = await call("google_gmail_read", {"message_id": "m1"})
+    assert "Subject — from a@b.com" in read and "full body" in read
+
+    draft = await call(
+        "google_gmail_draft", {"to": "x@y.z", "subject": "s", "body": "b"}
+    )
+    assert "draft created (id=draft-1)" in draft
+    assert "the agent does not send mail" in draft
+
+    events = await call(
+        "google_calendar_list", {"time_min": "t0", "time_max": "t1"}
+    )
+    assert events.startswith("calendar events:") and "Standup" in events
+
+    busy = await call("google_free_busy", {"time_min": "t0", "time_max": "t1"})
+    assert busy.startswith("busy periods:") and "t0 → t1" in busy
+
+    files = await call("google_drive_search", {"query": "plan"})
+    assert files.startswith("drive files:") and "id=d1" in files
+
+    unknown = await call("google_gmail_send", {})
+    assert unknown == "error: unknown Google tool google_gmail_send"
+
+
+async def test_google_empty_results_render_friendly_text(
+    use_cases, google_port, alice
+):
+    from tests.test_google_workspace import _connect
+
+    workspace, document = await make_document(use_cases, alice)
+    await _connect(
+        use_cases, google_port, alice, workspace.id, ["calendar", "drive"]
+    )
+
+    async def none_busy(access_token, *, time_min, time_max):
+        return []
+
+    async def no_files(access_token, query, *, limit=10):
+        return []
+
+    async def empty_doc(access_token, doc_id):
+        return []
+
+    google_port.calendar_free_busy = none_busy
+    google_port.drive_search = no_files
+    google_port.import_doc = empty_doc
+
+    def call(name, arguments):
+        return use_cases.agent._run_google_tool(
+            alice, workspace.id, document.id,
+            ToolCall(id="c", name=name, arguments=arguments),
+        )
+
+    assert await call(
+        "google_free_busy", {"time_min": "t0", "time_max": "t1"}
+    ) == "no busy periods in that window"
+    assert await call("google_drive_search", {"query": "x"}) == "no files found"
+    assert await call("google_import_doc", {"doc_id": "d1"}) == "the doc was empty"
+
+
+async def test_google_tools_offered_match_the_granted_scopes(
+    use_cases, google_port, alice
+):
+    from tests.test_google_workspace import _connect
+
+    workspace, document = await make_document(use_cases, alice)
+    await _connect(
+        use_cases, google_port, alice, workspace.id,
+        ["gmail_read", "gmail_compose", "calendar", "drive"],
+    )
+
+    offered = {
+        spec.name
+        for spec in await use_cases.agent._available_tools(
+            alice, workspace.id, document.id, None, None
+        )
+    }
+    assert {
+        "google_gmail_search",
+        "google_gmail_read",
+        "google_gmail_draft",
+        "google_calendar_list",
+        "google_free_busy",
+        "google_drive_search",
+        "google_import_doc",
+    } <= offered
+
+
+def test_render_gmail_and_events_empty():
+    from cyberarche.application.use_cases.agent import _render_events, _render_gmail
+
+    assert _render_gmail([]) == "no messages found"
+    assert _render_events([]) == "no events in that window"
+
+
+# ---- run_python guard rails -----------------------------------------------------------
+
+
+async def test_run_python_requires_code(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    result = await use_cases.agent._run_python(
+        alice, workspace.id, document.id, {"code": "  "}
+    )
+    assert result == "error: code required"
+
+
+async def test_run_python_needs_blob_storage_too(use_cases, alice):
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._blobs = None
+    result = await use_cases.agent._run_python(
+        alice, workspace.id, document.id, {"code": "1 + 1"}
+    )
+    assert result == "error: code execution is not configured"
+
+
+async def test_run_python_denies_a_viewer(use_cases, memberships, clock, alice):
+    from tests.conftest import caller
+
+    viewer = caller("carol", "acme")
+    workspace, document = await make_document(use_cases, alice)
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+    result = await use_cases.agent._run_python(
+        viewer, workspace.id, document.id, {"code": "1 + 1"}
+    )
+    assert result == "error: you do not have permission to edit this document"
+
+
+async def test_run_python_maps_interpreter_failure_to_error(use_cases, alice):
+    class _BrokenInterpreter:
+        async def run(self, code):
+            raise RuntimeError("sandbox unreachable")
+
+    workspace, document = await make_document(use_cases, alice)
+    use_cases.agent._code = _BrokenInterpreter()
+    result = await use_cases.agent._run_python(
+        alice, workspace.id, document.id, {"code": "1 + 1"}
+    )
+    assert result == "error: sandbox unreachable"
+
+
+def test_summarize_python_reports_failure_result_and_tables():
+    from cyberarche.application.ports.code_exec import CodeExecutionResult
+    from cyberarche.application.use_cases.agent import _summarize_python
+
+    outcome = CodeExecutionResult(
+        success=False,
+        stdout="partial\n",
+        stderr="Traceback: boom",
+        result="42",
+        error=None,
+        images=[],
+        tables=["| a | b |", "| c |", "| never shown |"],
+    )
+    summary = _summarize_python(outcome, inserted=0)
+
+    assert summary.startswith("failed")
+    assert "stdout:\npartial" in summary
+    assert "result: 42" in summary
+    assert "error:\nTraceback: boom" in summary  # stderr used when error is None
+    assert summary.count("table:") == 2  # capped at two tables
+    assert "never shown" not in summary
+    assert "inserted" not in summary  # no figures were inserted
+
+
+# ---- block normalization / answer parsing extras ---------------------------------------
+
+
+def test_normalize_maps_src_and_href_to_url():
+    b = _normalize_block({"type": "image", "data": {"src": "https://x/i.png"}})
+    assert b["data"]["url"] == "https://x/i.png"
+    b = _normalize_block({"type": "embed", "data": {"href": "https://x/v"}})
+    assert b["data"]["url"] == "https://x/v"
+    # A correct url is kept.
+    b = _normalize_block({"type": "image", "data": {"url": "https://x/ok.png"}})
+    assert b["data"]["url"] == "https://x/ok.png"
+
+
+def test_answer_blocks_parses_a_divider():
+    blocks = _answer_blocks(_Ids(), "above\n\n---\n\nbelow")
+    assert [b["type"] for b in blocks] == ["paragraph", "divider", "paragraph"]
+
+
+async def test_available_tools_without_persona_omits_memory_tools(use_cases, alice):
+    _, document = await make_document(use_cases, alice)
+    use_cases.agent._persona = None
+
+    offered = {
+        spec.name
+        for spec in await use_cases.agent._available_tools(
+            alice, document.workspace_id, document.id, None, None
+        )
+    }
+    assert not ({"remember", "list_memories", "forget"} & offered)
+
+
+async def test_ask_without_persona_uses_the_plain_system_prompt(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    use_cases.agent._persona = None
+    llm._responses = [LLMResponse(text="ok", model="m")]
+
+    await use_cases.agent.ask(alice, document.id, instruction="hi")
+
+    system = llm.requests[0][0]
+    assert system.role == "system"
+    assert "Remembered facts" not in system.content
+
+
+# --- PostgresAgentRunRepository: SQL translation over a recorded stub pool ---
+
+
+class _StubPool:
+    """Records every query and returns canned rows — no real Postgres."""
+
+    def __init__(self, rows: list[dict] | None = None) -> None:
+        self.rows = rows or []
+        self.calls: list[tuple[str, str, tuple]] = []
+
+    async def execute(self, query: str, *args) -> str:
+        self.calls.append(("execute", query, args))
+        return "INSERT 0 1"
+
+    async def fetch(self, query: str, *args) -> list[dict]:
+        self.calls.append(("fetch", query, args))
+        return self.rows
+
+
+def _run(**kw):
+    from datetime import UTC, datetime
+
+    from cyberarche.application.ports.agent import AgentRun
+    from cyberarche.domain.ids import AgentRunId, DocumentId, TenantId, UserId
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    defaults = dict(
+        id=AgentRunId("run-1"),
+        tenant_id=TenantId("acme"),
+        user_id=UserId("alice"),
+        document_id=DocumentId("doc-1"),
+        model="claude",
+        prompt="Summarize",
+        tools_used=("read_document", "edit_blocks"),
+        outcome="ok",
+        started_at=now,
+        finished_at=now,
+    )
+    defaults.update(kw)
+    return AgentRun(**defaults)
+
+
+async def test_postgres_agent_run_add_persists_every_column():
+    import json
+
+    from cyberarche.adapters.outbound.postgres.agent_runs import (
+        PostgresAgentRunRepository,
+    )
+
+    pool = _StubPool()
+    run = _run()
+    await PostgresAgentRunRepository(pool).add(run)
+
+    kind, query, args = pool.calls[0]
+    assert kind == "execute" and "INSERT INTO agent_runs" in query
+    assert args == (
+        run.id, run.tenant_id, run.document_id, run.user_id, run.model,
+        run.prompt, json.dumps(["read_document", "edit_blocks"]),
+        run.outcome, run.started_at, run.finished_at,
+    )
+
+
+async def test_postgres_agent_run_list_maps_rows_back_to_domain():
+    from cyberarche.adapters.outbound.postgres.agent_runs import (
+        PostgresAgentRunRepository,
+    )
+    from cyberarche.domain.ids import DocumentId, TenantId
+
+    stored = _run()
+    row = {
+        "id": stored.id, "tenant_id": stored.tenant_id,
+        "user_id": stored.user_id, "document_id": stored.document_id,
+        "model": stored.model, "prompt": stored.prompt,
+        "tools_used": '["read_document", "edit_blocks"]',
+        "outcome": stored.outcome, "started_at": stored.started_at,
+        "finished_at": stored.finished_at,
+    }
+    pool = _StubPool(rows=[row])
+
+    runs = await PostgresAgentRunRepository(pool).list_for_document(
+        TenantId("acme"), DocumentId("doc-1")
+    )
+
+    assert runs == [stored]
+    kind, query, args = pool.calls[0]
+    assert kind == "fetch" and "FROM agent_runs" in query
+    assert args == (TenantId("acme"), DocumentId("doc-1"))
+
+
+async def test_postgres_agent_run_list_handles_null_document_id():
+    """Workspace-level runs (no document) round-trip document_id=None."""
+    from cyberarche.adapters.outbound.postgres.agent_runs import (
+        PostgresAgentRunRepository,
+    )
+    from cyberarche.domain.ids import DocumentId, TenantId
+
+    stored = _run(document_id=None, tools_used=(), outcome=None)
+    row = {
+        "id": stored.id, "tenant_id": stored.tenant_id,
+        "user_id": stored.user_id, "document_id": None,
+        "model": stored.model, "prompt": stored.prompt,
+        "tools_used": "[]", "outcome": None,
+        "started_at": stored.started_at, "finished_at": stored.finished_at,
+    }
+    pool = _StubPool(rows=[row])
+
+    runs = await PostgresAgentRunRepository(pool).list_for_document(
+        TenantId("acme"), DocumentId("doc-1")
+    )
+    assert runs == [stored]
+    assert runs[0].document_id is None and runs[0].tools_used == ()
+
+
+async def test_postgres_agent_run_list_returns_empty_for_no_rows():
+    from cyberarche.adapters.outbound.postgres.agent_runs import (
+        PostgresAgentRunRepository,
+    )
+    from cyberarche.domain.ids import DocumentId, TenantId
+
+    pool = _StubPool(rows=[])
+    runs = await PostgresAgentRunRepository(pool).list_for_document(
+        TenantId("acme"), DocumentId("missing")
+    )
+    assert runs == []

@@ -231,3 +231,418 @@ async def test_move_out_of_folder_to_private(use_cases, alice):
 
     moved = await use_cases.documents.move_to_private(alice, doc.id)
     assert moved.folder_id is None and moved.teamspace_id is None
+
+
+# ---- HTTP surface (routers/folders.py) ---------------------------------------
+
+
+def _auth(token: str = "alice-token") -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _workspace(api, headers, name="WS") -> dict:
+    return api.post("/api/v1/workspaces", json={"name": name}, headers=headers).json()
+
+
+def _teamspace(api, headers, workspace_id: str, name="Team") -> dict:
+    return api.post(
+        f"/api/v1/workspaces/{workspace_id}/teamspaces",
+        json={"name": name},
+        headers=headers,
+    ).json()
+
+
+def test_nested_folder_created_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    parent = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Parent", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+
+    response = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Child", "parent_folder_id": parent["id"]},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    child = response.json()
+    assert child["parent_folder_id"] == parent["id"]
+    assert child["teamspace_id"] == ts["id"]  # inherited
+
+
+def test_rename_folder_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Old"},
+        headers=headers,
+    ).json()
+
+    response = api.patch(
+        f"/api/v1/folders/{folder['id']}", json={"name": "New"}, headers=headers
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "New"
+    listed = api.get(f"/api/v1/workspaces/{ws['id']}/folders", headers=headers).json()
+    assert [f["name"] for f in listed] == ["New"]
+
+
+def test_rename_folder_is_tenant_isolated_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Mine"},
+        headers=headers,
+    ).json()
+
+    # Mallory (other tenant) sees a 404, not a 403 (no existence leak).
+    response = api.patch(
+        f"/api/v1/folders/{folder['id']}",
+        json={"name": "Stolen"},
+        headers=_auth("mallory-token"),
+    )
+    assert response.status_code == 404
+
+
+def test_delete_folder_over_http_trashes_its_documents(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Box", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Doc", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{doc['id']}/location",
+        json={"folder_id": folder["id"]},
+        headers=headers,
+    )
+
+    response = api.delete(f"/api/v1/folders/{folder['id']}", headers=headers)
+    assert response.status_code == 204
+    assert api.get(f"/api/v1/workspaces/{ws['id']}/folders", headers=headers).json() == []
+    trash = api.get(f"/api/v1/workspaces/{ws['id']}/trash", headers=headers).json()
+    assert [d["id"] for d in trash] == [doc["id"]]
+
+
+def test_folder_graph_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Graph", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    alpha = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Alpha", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    beta = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Beta", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    for doc in (alpha, beta):
+        api.post(
+            f"/api/v1/documents/{doc['id']}/location",
+            json={"folder_id": folder["id"]},
+            headers=headers,
+        )
+    api.post(
+        f"/api/v1/documents/{alpha['id']}/agent/blocks",
+        json={"blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "see [[Beta]]"}}]},
+        headers=headers,
+    )
+
+    response = api.get(f"/api/v1/folders/{folder['id']}/graph", headers=headers)
+    assert response.status_code == 200
+    graph = response.json()
+    assert {n["id"] for n in graph["nodes"]} == {alpha["id"], beta["id"]}
+    assert {(e["source"], e["target"]) for e in graph["edges"]} == {
+        (alpha["id"], beta["id"])
+    }
+
+
+def test_folder_inferred_graph_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    folder = api.post(
+        f"/api/v1/workspaces/{ws['id']}/folders",
+        json={"name": "Inferred", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Solo", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{doc['id']}/location",
+        json={"folder_id": folder["id"]},
+        headers=headers,
+    )
+
+    response = api.get(f"/api/v1/folders/{folder['id']}/graph/inferred", headers=headers)
+    assert response.status_code == 200
+    graph = response.json()
+    assert {n["id"] for n in graph["nodes"]} == {doc["id"]}
+    assert graph["edges"] == []  # nothing to infer from a single unlinked doc
+
+
+def test_place_document_in_teamspace_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Loose"},
+        headers=headers,
+    ).json()
+
+    placed = api.post(
+        f"/api/v1/documents/{doc['id']}/location",
+        json={"teamspace_id": ts["id"]},
+        headers=headers,
+    )
+    assert placed.status_code == 200
+    assert placed.json()["teamspace_id"] == ts["id"]
+    assert placed.json()["folder_id"] is None
+
+
+def test_place_document_back_to_private_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    ts = _teamspace(api, headers, ws["id"])
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Shared", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+
+    # Both ids null -> the private space.
+    placed = api.post(
+        f"/api/v1/documents/{doc['id']}/location", json={}, headers=headers
+    )
+    assert placed.status_code == 200
+    assert placed.json()["teamspace_id"] is None
+    assert placed.json()["folder_id"] is None
+    private = api.get(f"/api/v1/workspaces/{ws['id']}/private", headers=headers).json()
+    assert doc["id"] in [d["id"] for d in private]
+
+
+def test_search_documents_over_http(api):
+    headers = _auth()
+    ws = _workspace(api, headers)
+    api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Calculus Notes"},
+        headers=headers,
+    )
+    api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Algebra"},
+        headers=headers,
+    )
+
+    hits = api.get(
+        f"/api/v1/workspaces/{ws['id']}/search", params={"q": "calc"}, headers=headers
+    ).json()
+    assert [d["title"] for d in hits] == ["Calculus Notes"]
+
+    # Empty q returns everything accessible; limit caps the result count.
+    everything = api.get(f"/api/v1/workspaces/{ws['id']}/search", headers=headers).json()
+    assert sorted(d["title"] for d in everything) == ["Algebra", "Calculus Notes"]
+    capped = api.get(
+        f"/api/v1/workspaces/{ws['id']}/search", params={"limit": 1}, headers=headers
+    ).json()
+    assert len(capped) == 1
+
+
+# ---------------------------------------------------------------------------
+# PostgresFolderRepository: SQL adapter over a stubbed asyncpg pool.
+# ---------------------------------------------------------------------------
+
+from datetime import UTC, datetime
+
+from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
+from cyberarche.domain.folders import Folder
+from cyberarche.domain.ids import (
+    FolderId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
+
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class _FakePool:
+    """Stands in for asyncpg.Pool: records queries, returns canned rows."""
+
+    def __init__(self, row=None, rows=None):
+        self.row = row
+        self.rows = rows or []
+        self.calls: list[tuple[str, tuple]] = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+        return "OK"
+
+    async def fetchrow(self, query, *args):
+        self.calls.append((query, args))
+        return self.row
+
+    async def fetch(self, query, *args):
+        self.calls.append((query, args))
+        return self.rows
+
+
+def _folder(**kw) -> Folder:
+    defaults = dict(
+        id=FolderId("folder-1"),
+        workspace_id=WorkspaceId("ws-1"),
+        tenant_id=TenantId("acme"),
+        name="Research",
+        created_by=UserId("alice"),
+        created_at=_NOW,
+        teamspace_id=None,
+        parent_folder_id=None,
+    )
+    defaults.update(kw)
+    return Folder(**defaults)
+
+
+def _folder_row(**kw) -> dict:
+    row = dict(
+        id="folder-1",
+        workspace_id="ws-1",
+        tenant_id="acme",
+        name="Research",
+        created_by="alice",
+        created_at=_NOW,
+        teamspace_id=None,
+        parent_folder_id=None,
+    )
+    row.update(kw)
+    return row
+
+
+async def test_postgres_folder_add_inserts_every_column():
+    pool = _FakePool()
+    folder = _folder(
+        teamspace_id=TeamspaceId("team-1"), parent_folder_id=FolderId("folder-0")
+    )
+
+    await PostgresFolderRepository(pool).add(folder)
+
+    query, args = pool.calls[0]
+    assert "INSERT INTO folders" in query
+    assert args == (
+        "folder-1", "ws-1", "acme", "Research", "alice", _NOW, "team-1", "folder-0",
+    )
+
+
+async def test_postgres_folder_get_maps_row_and_scopes_by_tenant():
+    pool = _FakePool(
+        row=_folder_row(teamspace_id="team-1", parent_folder_id="folder-0")
+    )
+
+    found = await PostgresFolderRepository(pool).get(
+        TenantId("acme"), FolderId("folder-1")
+    )
+
+    assert found == _folder(
+        teamspace_id=TeamspaceId("team-1"), parent_folder_id=FolderId("folder-0")
+    )
+    query, args = pool.calls[0]
+    assert "tenant_id = $2" in query
+    assert args == ("folder-1", "acme")
+
+
+async def test_postgres_folder_get_returns_none_when_missing():
+    repo = PostgresFolderRepository(_FakePool(row=None))
+    assert await repo.get(TenantId("acme"), FolderId("ghost")) is None
+
+
+async def test_postgres_folder_private_row_maps_optional_ids_to_none():
+    pool = _FakePool(row=_folder_row())
+    found = await PostgresFolderRepository(pool).get(
+        TenantId("acme"), FolderId("folder-1")
+    )
+    assert found is not None
+    assert found.teamspace_id is None
+    assert found.parent_folder_id is None
+
+
+async def test_postgres_folder_list_for_workspace_maps_all_rows():
+    pool = _FakePool(
+        rows=[_folder_row(), _folder_row(id="folder-2", name="Specs")]
+    )
+
+    listed = await PostgresFolderRepository(pool).list_for_workspace(
+        TenantId("acme"), WorkspaceId("ws-1")
+    )
+
+    assert [f.id for f in listed] == ["folder-1", "folder-2"]
+    query, args = pool.calls[0]
+    assert "ORDER BY name" in query
+    assert args == ("acme", "ws-1")
+
+
+async def test_postgres_folder_list_for_workspace_empty():
+    repo = PostgresFolderRepository(_FakePool(rows=[]))
+    assert await repo.list_for_workspace(TenantId("acme"), WorkspaceId("ws-1")) == []
+
+
+async def test_postgres_folder_list_for_teamspace_filters_by_teamspace():
+    pool = _FakePool(rows=[_folder_row(teamspace_id="team-1")])
+
+    listed = await PostgresFolderRepository(pool).list_for_teamspace(
+        TenantId("acme"), TeamspaceId("team-1")
+    )
+
+    assert [f.teamspace_id for f in listed] == [TeamspaceId("team-1")]
+    query, args = pool.calls[0]
+    assert "teamspace_id = $2" in query
+    assert "ORDER BY name" in query
+    assert args == ("acme", "team-1")
+
+
+async def test_postgres_folder_list_for_teamspace_empty():
+    repo = PostgresFolderRepository(_FakePool(rows=[]))
+    assert await repo.list_for_teamspace(TenantId("acme"), TeamspaceId("team-1")) == []
+
+
+async def test_postgres_folder_update_writes_name():
+    pool = _FakePool()
+
+    await PostgresFolderRepository(pool).update(_folder(name="Renamed"))
+
+    query, args = pool.calls[0]
+    assert "UPDATE folders" in query
+    assert args == ("folder-1", "Renamed")
+
+
+async def test_postgres_folder_delete_scopes_by_tenant():
+    pool = _FakePool()
+
+    await PostgresFolderRepository(pool).delete(TenantId("acme"), FolderId("folder-1"))
+
+    query, args = pool.calls[0]
+    assert "DELETE FROM folders" in query
+    assert args == ("folder-1", "acme")

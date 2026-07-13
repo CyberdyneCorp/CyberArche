@@ -150,4 +150,121 @@ describe('whiteboard VM', () => {
 		expect(restored.byId(image.id)?.src).toBe('data:image/png;base64,ZZ');
 		expect(restored.byId(shape.id)?.fill).toBe('#0f0');
 	});
+
+	it('select tracks selection and remove clears it only for the removed id', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const a = board.addShape('rect', 0, 0);
+		const b = board.addShape('rect', 100, 0);
+		expect(board.selectedId).toBe(b.id); // addShape selects the new element
+
+		board.select(a.id);
+		board.remove(b.id);
+		expect(board.selectedId).toBe(a.id); // untouched by other removals
+
+		board.remove(a.id);
+		expect(board.selectedId).toBeNull();
+	});
+
+	it('setLabel renames an element; unknown ids are ignored', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const a = board.addShape('rect', 0, 0, 132, 46, 'Old');
+
+		board.setLabel(a.id, 'Named');
+		expect(board.byId(a.id)?.label).toBe('Named');
+
+		board.setLabel('missing', 'x');
+		board.setStyle('missing', { fill: '#000' });
+		expect(board.elements).toHaveLength(1);
+	});
+
+	it('moveBy ignores arrows and unknown ids', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const a = board.addShape('rect', 0, 0);
+		const b = board.addShape('rect', 200, 0);
+		const arrow = board.connect(a.id, b.id);
+
+		board.moveBy(arrow.id, 50, 50); // arrows follow shapes, never move directly
+		expect(board.byId(arrow.id)).toMatchObject({ x: 0, y: 0 });
+
+		board.moveBy('missing', 5, 5);
+		expect(board.elements).toHaveLength(3);
+	});
+
+	it('addPen bounds the stroke to its points', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		const pen = board.addPen([
+			[10, 40],
+			[30, 20],
+			[50, 60]
+		]);
+
+		expect(pen).toMatchObject({ kind: 'pen', x: 10, y: 20, w: 40, h: 40 });
+		expect(board.byId(pen.id)?.points).toEqual([
+			[10, 40],
+			[30, 20],
+			[50, 60]
+		]);
+	});
+
+	it('addChild returns null for a missing parent and stacks siblings', () => {
+		const board = createWhiteboard(new Y.Doc(), 'b1');
+		expect(board.addChild('missing')).toBeNull();
+
+		const root = board.addShape('rect', 0, 0, 100, 40);
+		const first = board.addChild(root.id)!;
+		const second = board.addChild(root.id)!;
+
+		expect(second.y).toBe(first.y + 64); // laid out below the sibling
+		expect(board.selectedId).toBe(second.id);
+	});
+
+	it('rapid edits collapse into one debounced mirror, and destroy cancels it', async () => {
+		vi.useFakeTimers();
+		const onMirror = vi.fn();
+		const board = createWhiteboard(new Y.Doc(), 'b1', { onMirror });
+
+		board.addShape('rect', 0, 0);
+		board.addShape('rect', 10, 10);
+		await vi.advanceTimersByTimeAsync(500);
+		expect(onMirror).toHaveBeenCalledTimes(1); // debounced into one write
+		expect(Object.keys(onMirror.mock.calls[0][0])).toHaveLength(2);
+
+		board.addShape('rect', 20, 20);
+		board.destroy();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(onMirror).toHaveBeenCalledTimes(1); // pending mirror cancelled
+		vi.useRealTimers();
+	});
+
+	it('remove mirrors the pruned scene into block data', async () => {
+		vi.useFakeTimers();
+		const onMirror = vi.fn();
+		const board = createWhiteboard(new Y.Doc(), 'b1', { onMirror });
+		const a = board.addShape('rect', 0, 0);
+		await vi.advanceTimersByTimeAsync(500);
+
+		board.remove(a.id);
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(onMirror).toHaveBeenLastCalledWith({});
+		vi.useRealTimers();
+	});
+
+	it('destroy detaches the element mirror', () => {
+		const doc = new Y.Doc();
+		const board = createWhiteboard(doc, 'b1');
+		board.addShape('rect', 0, 0);
+		board.destroy(); // no pending mirror timer to clear
+
+		doc.getMap<WhiteboardElement>('wb:b1').set('x', {
+			id: 'x',
+			kind: 'rect',
+			x: 0,
+			y: 0,
+			w: 1,
+			h: 1,
+			label: ''
+		});
+		expect(board.elements).toHaveLength(1); // no longer mirrored
+	});
 });

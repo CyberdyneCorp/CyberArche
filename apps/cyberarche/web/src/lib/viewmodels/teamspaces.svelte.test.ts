@@ -238,4 +238,160 @@ describe('teamspaces ViewModel', () => {
 		expect(vm.foldersFor('ts-1')[0].expanded).toBe(true);
 		expect(vm.foldersFor('ts-1')[0].documents.map((d) => d.id)).toEqual(['d-1', 'd-2']);
 	});
+
+	it('collapse and re-expand fetch documents only once', async () => {
+		const FOLDER = {
+			id: 'f-1',
+			workspace_id: 'ws-1',
+			name: 'Folder',
+			teamspace_id: null,
+			parent_folder_id: null,
+			created_by: 'alice',
+			created_at: '2026-01-01T00:00:00Z'
+		};
+		const fetchMock = routedFetch({
+			'GET /api/v1/workspaces/ws-1/teamspaces': [TEAMSPACE],
+			'GET /api/v1/favorites': [],
+			'GET /api/v1/shared': [],
+			'GET /api/v1/workspaces/ws-1/private': [],
+			'GET /api/v1/workspaces/ws-1/folders': [FOLDER],
+			'GET /api/v1/teamspaces/ts-1/documents': [DOC('d-1', 'ts-1')],
+			'GET /api/v1/folders/f-1/documents': [DOC('d-2')]
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+
+		await vm.toggle('ts-1');
+		await vm.toggle('ts-1'); // collapse
+		expect(vm.nodes[0].expanded).toBe(false);
+		await vm.toggle('ts-1'); // re-expand from cache
+		expect(vm.nodes[0].expanded).toBe(true);
+
+		await vm.toggleFolder('f-1');
+		await vm.toggleFolder('f-1'); // collapse
+		expect(vm.foldersFor(null)[0].expanded).toBe(false);
+		await vm.toggleFolder('f-1'); // re-expand from cache
+		expect(vm.foldersFor(null)[0].expanded).toBe(true);
+
+		const calls = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls;
+		expect(calls.filter(([url]) => String(url).includes('/teamspaces/ts-1/documents'))).toHaveLength(1);
+		expect(calls.filter(([url]) => String(url).includes('/folders/f-1/documents'))).toHaveLength(1);
+	});
+
+	it('toggle, reload and their folder variants ignore unknown ids', async () => {
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/workspaces/ws-1/teamspaces': [],
+				'GET /api/v1/favorites': [],
+				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': []
+			})
+		);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+
+		// Any fetch for an unknown node would hit an unrouted URL and throw.
+		await vm.toggle('nope');
+		await vm.toggleFolder('nope');
+		await vm.reload('nope');
+		await vm.reloadFolder('nope');
+
+		expect(vm.nodes).toHaveLength(0);
+		expect(vm.foldersFor(null)).toHaveLength(0);
+	});
+
+	it('reload refreshes a teamspace and a folder without toggling', async () => {
+		const FOLDER = {
+			id: 'f-1',
+			workspace_id: 'ws-1',
+			name: 'Folder',
+			teamspace_id: null,
+			parent_folder_id: null,
+			created_by: 'alice',
+			created_at: '2026-01-01T00:00:00Z'
+		};
+		const NESTED = { ...FOLDER, id: 'f-child', parent_folder_id: 'f-1' };
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/workspaces/ws-1/teamspaces': [TEAMSPACE],
+				'GET /api/v1/favorites': [],
+				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': [FOLDER, NESTED],
+				'GET /api/v1/teamspaces/ts-1/documents': [DOC('d-1', 'ts-1')],
+				'GET /api/v1/folders/f-1/documents': [DOC('d-2')]
+			})
+		);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+		await vm.load(); // reloading collapsed, unloaded nodes stays lazy
+		expect(vm.nodes[0].loaded).toBe(false);
+
+		// Nested folders are not top-level in any scope.
+		expect(vm.foldersFor(null).map((n) => n.folder.id)).toEqual(['f-1']);
+
+		await vm.reload('ts-1');
+		expect(vm.nodes[0].loaded).toBe(true);
+		expect(vm.nodes[0].documents.map((d) => d.id)).toEqual(['d-1']);
+
+		await vm.reloadFolder('f-1');
+		expect(vm.foldersFor(null)[0].loaded).toBe(true);
+		expect(vm.foldersFor(null)[0].documents.map((d) => d.id)).toEqual(['d-2']);
+	});
+
+	it('createFolder appends a collapsed node scoped to its parent', async () => {
+		const FOLDER = {
+			id: 'f-new',
+			workspace_id: 'ws-1',
+			name: 'Notes',
+			teamspace_id: null,
+			parent_folder_id: null,
+			created_by: 'alice',
+			created_at: '2026-01-01T00:00:00Z'
+		};
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/workspaces/ws-1/teamspaces': [],
+				'GET /api/v1/favorites': [],
+				'GET /api/v1/shared': [],
+				'GET /api/v1/workspaces/ws-1/private': [],
+				'GET /api/v1/workspaces/ws-1/folders': [],
+				'POST /api/v1/workspaces/ws-1/folders': FOLDER
+			})
+		);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+
+		const created = await vm.createFolder('Notes', null);
+
+		expect(created?.id).toBe('f-new');
+		const node = vm.foldersFor(null)[0];
+		expect(node.folder.id).toBe('f-new');
+		expect(node.expanded).toBe(false); // lazy until toggled
+		expect(node.loaded).toBe(false);
+		expect(vm.error).toBeNull();
+	});
+
+	it('surfaces a createFolder failure without adding a node', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (url: string, init?: RequestInit) => {
+				if ((init?.method ?? 'GET') === 'POST') {
+					return { ok: false, status: 403, json: async () => ({ detail: 'nope' }) };
+				}
+				return { ok: true, status: 200, json: async () => [] };
+			}) as unknown as typeof fetch
+		);
+		const vm = createTeamspaces('ws-1');
+		await vm.load();
+
+		expect(await vm.createFolder('Denied', null)).toBeNull();
+		expect(vm.foldersFor(null)).toHaveLength(0);
+		expect(vm.error).toMatch(/403/);
+	});
 });
