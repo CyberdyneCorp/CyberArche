@@ -27,6 +27,25 @@ async def make_workspace(use_cases: UseCases, alice):
     return await use_cases.workspaces.create(alice, name="WS")
 
 
+async def test_unreachable_endpoint_error_does_not_leak_raw_detail(
+    use_cases, mcp_client, alice
+):
+    """F-002: a failed handshake must not echo the endpoint/transport error back
+    (that turns a rejected connector into a blind internal-port oracle)."""
+    workspace = await make_workspace(use_cases, alice)
+    with pytest.raises(ValidationFailed) as excinfo:
+        await use_cases.connectors.register(
+            alice,
+            workspace.id,
+            name="probe",
+            endpoint="http://redis:6379/",
+            credentials="x",
+        )
+    message = str(excinfo.value)
+    assert "redis:6379" not in message
+    assert "unreachable" not in message.lower() or "endpoint is unreachable" in message
+
+
 async def test_register_connector_exposes_its_tools(use_cases, mcp_client, alice):
     workspace = await make_workspace(use_cases, alice)
     mcp_client.servers["https://tools.example/mcp"] = [SEARCH_TOOL]

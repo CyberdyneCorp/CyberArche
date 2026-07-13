@@ -12,13 +12,23 @@
 	const language = $derived((block.data.language as string) ?? 'python');
 	let editing = $state(false);
 
+	// The output is injected via {@html}. highlight.js escapes on its normal
+	// path; the fallback must escape too, or a throw would inject raw source
+	// (security audit F-015).
+	function escapeHtml(text: string): string {
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;');
+	}
+
 	const highlighted = $derived.by(() => {
 		try {
 			return hljs.getLanguage(language)
 				? hljs.highlight(source, { language }).value
 				: hljs.highlightAuto(source).value;
 		} catch {
-			return source;
+			return escapeHtml(source);
 		}
 	});
 

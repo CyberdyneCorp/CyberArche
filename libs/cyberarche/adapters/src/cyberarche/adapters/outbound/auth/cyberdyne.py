@@ -26,6 +26,10 @@ from cyberarche.application.ports.identity import Claims, TokenPair
 from cyberarche.domain.errors import NotAuthenticated
 
 _JWKS_TTL_SECONDS = 300.0
+# Floor between JWKS refetches triggered by an unknown `kid`, so a stream of
+# tokens carrying random (attacker-chosen, unsigned) kids can't amplify into
+# unbounded outbound requests to the IdP (security audit F-013).
+_JWKS_MIN_REFRESH_INTERVAL_SECONDS = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +38,10 @@ class CyberdyneAuthConfig:
     client_id: str = ""
     client_secret: str = ""
     audience: str | None = None
+    # Expected `iss` claim. Enforced when set; defaults to the realm issuer so a
+    # token from a different issuer is rejected even if its signature validates
+    # against a JWKS key (security audit F-008).
+    issuer: str | None = "cyberdyne-auth"
     tenant_claim: str = "org_id"
 
     @property
@@ -104,29 +112,49 @@ class JwksTokenVerifier:
         key = await self._key_for(kid)
         if key is None:
             raise NotAuthenticated("no matching signing key")
+        required = ["exp", "sub"]
+        if self._config.issuer is not None:
+            required.append("iss")
         try:
             payload = jwt.decode(
                 token,
                 key,
                 algorithms=["RS256"],
                 audience=self._config.audience,
-                options={"verify_aud": self._config.audience is not None},
+                issuer=self._config.issuer,
+                options={
+                    # `exp` and `iss` (when configured) must be present, not just
+                    # valid-if-present (audit F-008); aud is verified only when an
+                    # audience is configured (audit F-003 — tokens are aud-less
+                    # until CyberdyneAuth stamps a per-client audience).
+                    "require": required,
+                    "verify_aud": self._config.audience is not None,
+                    "verify_iss": self._config.issuer is not None,
+                },
             )
         except InvalidTokenError as error:
             raise NotAuthenticated(f"invalid token: {error}") from error
         return claims_from_payload(payload, tenant_claim=self._config.tenant_claim)
 
     async def _key_for(self, kid: str | None) -> PyJWK | None:
-        stale = time.monotonic() - self._jwks_fetched_at > _JWKS_TTL_SECONDS
-        if stale or (kid is not None and kid not in self._jwks):
+        age = time.monotonic() - self._jwks_fetched_at
+        stale = age > _JWKS_TTL_SECONDS
+        # An unknown kid triggers a refresh, but not more often than the floor —
+        # otherwise unsigned attacker-chosen kids amplify into IdP traffic (F-013).
+        unknown_kid = kid is not None and kid not in self._jwks
+        if stale or (unknown_kid and age > _JWKS_MIN_REFRESH_INTERVAL_SECONDS):
             await self._refresh_jwks()
         if kid is not None:
             return self._jwks.get(kid)
         return next(iter(self._jwks.values()), None)
 
     async def _refresh_jwks(self) -> None:
-        response = await self._http.get(self._config.jwks_url)
-        response.raise_for_status()
+        try:
+            response = await self._http.get(self._config.jwks_url)
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            # A JWKS outage is an auth failure, not a 500 (audit F-013).
+            raise NotAuthenticated("cannot reach the signing-key endpoint") from error
         keys = response.json().get("keys", [])
         self._jwks = {k["kid"]: PyJWK.from_dict(k) for k in keys if "kid" in k}
         self._jwks_fetched_at = time.monotonic()

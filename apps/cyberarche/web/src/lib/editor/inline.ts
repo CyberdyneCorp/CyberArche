@@ -21,7 +21,10 @@ function renderMath(source: string, displayMode: boolean): string {
 	try {
 		return katex.renderToString(source, { displayMode, throwOnError: true });
 	} catch (error) {
-		const message = escapeHtml(error instanceof Error ? error.message : 'invalid math');
+		// escapeAttr (not escapeHtml) for the title: the KaTeX message echoes the
+		// raw source, and an unescaped " would break out of the attribute
+		// (security audit F-014).
+		const message = escapeAttr(error instanceof Error ? error.message : 'invalid math');
 		// Non-destructive: show the raw source flagged, never drop it.
 		const fence = displayMode ? '$$' : '$';
 		return `<span class="inline-math-error" title="${message}">${fence}${escapeHtml(source)}${fence}</span>`;

@@ -93,7 +93,7 @@ def external_server(monkeypatch):
 
 
 async def test_list_tools_maps_name_description_and_schema(external_server):
-    tools = await FastMcpClientAdapter().list_tools(ENDPOINT, "token")
+    tools = await FastMcpClientAdapter(allow_private_networks=True).list_tools(ENDPOINT, "token")
 
     by_name = {tool.name: tool for tool in tools}
     echo = by_name["echo"]
@@ -103,27 +103,27 @@ async def test_list_tools_maps_name_description_and_schema(external_server):
 
 
 async def test_list_tools_defaults_missing_description_to_empty(external_server):
-    tools = await FastMcpClientAdapter().list_tools(ENDPOINT, "token")
+    tools = await FastMcpClientAdapter(allow_private_networks=True).list_tools(ENDPOINT, "token")
 
     by_name = {tool.name: tool for tool in tools}
     assert by_name["no_doc"].description == ""
 
 
 async def test_list_tools_sends_credentials_as_bearer(external_server):
-    await FastMcpClientAdapter().list_tools(ENDPOINT, "s3cret")
+    await FastMcpClientAdapter(allow_private_networks=True).list_tools(ENDPOINT, "s3cret")
 
     assert external_server["url"] == ENDPOINT
     assert external_server["headers"] == {"Authorization": "Bearer s3cret"}
 
 
 async def test_list_tools_open_server_sends_no_auth_header(external_server):
-    await FastMcpClientAdapter().list_tools(ENDPOINT, "")
+    await FastMcpClientAdapter(allow_private_networks=True).list_tools(ENDPOINT, "")
 
     assert external_server["headers"] == {}
 
 
 async def test_call_tool_forwards_arguments_and_returns_text(external_server):
-    result = await FastMcpClientAdapter().call_tool(
+    result = await FastMcpClientAdapter(allow_private_networks=True).call_tool(
         ENDPOINT, "token", "echo", {"text": "hi"}
     )
 
@@ -133,25 +133,25 @@ async def test_call_tool_forwards_arguments_and_returns_text(external_server):
 
 
 async def test_call_tool_joins_text_blocks_and_skips_non_text(external_server):
-    result = await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "mixed_content", {})
+    result = await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "mixed_content", {})
 
     assert result == "first\nsecond"
 
 
 async def test_call_tool_returns_empty_string_when_no_text_content(external_server):
-    result = await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "image_only", {})
+    result = await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "image_only", {})
 
     assert result == ""
 
 
 async def test_call_tool_propagates_remote_tool_errors(external_server):
     with pytest.raises(ToolError):
-        await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "boom", {})
+        await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "boom", {})
 
 
 async def test_call_tool_unknown_tool_raises(external_server):
     with pytest.raises(ToolError):
-        await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "nope", {})
+        await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "nope", {})
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ async def test_list_tools_defaults_missing_input_schema(monkeypatch):
         tools=[SimpleNamespace(name="bare", description=None, inputSchema=None)],
     )
 
-    (tool,) = await FastMcpClientAdapter().list_tools(ENDPOINT, "token")
+    (tool,) = await FastMcpClientAdapter(allow_private_networks=True).list_tools(ENDPOINT, "token")
 
     assert tool.name == "bare"
     assert tool.description == ""
@@ -204,7 +204,7 @@ async def test_call_tool_skips_blocks_with_empty_text(monkeypatch):
         ),
     )
 
-    result = await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "any", {})
+    result = await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "any", {})
 
     assert result == "kept"
 
@@ -212,6 +212,6 @@ async def test_call_tool_skips_blocks_with_empty_text(monkeypatch):
 async def test_call_tool_empty_content_returns_empty_string(monkeypatch):
     _stub_client(monkeypatch, result=SimpleNamespace(content=[]))
 
-    result = await FastMcpClientAdapter().call_tool(ENDPOINT, "token", "any", {})
+    result = await FastMcpClientAdapter(allow_private_networks=True).call_tool(ENDPOINT, "token", "any", {})
 
     assert result == ""

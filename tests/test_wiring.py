@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cyberarche.adapters.outbound.crypto import FernetSecretBox
 from cyberarche.adapters.outbound.llm.anthropic import AnthropicLLM
 from cyberarche.adapters.outbound.llm.openai_compatible import OpenAICompatibleLLM
 from cyberarche.adapters.wiring import WiringConfig, build_container
+from cyberarche.adapters.wiring import _build_secret_box
 from cyberarche.application.testing.fakes import (
     InMemoryBlobStorage,
     InMemoryTaskQueue,
@@ -20,6 +23,35 @@ async def build(**overrides):
     return await build_container(config, token_port=StaticTokenPort({}))
 
 
+def test_secret_box_fails_closed_on_postgres_without_key():
+    """F-001: the real backend must not silently fall back to non-encryption."""
+    with pytest.raises(ValueError, match="connector_secret_key"):
+        _build_secret_box(WiringConfig(backend="postgres", connector_secret_key=""))
+
+
+def test_secret_box_allows_naive_only_on_memory_backend():
+    box = _build_secret_box(WiringConfig(backend="memory", connector_secret_key=""))
+    assert type(box).__name__ == "NaiveSecretBox"
+
+
+def test_secret_box_uses_fernet_when_key_present():
+    box = _build_secret_box(
+        WiringConfig(backend="postgres", connector_secret_key="k" * 32)
+    )
+    assert isinstance(box, FernetSecretBox)
+
+
+def test_fernet_rejects_weak_derivation_key():
+    """F-016: a short passphrase (brute-forceable) is refused."""
+    with pytest.raises(ValueError):
+        FernetSecretBox("short")
+
+
+def test_fernet_roundtrip_with_strong_key():
+    box = FernetSecretBox("a-sufficiently-long-passphrase-of-32+chars")
+    assert box.decrypt(box.encrypt("secret-value")) == "secret-value"
+
+
 async def test_llm_provider_selected_by_config():
     anthropic = await build(llm_provider="anthropic", llm_api_key="k")
     local = await build(llm_provider="local", llm_base_url="http://ollama.local/v1")
@@ -31,7 +63,7 @@ async def test_llm_provider_selected_by_config():
 
 
 async def test_secret_box_selected_by_config():
-    fernet = await build(connector_secret_key="super-key")
+    fernet = await build(connector_secret_key="super-key-that-is-long-enough-32ch")
     naive = await build()
 
     assert isinstance(fernet.secret_box, FernetSecretBox)
@@ -280,7 +312,12 @@ async def test_postgres_backend_selected_by_config(monkeypatch):
     monkeypatch.setattr(asyncpg, "create_pool", fake_create_pool)
 
     container = await build_container(
-        WiringConfig(backend="postgres", database_url="postgresql://db/cyberarche"),
+        WiringConfig(
+            backend="postgres",
+            database_url="postgresql://db/cyberarche",
+            # Required now that the postgres backend fails closed without a key.
+            connector_secret_key="k" * 32,
+        ),
         token_port=StaticTokenPort({}),
     )
     assert seen == ["postgresql://db/cyberarche"]

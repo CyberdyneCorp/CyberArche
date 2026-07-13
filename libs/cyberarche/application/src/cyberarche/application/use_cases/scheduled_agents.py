@@ -114,8 +114,10 @@ class ScheduledAgentUseCases:
         task_id: ScheduledAgentTaskId,
         enabled: bool,
     ) -> ScheduledAgentTask:
-        await self._access.require_workspace(caller, workspace_id, Role.EDITOR)
         task = await self._require_task(caller, workspace_id, task_id)
+        # Toggling re-schedules a run AS the task owner, so restrict it to the
+        # owner or a workspace owner — not any editor (security audit F-011).
+        await self._require_owner_or_workspace_owner(caller, workspace_id, task)
         now = self._clock.now()
         updated = _replace(
             task,
@@ -135,9 +137,7 @@ class ScheduledAgentUseCases:
         task_id: ScheduledAgentTaskId,
     ) -> None:
         task = await self._require_task(caller, workspace_id, task_id)
-        role = await self._access.workspace_role(caller, workspace_id)
-        if role != Role.OWNER and str(task.owner_id) != str(caller.user_id):
-            raise NotAuthorized("only the owner or a workspace owner may delete")
+        await self._require_owner_or_workspace_owner(caller, workspace_id, task)
         await self._tasks.delete(caller.tenant_id, task_id)
 
     async def list_runs(
@@ -146,8 +146,23 @@ class ScheduledAgentUseCases:
         workspace_id: WorkspaceId,
         task_id: ScheduledAgentTaskId,
     ) -> list[AgentTaskRun]:
-        await self._require_task(caller, workspace_id, task_id)
+        task = await self._require_task(caller, workspace_id, task_id)
+        # Run records embed the task's agent output — restrict to the task owner
+        # or a workspace owner, not any workspace viewer (security audit F-010).
+        await self._require_owner_or_workspace_owner(caller, workspace_id, task)
         return await self._tasks.list_runs(caller.tenant_id, task_id)
+
+    async def _require_owner_or_workspace_owner(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        task: ScheduledAgentTask,
+    ) -> None:
+        if str(task.owner_id) == str(caller.user_id):
+            return
+        role = await self._access.workspace_role(caller, workspace_id)
+        if role != Role.OWNER:
+            raise NotAuthorized("only the task owner or a workspace owner may do this")
 
     async def _require_task(
         self,

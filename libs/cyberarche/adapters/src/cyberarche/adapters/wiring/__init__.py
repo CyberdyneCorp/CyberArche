@@ -118,6 +118,7 @@ class WiringConfig:
     auth_client_id: str = ""
     auth_client_secret: str = ""
     auth_audience: str | None = None
+    auth_issuer: str | None = "cyberdyne-auth"
     auth_tenant_claim: str = "org_id"
     rag_base_url: str = ""
     rag_api_token: str = ""
@@ -598,6 +599,14 @@ def _build_secret_box(config: WiringConfig) -> SecretBoxPort:
         from cyberarche.adapters.outbound.crypto import FernetSecretBox
 
         return FernetSecretBox(config.connector_secret_key)
+    # Fail closed: the real (postgres) deployment MUST have a real key, or
+    # connector credentials and Google OAuth tokens would be stored with the
+    # non-encrypting NaiveSecretBox (security audit F-001).
+    if config.backend == "postgres":
+        raise ValueError(
+            "connector_secret_key is required for the postgres backend "
+            "(refusing to store secrets without real encryption)"
+        )
     from cyberarche.application.testing.fakes import NaiveSecretBox
 
     return NaiveSecretBox()  # tests/sample runtime only
@@ -609,6 +618,7 @@ def _auth_config(config: WiringConfig) -> CyberdyneAuthConfig:
         client_id=config.auth_client_id,
         client_secret=config.auth_client_secret,
         audience=config.auth_audience,
+        issuer=config.auth_issuer,
         tenant_claim=config.auth_tenant_claim,
     )
 
@@ -722,7 +732,12 @@ async def build_container(
             FastMcpClientAdapter,
         )
 
-        mcp_client = FastMcpClientAdapter()
+        # Private/loopback connector endpoints are allowed only outside the
+        # real deployment (memory backend = local/dev/tests). In postgres the
+        # SSRF guard blocks internal targets (security audit F-002).
+        mcp_client = FastMcpClientAdapter(
+            allow_private_networks=config.backend != "postgres"
+        )
 
     secret_box = _build_secret_box(config)
     blobs, built_queue, built_bus = _build_shared_infra(config, closers)

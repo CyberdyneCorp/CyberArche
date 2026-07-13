@@ -34,14 +34,17 @@ def jwks_for(key) -> dict:
     return {"keys": [{**public_jwk, "kid": KID, "alg": "RS256", "use": "sig"}]}
 
 
-def sign(key, **claims) -> str:
-    payload = {"sub": "user-1", "exp": time.time() + 300, **claims}
+def sign(key, *, kid: str = KID, **claims) -> str:
+    # Real CyberdyneAuth tokens carry iss + exp; include them by default so the
+    # verifier's issuer/expiry requirements (F-003/F-008) are exercised.
+    payload = {"sub": "user-1", "iss": "cyberdyne-auth", "exp": time.time() + 300}
+    payload.update(claims)
     pem = key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-    return jwt.encode(payload, pem, algorithm="RS256", headers={"kid": KID})
+    return jwt.encode(payload, pem, algorithm="RS256", headers={"kid": kid})
 
 
 def http_with(handler) -> httpx.AsyncClient:
@@ -163,3 +166,77 @@ async def test_hs256_token_is_rejected(rsa_key):
     )
     with pytest.raises(NotAuthenticated):
         await verifier.verify(forged)
+
+
+def _sign_raw(key, payload: dict) -> str:
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return jwt.encode(payload, pem, algorithm="RS256", headers={"kid": KID})
+
+
+async def test_wrong_issuer_is_rejected(rsa_key):
+    """F-008: a validly-signed token from a different issuer must not verify."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(sign(rsa_key, iss="evil-issuer"))
+
+
+async def test_missing_issuer_is_rejected(rsa_key):
+    """F-008: issuer is required (not just validated-if-present)."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    token = _sign_raw(rsa_key, {"sub": "user-1", "exp": time.time() + 300})
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(token)
+
+
+async def test_missing_exp_is_rejected(rsa_key):
+    """F-008: a token without an expiry must not be accepted as never-expiring."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    token = _sign_raw(rsa_key, {"sub": "user-1", "iss": "cyberdyne-auth"})
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(token)
+
+
+async def test_issuer_check_can_be_disabled(rsa_key):
+    """With issuer=None an unsigned-issuer token verifies (opt-out escape hatch)."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(
+        CyberdyneAuthConfig(base_url="https://auth.test", issuer=None),
+        http_with(handler),
+    )
+    token = _sign_raw(rsa_key, {"sub": "u", "exp": time.time() + 300})
+    claims = await verifier.verify(token)
+    assert claims.subject == "u"
+
+
+async def test_unknown_kid_does_not_hammer_jwks(rsa_key):
+    """F-013: a burst of tokens with random unknown kids must not trigger a JWKS
+    refetch per request."""
+    handler, calls = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    for i in range(5):
+        with pytest.raises(NotAuthenticated):
+            await verifier.verify(sign(rsa_key, kid=f"random-{i}"))
+    # One initial populate; the throttle floor prevents a fetch per unknown kid.
+    assert calls["jwks"] <= 1
+
+
+async def test_jwks_fetch_error_maps_to_not_authenticated(rsa_key):
+    """F-013: a JWKS outage surfaces as 401, not an unhandled 500."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+    with pytest.raises(NotAuthenticated):
+        await verifier.verify(sign(rsa_key))

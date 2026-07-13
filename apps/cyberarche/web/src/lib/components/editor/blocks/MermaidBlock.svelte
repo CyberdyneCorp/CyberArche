@@ -29,7 +29,10 @@
 			: null
 	);
 
-	mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+	// securityLevel:'strict' set explicitly (it is mermaid's default) so the
+	// rendered SVG stays DOMPurify-sanitized and a future refactor can't silently
+	// switch to 'loose'/'antiscript' and open stored XSS (security audit INFO-3).
+	mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' });
 
 	// Depend ONLY on `source` (a value-memoized derived): the diagram re-renders
 	// when its own source changes, never because another block was edited.

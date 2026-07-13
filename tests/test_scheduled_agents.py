@@ -93,6 +93,49 @@ async def test_only_editor_creates(use_cases, memberships, clock, alice):
         )
 
 
+async def _editor_of(workspace, memberships, clock, *, user="mallory", tenant="acme"):
+    editor = caller(user, tenant)
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=editor.user_id,
+            role=Role.EDITOR, granted_at=clock.now(),
+        )
+    )
+    return editor
+
+
+async def test_non_owner_editor_cannot_toggle_task(use_cases, memberships, clock, alice):
+    """F-011: set_enabled reschedules a run AS the owner, so a mere workspace
+    editor (not the owner) must not be able to toggle another user's task."""
+    workspace, document = await make_document(use_cases, alice)
+    task = await use_cases.scheduled_agents.create(
+        alice, workspace.id, name="x", instruction="y", schedule_cron="0 9 * * *",
+        document_id=document.id,
+    )
+    editor = await _editor_of(workspace, memberships, clock)
+    with pytest.raises(NotAuthorized):
+        await use_cases.scheduled_agents.set_enabled(editor, workspace.id, task.id, False)
+
+
+async def test_non_owner_viewer_cannot_read_run_history(use_cases, memberships, clock, alice):
+    """F-010: run records embed the owner's agent output — a workspace viewer
+    must not read another user's task run history."""
+    workspace, document = await make_document(use_cases, alice)
+    task = await use_cases.scheduled_agents.create(
+        alice, workspace.id, name="x", instruction="y", schedule_cron="0 9 * * *",
+        document_id=document.id,
+    )
+    viewer = caller("carol", "acme")
+    await memberships.add_workspace_member(
+        WorkspaceMembership(
+            workspace_id=workspace.id, user_id=viewer.user_id,
+            role=Role.VIEWER, granted_at=clock.now(),
+        )
+    )
+    with pytest.raises(NotAuthorized):
+        await use_cases.scheduled_agents.list_runs(viewer, workspace.id, task.id)
+
+
 # ---- execution -------------------------------------------------------------
 
 

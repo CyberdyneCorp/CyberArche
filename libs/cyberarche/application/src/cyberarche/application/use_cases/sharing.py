@@ -156,6 +156,12 @@ class SharingUseCases:
         link = await self._share_links.get(link_id)
         if link is None or not link.is_usable(self._clock.now()):
             raise NotAuthorized("share link is invalid, expired, or revoked")
+        # Validate the document exists and is live BEFORE writing the grant, so a
+        # link to a trashed/purged doc can't leave a lingering or orphan grant
+        # (security audit F-009).
+        document = await self._documents.get_any_tenant(link.document_id)
+        if document is None or document.trashed:
+            raise NotFound("document not found")
         await self._memberships.add_document_grant(
             DocumentGrant(
                 document_id=link.document_id,
@@ -164,9 +170,6 @@ class SharingUseCases:
                 granted_at=self._clock.now(),
             )
         )
-        document = await self._documents.get_any_tenant(link.document_id)
-        if document is None or document.trashed:
-            raise NotFound("document not found")
         return document
 
     # ---- comments -------------------------------------------------------------

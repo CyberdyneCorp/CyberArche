@@ -1,0 +1,49 @@
+"""HTTP hardening: security headers, CORS guard, auth rate limit
+(security audit F-005, F-006, INFO-1)."""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from cyberarche.api.bootstrap import create_app
+from cyberarche.api.config import Settings
+
+from tests.conftest import TOKENS
+from cyberarche.application.testing.fakes import StaticTokenPort
+
+
+def test_security_headers_present(api):
+    response = api.get("/api/v1/health")
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    assert "Strict-Transport-Security" in response.headers
+
+
+def test_credentialed_wildcard_cors_is_refused_at_startup():
+    with pytest.raises(ValueError, match="CORS"):
+        create_app(
+            Settings(backend="memory", auth_base_url="", cors_origins=["*"]),
+            token_port=StaticTokenPort(dict(TOKENS)),
+        )
+
+
+def test_auth_endpoint_is_rate_limited(api):
+    # The credential proxy is throttled; the 11th attempt in the window is 429.
+    seen_429 = False
+    for _ in range(15):
+        response = api.post(
+            "/api/v1/auth/session", json={"email": "u@t.io", "password": "pw"}
+        )
+        if response.status_code == 429:
+            seen_429 = True
+            assert response.headers.get("Retry-After")
+            break
+    assert seen_429
+
+
+def test_non_auth_endpoints_are_not_rate_limited(api):
+    # Health is not in the limited prefix — many calls stay 200.
+    for _ in range(30):
+        assert api.get("/api/v1/health").status_code == 200

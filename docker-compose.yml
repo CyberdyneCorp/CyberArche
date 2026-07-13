@@ -9,7 +9,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cyberarche}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberarche}
+      # Required: fail the deploy rather than boot with a weak default password
+      # (security audit F-007).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-cyberarche}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -39,7 +41,7 @@ services:
     restart: unless-stopped
     environment: &backend-env
       CYBERARCHE_BACKEND: postgres
-      CYBERARCHE_DATABASE_URL: postgresql://${POSTGRES_USER:-cyberarche}:${POSTGRES_PASSWORD:-cyberarche}@postgres:5432/${POSTGRES_DB:-cyberarche}
+      CYBERARCHE_DATABASE_URL: postgresql://${POSTGRES_USER:-cyberarche}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-cyberarche}
       CYBERARCHE_REDIS_URL: redis://redis:6379/0
       CYBERARCHE_BLOB_DIR: /data/blobs
       CYBERARCHE_AUTH_BASE_URL: ${CYBERARCHE_AUTH_BASE_URL:-https://auth.backend.coolify.cyberdynecorp.ai}
