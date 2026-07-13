@@ -4,6 +4,7 @@
 	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
 
 	$effect(() => {
+		if (session.restoring) return; // wait for the cookie-based restore to settle
 		(async () => {
 			if (!session.isAuthenticated) {
 				await goto('/signin');

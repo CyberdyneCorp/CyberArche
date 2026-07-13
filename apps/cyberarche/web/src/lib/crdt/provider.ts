@@ -48,9 +48,9 @@ const EXPIRY_SKEW_MS = 30_000;
 
 /** True when the JWT is absent, unreadable, or past (exp - skew).
  *
- * Checked before every connect: the socket carries its token in the URL, so an
- * expired one is refused at the handshake and — depending on the server — may
- * come back as an opaque failure rather than a close code. Refreshing first
+ * Checked before every connect: the socket carries its token as a subprotocol,
+ * so an expired one is refused at the handshake and — depending on the server —
+ * may come back as an opaque failure rather than a close code. Refreshing first
  * keeps the reconnect on the happy path. */
 export function isExpired(token: string | null): boolean {
 	if (!token) return true;
@@ -104,12 +104,11 @@ export class ArcheProvider {
 	private wsUrl(): string {
 		const base = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 		const origin = base || window.location.origin;
-		const url = new URL(
+		// No token in the URL — it travels as a subprotocol (see connect()).
+		return new URL(
 			`/api/v1/documents/${this.documentId}/sync`,
 			origin.replace(/^http/, 'ws')
-		);
-		url.searchParams.set('token', this.tokens.getAccessToken() ?? '');
-		return url.toString();
+		).toString();
 	}
 
 	private connect(): void {
@@ -127,7 +126,13 @@ export class ArcheProvider {
 			return;
 		}
 		this.setStatus('connecting');
-		const socket = new WebSocket(this.wsUrl());
+		// The token is sent as the second subprotocol ("bearer", <token>) so it
+		// stays out of the URL/query string and access logs (audit F-012). The
+		// server selects "bearer" and reads the token from the handshake.
+		const socket = new WebSocket(this.wsUrl(), [
+			'bearer',
+			this.tokens.getAccessToken() ?? ''
+		]);
 		socket.binaryType = 'arraybuffer';
 		this.socket = socket;
 

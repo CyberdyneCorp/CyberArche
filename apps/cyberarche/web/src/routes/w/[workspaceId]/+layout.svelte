@@ -17,6 +17,7 @@
 	let paletteOpen = $state(false);
 
 	$effect(() => {
+		if (session.restoring) return; // wait for the cookie-based restore to settle
 		if (!session.isAuthenticated) {
 			goto('/signin');
 			return;

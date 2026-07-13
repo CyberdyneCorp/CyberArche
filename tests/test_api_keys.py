@@ -147,7 +147,8 @@ def test_api_key_authenticates_http_and_mcp_like_surfaces(api):
         headers=key_headers,
     ).json()
     with api.websocket_connect(
-        f"/api/v1/documents/{document['id']}/sync?token={created['secret']}"
+        f"/api/v1/documents/{document['id']}/sync",
+        subprotocols=["bearer", created["secret"]],
     ) as ws:
         assert ws.receive_bytes()[0] == 0  # initial state frame
 

@@ -18,7 +18,12 @@ class FakeSocket {
 	sent: unknown[] = [];
 	closedByClient = false;
 
-	constructor(readonly url: string) {
+	readonly protocols: string[];
+	constructor(
+		readonly url: string,
+		protocols?: string | string[]
+	) {
+		this.protocols = protocols == null ? [] : Array.isArray(protocols) ? protocols : [protocols];
 		FakeSocket.instances.push(this);
 	}
 	send(data: unknown) {
@@ -66,7 +71,9 @@ function jwt(secondsFromNow: number): string {
 }
 
 function tokenOf(socket: FakeSocket): string {
-	return new URL(socket.url).searchParams.get('token') ?? '';
+	// The token travels as the second subprotocol ("bearer", <token>) — never in
+	// the URL (F-012).
+	return socket.protocols[0] === 'bearer' ? (socket.protocols[1] ?? '') : '';
 }
 
 const LIVE = jwt(3600);
@@ -96,9 +103,22 @@ describe('isExpired', () => {
 });
 
 describe('ArcheProvider token lifecycle', () => {
+	it('sends the token as a subprotocol, never in the URL (F-012)', async () => {
+		const provider = new ArcheProvider('doc-1', {
+			getAccessToken: () => LIVE,
+			tryRefresh: vi.fn(async () => true)
+		});
+		await vi.waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+		const socket = FakeSocket.instances[0];
+		expect(socket.url).not.toContain('token');
+		expect(socket.url).not.toContain(LIVE);
+		expect(socket.protocols).toEqual(['bearer', LIVE]);
+		provider.destroy();
+	});
+
 	it('refreshes BEFORE connecting when the token is already spent', async () => {
-		// The socket carries its token in the URL, so connecting with a spent one
-		// is refused at the handshake — where the close code was historically
+		// The socket carries its token as a subprotocol, so connecting with a spent
+		// one is refused at the handshake — where the close code was historically
 		// lost, and the client retried the dead token forever.
 		let token = SPENT;
 		const tokens = {
