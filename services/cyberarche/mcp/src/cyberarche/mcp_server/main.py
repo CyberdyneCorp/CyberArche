@@ -22,6 +22,7 @@ class McpSettings(BaseSettings):
     auth_client_id: str = ""
     auth_client_secret: str = ""
     auth_audience: str | None = None
+    auth_issuer: str | None = "cyberdyne-auth"
     auth_tenant_claim: str = "org_id"
     rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
     rag_api_token: str = ""
@@ -41,6 +42,10 @@ class McpSettings(BaseSettings):
     # Proxy IPs whose X-Forwarded-* headers we trust ("*" = any; the service
     # is only reachable through the proxy on the container network).
     mcp_forwarded_allow_ips: str = "*"
+    # Required for the postgres backend (connector/OAuth secret encryption). The
+    # MCP server shares the wiring/composition root, which fails closed without
+    # it (security audit F-001).
+    connector_secret_key: str = ""
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -50,6 +55,7 @@ class McpSettings(BaseSettings):
             auth_client_id=self.auth_client_id,
             auth_client_secret=self.auth_client_secret,
             auth_audience=self.auth_audience,
+            auth_issuer=self.auth_issuer,
             auth_tenant_claim=self.auth_tenant_claim,
             rag_base_url=self.rag_base_url,
             rag_api_token=self.rag_api_token,
@@ -58,6 +64,7 @@ class McpSettings(BaseSettings):
             llm_model=self.llm_model,
             llm_api_key=self.llm_api_key,
             llm_base_url=self.llm_base_url,
+            connector_secret_key=self.connector_secret_key,
         )
 
     def allowed_hosts(self) -> list[str] | None:

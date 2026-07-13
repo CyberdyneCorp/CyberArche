@@ -12,7 +12,7 @@ from cyberarche.adapters.outbound.postgres.sharing import (
     PostgresShareLinkRepository,
 )
 from cyberarche.application.use_cases import UseCases
-from cyberarche.domain.errors import NotAuthorized
+from cyberarche.domain.errors import NotAuthorized, NotFound
 from cyberarche.domain.ids import DocumentId, ShareLinkId, UserId
 from cyberarche.domain.memberships import Role
 from cyberarche.domain.sharing import Comment, ShareLink, SharePermission
@@ -106,6 +106,23 @@ async def test_edit_share_link_grants_edit(use_cases, alice):
     )
     await use_cases.sharing.open_share_link(BOB, link.id)
     await use_cases.agent.apply_blocks(BOB, document.id, [BLOCK])  # allowed
+
+
+async def test_redeeming_link_to_trashed_doc_creates_no_grant(use_cases, alice):
+    """F-009: redeeming a usable link whose document was trashed must not leave
+    a lingering grant that resurfaces if the document is restored."""
+    _, document = await setup(use_cases, alice)
+    link = await use_cases.sharing.create_share_link(
+        alice, document.id, permission=SharePermission.VIEW
+    )
+    await use_cases.documents.trash(alice, document.id)
+
+    with pytest.raises(NotFound):
+        await use_cases.sharing.open_share_link(OUTSIDER, link.id)
+
+    # No grant was written: the outsider sees nothing shared, even after restore.
+    await use_cases.documents.restore(alice, document.id)
+    assert await use_cases.sharing.list_shared_with_me(OUTSIDER) == []
 
 
 async def test_revoked_link_is_denied(use_cases, alice):

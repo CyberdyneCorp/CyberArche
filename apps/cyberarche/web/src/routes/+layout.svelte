@@ -7,7 +7,8 @@
 
 	let { children } = $props();
 
-	session.restore();
+	// Restore a session from the HttpOnly refresh cookie (async silent refresh).
+	void session.init();
 
 	// A new build was deployed while this tab was open: its in-memory JS is now
 	// stale (this is what left tabs on old realtime/reconnect logic). Offer a

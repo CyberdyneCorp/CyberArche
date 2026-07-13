@@ -7,10 +7,13 @@ to it in the frontend task group):
 - binary frame, first byte 0x01: awareness/presence (broadcast only)
 - text frame: JSON control messages from the server (errors, presence_left)
 
-Join: `WS /api/v1/documents/{id}/sync?token=<bearer>`. The server verifies
-the token, authorizes VIEWER, and sends the current document state as one
-0x00 frame. Every inbound update re-checks EDITOR through the use case, so
-a viewer's update is rejected and never broadcast.
+Join: `WS /api/v1/documents/{id}/sync`, with the bearer token carried as a
+WebSocket subprotocol (`Sec-WebSocket-Protocol: bearer, <token>`) rather than
+in the URL query string, so the token never lands in access logs or browser
+history (security audit F-012). The server verifies the token, authorizes
+VIEWER, and sends the current document state as one 0x00 frame. Every inbound
+update re-checks EDITOR through the use case, so a viewer's update is rejected
+and never broadcast.
 
 Fanout goes through the PeerBusPort (architecture-quality spec 12.5):
 frames are published to a per-document channel and every relay instance
@@ -121,8 +124,20 @@ class DocumentPeers:
         return deliver
 
 
+_SUBPROTOCOL = "bearer"
+
+
+def _token_from_subprotocol(socket: WebSocket) -> str:
+    """The token rides as the second offered subprotocol (`bearer`, `<token>`),
+    keeping it out of the URL/query string (audit F-012)."""
+    protocols = socket.scope.get("subprotocols") or []
+    if len(protocols) >= 2 and protocols[0] == _SUBPROTOCOL:
+        return protocols[1].strip()
+    return ""
+
+
 async def _authenticate(socket: WebSocket) -> CallerContext:
-    token = socket.query_params.get("token", "")
+    token = _token_from_subprotocol(socket)
     if not token:
         raise NotAuthenticated("missing token")
     claims = await socket.app.state.container.token_port.verify(token)
@@ -172,7 +187,7 @@ async def _refuse(socket: WebSocket, code: int) -> None:
     from a forbidden document (stop) — and retries the dead token forever.
     Accept first, then close: the code survives.
     """
-    await socket.accept()
+    await socket.accept(subprotocol=_SUBPROTOCOL)
     await socket.close(code=code)
 
 
@@ -195,7 +210,7 @@ async def sync(socket: WebSocket, document_id: str) -> None:
         await _refuse(socket, 4404)
         return
 
-    await socket.accept()
+    await socket.accept(subprotocol=_SUBPROTOCOL)
     socket_id = await registry.join(doc_id, socket)
     try:
         await socket.send_bytes(bytes([FRAME_UPDATE]) + state)

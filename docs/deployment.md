@@ -22,17 +22,26 @@ mcp and workers services wait for `api: service_healthy`.
 ## Environment variables (set in Coolify, never committed)
 
 ```
-POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB          # PASSWORD is REQUIRED (no default)
 CYBERARCHE_AUTH_BASE_URL / _CLIENT_ID / _CLIENT_SECRET   # cyberarche-backend client
 CYBERARCHE_RAG_BASE_URL / _RAG_API_TOKEN / _RAG_WEBHOOK_SECRET
 CYBERARCHE_LLM_PROVIDER / _MODEL / _API_KEY / _BASE_URL  # _BASE_URL for OpenAI-compatible endpoints
 CYBERARCHE_MEETINGS_URL                                  # Cyberflies transcripts; defaults to prod URL
-CYBERARCHE_CONNECTOR_SECRET_KEY                          # Fernet key for connector creds
+CYBERARCHE_CONNECTOR_SECRET_KEY                          # REQUIRED on postgres: Fernet key for connector/OAuth creds
 CYBERARCHE_MCP_ALLOWED_HOSTS=cyberarche.mcp.coolify.cyberdynecorp.ai
-CYBERARCHE_CORS_ORIGINS=["https://cyberarche.coolify.cyberdynecorp.ai"]  # literal
+CYBERARCHE_CORS_ORIGINS=["https://cyberarche.coolify.cyberdynecorp.ai"]  # literal; MUST NOT be "*"
 VITE_API_URL=https://cyberarche.backend.coolify.cyberdynecorp.ai         # BUILD arg
 NPM_GITHUB_TOKEN                                         # BUILD arg: private npm registry (web)
 ```
+
+**Fail-closed / hardening (security audit).** The API refuses to start if
+`POSTGRES_PASSWORD` or (on the postgres backend) `CYBERARCHE_CONNECTOR_SECRET_KEY`
+is unset — an empty connector key would otherwise store connector and Google
+OAuth credentials without real encryption. `CYBERARCHE_CORS_ORIGINS` must be an
+explicit origin list, never `"*"` (a credentialed wildcard is rejected at
+startup). The SPA refresh token is set as an HttpOnly cookie by the API, so no
+extra config is needed, but the API must be reached over https in production for
+the cookie's `Secure` flag to apply (it keys off the forwarded scheme).
 
 `VITE_API_URL` and `NPM_GITHUB_TOKEN` are consumed at **build** time —
 changing them requires a rebuild, not a restart.

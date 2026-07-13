@@ -1,40 +1,20 @@
 /** Session ViewModel: token state, login/logout, refresh-on-401.
- * Persisted in localStorage; wires itself into the HTTP core's auth hooks. */
+ *
+ * The access token is held in memory ONLY — never localStorage — and the
+ * refresh token lives in an HttpOnly cookie the browser manages, so an XSS
+ * cannot steal either for persistent account takeover (security audit F-004).
+ * A session is restored on load by a silent refresh against that cookie. */
 
-import { login as apiLogin, refreshSession } from '$lib/api/auth';
+import { login as apiLogin, logout as apiLogout, refreshSession } from '$lib/api/auth';
 import { configureAuth } from '$lib/api/http';
-
-const STORAGE_KEY = 'cyberarche.session';
-
-interface StoredSession {
-	access: string;
-	refresh: string;
-}
-
-function loadStored(): StoredSession | null {
-	if (typeof localStorage === 'undefined') return null;
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		return raw ? (JSON.parse(raw) as StoredSession) : null;
-	} catch {
-		return null;
-	}
-}
 
 export function createSession() {
 	let access = $state<string | null>(null);
-	let refresh = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
-
-	function persist() {
-		if (typeof localStorage === 'undefined') return;
-		if (access && refresh) {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify({ access, refresh }));
-		} else {
-			localStorage.removeItem(STORAGE_KEY);
-		}
-	}
+	// True until the initial cookie-based restore settles, so route guards don't
+	// bounce a returning user to /signin before the silent refresh completes.
+	let restoring = $state(true);
 
 	const vm = {
 		get isAuthenticated() {
@@ -45,6 +25,9 @@ export function createSession() {
 		},
 		get busy() {
 			return busy;
+		},
+		get restoring() {
+			return restoring;
 		},
 		getAccessToken(): string | null {
 			return access;
@@ -60,12 +43,13 @@ export function createSession() {
 			}
 		},
 
-		restore(): boolean {
-			const stored = loadStored();
-			if (!stored) return false;
-			access = stored.access;
-			refresh = stored.refresh;
-			return true;
+		/** Restore a session from the HttpOnly refresh cookie (silent refresh). */
+		async init(): Promise<void> {
+			try {
+				await vm.tryRefresh();
+			} finally {
+				restoring = false;
+			}
 		},
 
 		async login(email: string, password: string): Promise<boolean> {
@@ -74,8 +58,6 @@ export function createSession() {
 			try {
 				const tokens = await apiLogin(email, password);
 				access = tokens.access_token;
-				refresh = tokens.refresh_token;
-				persist();
 				return true;
 			} catch {
 				error = 'Sign-in failed — check your email and password.';
@@ -86,23 +68,25 @@ export function createSession() {
 		},
 
 		async tryRefresh(): Promise<boolean> {
-			if (!refresh) return false;
 			try {
-				const tokens = await refreshSession(refresh);
+				const tokens = await refreshSession();
 				access = tokens.access_token;
-				refresh = tokens.refresh_token;
-				persist();
 				return true;
 			} catch {
-				vm.logout();
+				// No usable cookie/session — clear locally (no network logout: that
+				// would recurse, and there's nothing to revoke).
+				access = null;
 				return false;
 			}
 		},
 
-		logout() {
+		async logout(): Promise<void> {
+			try {
+				await apiLogout(); // clears the refresh cookie server-side
+			} catch {
+				// Clear the local session regardless of network outcome.
+			}
 			access = null;
-			refresh = null;
-			persist();
 		}
 	};
 

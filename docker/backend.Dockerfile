@@ -6,7 +6,8 @@
 # Stage 1: base with uv
 FROM python:3.12-slim AS base
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Pinned (not :latest) for reproducible builds / supply-chain hygiene (audit F-017).
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

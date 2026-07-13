@@ -58,8 +58,12 @@ class ConnectorUseCases:
         try:
             await self._client.list_tools(endpoint, credentials)
         except Exception as error:
+            # Do not echo the raw transport error back to the caller: it turns a
+            # rejected connector into a blind internal-port oracle (audit F-002).
+            # The detail is preserved on the exception chain for server logs.
             raise ValidationFailed(
-                f"MCP handshake with {endpoint} failed: {error}"
+                "MCP handshake failed: the endpoint is unreachable or not a valid "
+                "MCP server"
             ) from error
         connector = Connector(
             id=ConnectorId(self._ids.new_id()),

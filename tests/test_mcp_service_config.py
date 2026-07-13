@@ -52,6 +52,7 @@ def test_wiring_maps_settings_to_the_composition_root():
         llm_model="claude-sonnet-5",
         llm_api_key="llm-key",
         llm_base_url="https://llm.test",
+        connector_secret_key="k" * 32,
     ).wiring()
 
     assert config.backend == "postgres"
@@ -60,11 +61,15 @@ def test_wiring_maps_settings_to_the_composition_root():
     assert config.auth_client_id == "cid"
     assert config.auth_client_secret == "sec"
     assert config.auth_audience == "aud"
+    assert config.auth_issuer == "cyberdyne-auth"
     assert config.rag_base_url == "https://rag.test"
     assert config.rag_api_token == "rag-token"
     assert config.dao_base_url == "https://dao.test"
     assert config.llm_api_key == "llm-key"
     assert config.llm_base_url == "https://llm.test"
+    # F-001 regression: the MCP service must forward the secret key, or the
+    # postgres composition root fails closed at startup.
+    assert config.connector_secret_key == "k" * 32
 
 
 def test_wiring_treats_unknown_backends_as_memory():

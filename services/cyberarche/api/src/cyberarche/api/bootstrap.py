@@ -21,6 +21,10 @@ from cyberarche.adapters.inbound.http.routers import all_routers
 from cyberarche.adapters.wiring import Container, build_container
 from cyberarche.api.config import Settings
 from cyberarche.api.observability import install_observability
+from cyberarche.api.security_middleware import (
+    AuthRateLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from cyberarche.application.ports.identity import TokenPort
 
 logger = logging.getLogger(__name__)
@@ -76,6 +80,12 @@ def create_app(
                 await active.aclose()
 
     app = FastAPI(title="CyberArche API", version="0.1.0", lifespan=lifespan)
+    # A credentialed wildcard origin would let any site read authenticated
+    # responses — refuse it at startup rather than boot insecure (audit INFO-1).
+    if "*" in settings.cors_origins:
+        raise ValueError(
+            "CYBERARCHE_CORS_ORIGINS must not be '*' when credentials are allowed"
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -83,6 +93,8 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(AuthRateLimitMiddleware)
     install_observability(app)
     install_error_handlers(app)
     for router in all_routers:

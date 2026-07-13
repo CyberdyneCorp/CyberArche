@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 
 import anyio
+import pytest
 from pycrdt import Doc, Text
 
 from starlette.websockets import WebSocketDisconnect
@@ -18,6 +19,15 @@ from cyberarche.domain.memberships import Role, WorkspaceMembership
 
 def auth(token: str = "alice-token") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def ws_connect(api, document_id: str, token: str | None = "alice-token"):
+    """Open the sync socket with the token carried as a subprotocol (F-012):
+    it must never travel in the URL/query string."""
+    subprotocols = ["bearer", token] if token else None
+    return api.websocket_connect(
+        f"/api/v1/documents/{document_id}/sync", subprotocols=subprotocols
+    )
 
 
 def one_edit(text: str) -> bytes:
@@ -59,9 +69,8 @@ def grant(api, workspace_id: str, user: str, role: Role) -> None:
 
 def test_update_is_broadcast_to_other_peer(api):
     _, document_id = make_document(api)
-    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
 
-    with api.websocket_connect(url) as first, api.websocket_connect(url) as second:
+    with ws_connect(api, document_id) as first, ws_connect(api, document_id) as second:
         first.receive_bytes()  # initial state
         second.receive_bytes()
 
@@ -83,12 +92,9 @@ def test_viewer_update_rejected_and_not_broadcast(api):
     )
     grant(api, workspace_id, "carol", Role.VIEWER)
 
-    owner_url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
-    viewer_url = f"/api/v1/documents/{document_id}/sync?token=carol-token"
-
     with (
-        api.websocket_connect(owner_url) as owner,
-        api.websocket_connect(viewer_url) as viewer,
+        ws_connect(api, document_id, "alice-token") as owner,
+        ws_connect(api, document_id, "carol-token") as viewer,
     ):
         owner.receive_bytes()
         viewer.receive_bytes()
@@ -104,9 +110,8 @@ def test_agent_http_edit_reaches_open_websocket_clients(api):
     Regression test — server-originated edits (HTTP/MCP) must fan out
     through the bus, not only persist to the update log."""
     _, document_id = make_document(api)
-    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
 
-    with api.websocket_connect(url) as client:
+    with ws_connect(api, document_id) as client:
         client.receive_bytes()  # initial state
 
         response = api.post(
@@ -130,13 +135,13 @@ def test_agent_http_edit_reaches_open_websocket_clients(api):
         assert blocks[0]["data"]["text"] == "live agent edit"
 
 
-def _refusal_code(api, url: str) -> int:
+def _refusal_code(api, document_id: str, token: str | None = "alice-token") -> int:
     """The application close code the client actually receives.
 
     Asserting merely "it raised" cannot distinguish an expired token from a
     forbidden document — and the client's behaviour differs (refresh vs stop).
     """
-    with api.websocket_connect(url) as ws:
+    with ws_connect(api, document_id, token) as ws:
         try:
             ws.receive_bytes()
         except WebSocketDisconnect as exc:
@@ -146,13 +151,24 @@ def _refusal_code(api, url: str) -> int:
 
 def test_missing_token_is_refused(api):
     _, document_id = make_document(api)
-    assert _refusal_code(api, f"/api/v1/documents/{document_id}/sync") == 4401
+    assert _refusal_code(api, document_id, token=None) == 4401
 
 
 def test_unknown_document_is_refused(api):
-    assert (
-        _refusal_code(api, "/api/v1/documents/nope/sync?token=alice-token") == 4404
-    )
+    assert _refusal_code(api, "nope", "alice-token") == 4404
+
+
+def test_token_in_query_string_is_ignored(api):
+    """F-012: the token must ONLY be accepted as a subprotocol. A token supplied
+    the old way (query string) must not authenticate — so it can't leak via logs
+    and still work."""
+    _, document_id = make_document(api)
+    with api.websocket_connect(
+        f"/api/v1/documents/{document_id}/sync?token=alice-token"  # no subprotocol
+    ) as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_bytes()
+        assert exc.value.code == 4401  # unauthenticated: query token ignored
 
 
 def test_join_without_any_role_is_refused(api):
@@ -167,7 +183,7 @@ def test_join_without_any_role_is_refused(api):
         "eve-token", Claims(subject="eve", tenant_id="acme")
     )
 
-    code = _refusal_code(api, f"/api/v1/documents/{document_id}/sync?token=eve-token")
+    code = _refusal_code(api, document_id, "eve-token")
     assert code == 4403  # forbidden, not merely "some failure"
 
 
@@ -181,9 +197,7 @@ def test_viewer_may_join(api):
     )
     grant(api, workspace_id, "dave", Role.VIEWER)
 
-    with api.websocket_connect(
-        f"/api/v1/documents/{document_id}/sync?token=dave-token"
-    ) as ws:
+    with ws_connect(api, document_id, "dave-token") as ws:
         assert ws.receive_bytes() is not None
 
 
@@ -193,7 +207,6 @@ def test_snapshot_restore_reaches_open_websocket_clients(api):
     Writing the document row directly would leave this client divergent.
     """
     _, document_id = make_document(api)
-    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
 
     blocks = [{"id": "b1", "type": "paragraph", "data": {"text": "v1"}}]
     api.post(
@@ -214,7 +227,7 @@ def test_snapshot_restore_reaches_open_websocket_clients(api):
 
     # A real client: hydrate from the initial state, then apply live deltas.
     doc = Doc()
-    with api.websocket_connect(url) as client:
+    with ws_connect(api, document_id) as client:
         initial = client.receive_bytes()
         assert initial[0] == FRAME_UPDATE
         doc.apply_update(initial[1:])

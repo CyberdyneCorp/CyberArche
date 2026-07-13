@@ -25,6 +25,7 @@ class WorkerSettings(BaseSettings):
     auth_client_id: str = ""
     auth_client_secret: str = ""
     auth_audience: str | None = None
+    auth_issuer: str | None = "cyberdyne-auth"
     auth_tenant_claim: str = "org_id"
     rag_base_url: str = "https://cyberrag.coolify.cyberdynecorp.ai"
     rag_api_token: str = ""
@@ -44,6 +45,7 @@ class WorkerSettings(BaseSettings):
             auth_client_id=self.auth_client_id,
             auth_client_secret=self.auth_client_secret,
             auth_audience=self.auth_audience,
+            auth_issuer=self.auth_issuer,
             auth_tenant_claim=self.auth_tenant_claim,
             rag_base_url=self.rag_base_url,
             rag_api_token=self.rag_api_token,

@@ -13,8 +13,10 @@ def _block_ids(api, document_id: str, headers: dict[str, str]) -> list[str]:
     """The document's live blocks. No HTTP endpoint reads them — the editor
     reads over the realtime socket, so a restore is only real if it shows up
     there."""
-    url = f"/api/v1/documents/{document_id}/sync?token=alice-token"
-    with api.websocket_connect(url) as client:
+    # Token rides as a subprotocol, never in the URL (F-012).
+    with api.websocket_connect(
+        f"/api/v1/documents/{document_id}/sync", subprotocols=["bearer", "alice-token"]
+    ) as client:
         frame = client.receive_bytes()  # FRAME_UPDATE + current state
     doc = Doc()
     doc.apply_update(frame[1:])

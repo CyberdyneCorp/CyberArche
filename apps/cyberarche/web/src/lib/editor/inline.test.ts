@@ -63,6 +63,17 @@ describe('renderInline', () => {
 		expect(html).toContain('$'); // raw source still shown
 	});
 
+	it('escapes double quotes in the math-error title (F-014 attribute injection)', () => {
+		// KaTeX echoes the raw source in its error message; a " must not break out
+		// of the title="…" attribute and inject event handlers onto the span.
+		const html = renderInline('$\\unknown"onmouseover=alert(1) x$');
+		const title = html.match(/title="([^"]*)"/);
+		expect(title).not.toBeNull(); // the attribute closes cleanly on a real quote
+		// The quote from the echoed source is entity-escaped INSIDE the title, so
+		// no attribute breakout: the captured title contains &quot;, not a raw ".
+		expect(title![1]).toContain('&quot;onmouseover');
+	});
+
 	it('leaves an unclosed dollar as literal text', () => {
 		const html = renderInline('costs $5 today');
 		expect(html).not.toContain('katex');
