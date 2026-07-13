@@ -651,6 +651,57 @@ def _build_rag(config: WiringConfig, service_tokens, shared_http) -> RagPort:
     return CyberdyneRagAdapter(config.rag_base_url, shared_http(), rag_token)
 
 
+def _build_llm_or_default(config: WiringConfig, shared_http) -> LLMPort:
+    """Configured LLM adapter, or a scripted no-op LLM when no provider is
+    configured (tests/sample runtime)."""
+    if config.llm_api_key or config.llm_base_url:
+        return _build_llm(config, shared_http())
+    from cyberarche.application.testing.fakes import ScriptedLLM
+
+    return ScriptedLLM([])  # no provider configured (tests/sample)
+
+
+@dataclass(slots=True)
+class _OptionalAdapters:
+    images: ImageGenerationPort | None
+    code: CodeExecutionPort | None
+    meetings: MeetingsPort | None
+    web_media: WebMediaPort | None
+    google_port: GoogleWorkspacePort | None
+
+
+def _build_optional_adapters(
+    config: WiringConfig,
+    service_tokens: ServiceTokenPort | None,
+    shared_http,
+    *,
+    images: ImageGenerationPort | None,
+    code: CodeExecutionPort | None,
+    meetings: MeetingsPort | None,
+    web_media: WebMediaPort | None,
+    google_port: GoogleWorkspacePort | None,
+) -> _OptionalAdapters:
+    """Resolve the optional agent tool adapters: honor any injected override,
+    otherwise build from config (each builder returns None when unconfigured)."""
+    return _OptionalAdapters(
+        images=images
+        if images is not None
+        else _build_image_generator(config, shared_http()),
+        code=code
+        if code is not None
+        else _build_code_executor(config, service_tokens, shared_http),
+        meetings=meetings
+        if meetings is not None
+        else _build_meetings(config, shared_http),
+        web_media=web_media
+        if web_media is not None
+        else _build_web_media(config, shared_http),
+        google_port=google_port
+        if google_port is not None
+        else _build_google_port(config, shared_http),
+    )
+
+
 async def build_container(
     config: WiringConfig,
     *,
@@ -705,27 +756,23 @@ async def build_container(
         rag = _build_rag(config, service_tokens, shared_http)
 
     if llm is None:
-        if config.llm_api_key or config.llm_base_url:
-            llm = _build_llm(config, shared_http())
-        else:
-            from cyberarche.application.testing.fakes import ScriptedLLM
+        llm = _build_llm_or_default(config, shared_http)
 
-            llm = ScriptedLLM([])  # no provider configured (tests/sample)
-
-    if images is None:
-        images = _build_image_generator(config, shared_http())
-
-    if code is None:
-        code = _build_code_executor(config, service_tokens, shared_http)
-
-    if meetings is None:
-        meetings = _build_meetings(config, shared_http)
-
-    if web_media is None:
-        web_media = _build_web_media(config, shared_http)
-
-    if google_port is None:
-        google_port = _build_google_port(config, shared_http)
+    adapters = _build_optional_adapters(
+        config,
+        service_tokens,
+        shared_http,
+        images=images,
+        code=code,
+        meetings=meetings,
+        web_media=web_media,
+        google_port=google_port,
+    )
+    images = adapters.images
+    code = adapters.code
+    meetings = adapters.meetings
+    web_media = adapters.web_media
+    google_port = adapters.google_port
 
     if mcp_client is None:
         from cyberarche.adapters.outbound.mcp_client.fastmcp_client import (

@@ -24,6 +24,19 @@ _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 _TEXT_MIME_PREFIXES = ("text/", "application/json")
 
 
+def _image_names(body: dict) -> list[str]:
+    """Collect figure filenames from the execute response's rich outputs and artifacts."""
+    names: list[str] = []
+    for ro in body.get("rich_outputs", []) or []:
+        if str(ro.get("mime_type", "")).startswith("image/") and ro.get("artifact"):
+            names.append(str(ro["artifact"]))
+    for artifact in body.get("artifacts", []) or []:
+        name = artifact.get("name") if isinstance(artifact, dict) else artifact
+        if name and str(name).lower().endswith(_IMAGE_EXTS):
+            names.append(str(name))
+    return names
+
+
 def _dedupe_images(images: list[CodeImage]) -> list[CodeImage]:
     """Drop byte-identical duplicates (e.g. a figure listed under two names)."""
     seen: set[str] = set()
@@ -91,30 +104,27 @@ class CyberdyneInterpreterAdapter:
     async def _download_images(
         self, session_id: str, body: dict, headers: dict[str, str]
     ) -> list[CodeImage]:
-        names: list[str] = []
-        for ro in body.get("rich_outputs", []) or []:
-            if str(ro.get("mime_type", "")).startswith("image/") and ro.get("artifact"):
-                names.append(str(ro["artifact"]))
-        for artifact in body.get("artifacts", []) or []:
-            name = artifact.get("name") if isinstance(artifact, dict) else artifact
-            if name and str(name).lower().endswith(_IMAGE_EXTS):
-                names.append(str(name))
-
         images: list[CodeImage] = []
         seen: set[str] = set()
-        for name in names:
+        for name in _image_names(body):
             if name in seen:
                 continue
             seen.add(name)
-            resp = await self._http.get(
-                f"{self._base}/files/{session_id}/{name}", headers=headers
-            )
-            if resp.status_code == 200 and resp.content:
-                images.append(
-                    CodeImage(
-                        filename=name,
-                        content=resp.content,
-                        content_type=resp.headers.get("content-type", "image/png"),
-                    )
-                )
+            image = await self._download_image(session_id, name, headers)
+            if image is not None:
+                images.append(image)
         return images
+
+    async def _download_image(
+        self, session_id: str, name: str, headers: dict[str, str]
+    ) -> CodeImage | None:
+        resp = await self._http.get(
+            f"{self._base}/files/{session_id}/{name}", headers=headers
+        )
+        if resp.status_code != 200 or not resp.content:
+            return None
+        return CodeImage(
+            filename=name,
+            content=resp.content,
+            content_type=resp.headers.get("content-type", "image/png"),
+        )
