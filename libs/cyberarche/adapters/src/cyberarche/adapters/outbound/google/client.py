@@ -139,19 +139,7 @@ class GoogleWorkspaceClient:
             body=_gmail_body(data.get("payload", {})),
         )
 
-    async def gmail_create_draft(
-        self, access_token: str, *, to: str, subject: str, body: str
-    ) -> str:
-        raw = base64.urlsafe_b64encode(
-            f"To: {to}\r\nSubject: {subject}\r\n\r\n{body}".encode()
-        ).decode()
-        resp = await self._http.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
-            json={"message": {"raw": raw}},
-            headers=self._auth(access_token),
-        )
-        resp.raise_for_status()
-        return resp.json().get("id", "")
+    # Gmail is read-only — no draft/compose/send (least privilege).
 
     # ---- Calendar ----------------------------------------------------------
 
@@ -260,6 +248,29 @@ class GoogleWorkspaceClient:
         resp.raise_for_status()
         return map_doc_elements(_doc_elements(resp.json()))
 
+    # ---- Sheets / Slides (read-only) ---------------------------------------
+
+    async def sheets_read(
+        self, access_token: str, spreadsheet_id: str, *, range: str = ""
+    ) -> str:
+        cell_range = range or "A1:Z100"
+        resp = await self._http.get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
+            f"/values/{cell_range}",
+            headers=self._auth(access_token),
+        )
+        resp.raise_for_status()
+        rows = resp.json().get("values", [])
+        return "\n".join("\t".join(str(cell) for cell in row) for row in rows)
+
+    async def slides_read(self, access_token: str, presentation_id: str) -> str:
+        resp = await self._http.get(
+            f"https://slides.googleapis.com/v1/presentations/{presentation_id}",
+            headers=self._auth(access_token),
+        )
+        resp.raise_for_status()
+        return _slide_text(resp.json())
+
 
 def _gmail_body(payload: dict[str, Any]) -> str:
     """Best-effort plain-text body from a Gmail payload."""
@@ -294,3 +305,19 @@ def _doc_elements(doc: dict[str, Any]) -> list[dict]:
         else:
             elements.append({"type": "paragraph", "text": text})
     return elements
+
+
+def _slide_text(presentation: dict[str, Any]) -> str:
+    """Flatten a Slides presentation into per-slide text lines (read-only)."""
+    lines: list[str] = []
+    for index, slide in enumerate(presentation.get("slides", []), start=1):
+        texts: list[str] = []
+        for element in slide.get("pageElements", []):
+            shape = element.get("shape", {})
+            for run in shape.get("text", {}).get("textElements", []):
+                content = run.get("textRun", {}).get("content", "").strip()
+                if content:
+                    texts.append(content)
+        if texts:
+            lines.append(f"Slide {index}: " + " ".join(texts))
+    return "\n".join(lines)

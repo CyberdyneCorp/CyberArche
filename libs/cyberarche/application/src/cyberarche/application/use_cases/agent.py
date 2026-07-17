@@ -63,11 +63,13 @@ from cyberarche.domain.errors import NotAuthorized, NotFound, ValidationFailed
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
 from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.domain.google_workspace import (
-    SCOPE_CALENDAR,
+    SCOPE_CALENDAR_EVENTS,
+    SCOPE_CALENDAR_FREEBUSY,
     SCOPE_DOCS,
     SCOPE_DRIVE,
-    SCOPE_GMAIL_COMPOSE,
     SCOPE_GMAIL_READ,
+    SCOPE_SHEETS,
+    SCOPE_SLIDES,
     GoogleConnection,
 )
 from cyberarche.domain.ids import AgentMemoryId, AgentRunId, ConnectorId, DocumentId
@@ -985,11 +987,13 @@ class AgentUseCases:
         handlers = {
             "google_gmail_search": self._g_gmail_search,
             "google_gmail_read": self._g_gmail_read,
-            "google_gmail_draft": self._g_gmail_draft,
             "google_calendar_list": self._g_calendar_list,
             "google_free_busy": self._g_free_busy,
+            "google_calendar_create_event": self._g_calendar_create_event,
             "google_drive_search": self._g_drive_search,
             "google_import_doc": self._g_import_doc,
+            "google_sheets_read": self._g_sheets_read,
+            "google_slides_read": self._g_slides_read,
         }
         handler = handlers.get(call.name)
         if handler is None:
@@ -1015,20 +1019,38 @@ class AgentUseCases:
         )
         return f"{msg.subject} — from {msg.sender}\n\n{msg.body}"
 
-    async def _g_gmail_draft(
+    async def _g_calendar_create_event(
         self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
     ) -> str:
-        draft_id = await self._google.gmail_draft(
+        attendees = args.get("attendees") or []
+        event_id = await self._google.calendar_create_event(
             caller,
             workspace_id,
-            to=str(args.get("to", "")),
-            subject=str(args.get("subject", "")),
-            body=str(args.get("body", "")),
+            summary=str(args.get("summary", "")),
+            start=str(args.get("start", "")),
+            end=str(args.get("end", "")),
+            attendees=[str(a) for a in attendees if isinstance(attendees, list)],
         )
-        return (
-            f"draft created (id={draft_id}) — review and send it yourself; "
-            "the agent does not send mail"
+        return f"created calendar event (id={event_id})"
+
+    async def _g_sheets_read(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        values = await self._google.sheets_read(
+            caller,
+            workspace_id,
+            str(args.get("spreadsheet_id", "")),
+            range=str(args.get("range", "")),
         )
+        return values or "(empty sheet)"
+
+    async def _g_slides_read(
+        self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
+    ) -> str:
+        text = await self._google.slides_read(
+            caller, workspace_id, str(args.get("presentation_id", ""))
+        )
+        return text or "(empty presentation)"
 
     async def _g_calendar_list(
         self, caller: CallerContext, workspace_id: WorkspaceId, _doc: DocumentId, args: dict
@@ -1595,11 +1617,13 @@ def _render_memories(items: list) -> str:
 _GOOGLE_TOOL_NAMES = {
     "google_gmail_search",
     "google_gmail_read",
-    "google_gmail_draft",
     "google_calendar_list",
     "google_free_busy",
+    "google_calendar_create_event",
     "google_drive_search",
     "google_import_doc",
+    "google_sheets_read",
+    "google_slides_read",
 }
 
 
@@ -1632,17 +1656,8 @@ def _google_tool_specs(connection: GoogleConnection) -> list[ToolSpec]:
                 ["message_id"],
             )
         )
-    if connection.has_scope(SCOPE_GMAIL_COMPOSE):
-        specs.append(
-            _tool(
-                "google_gmail_draft",
-                "Create a Gmail DRAFT reply/message (never sends — the user must "
-                "review and send it). Provide to, subject, body.",
-                {"to": _s, "subject": _s, "body": _s},
-                ["to", "subject", "body"],
-            )
-        )
-    if connection.has_scope(SCOPE_CALENDAR):
+    # Gmail is read-only — no draft/compose tool.
+    if connection.has_scope(SCOPE_CALENDAR_EVENTS):
         specs.append(
             _tool(
                 "google_calendar_list",
@@ -1654,11 +1669,46 @@ def _google_tool_specs(connection: GoogleConnection) -> list[ToolSpec]:
         )
         specs.append(
             _tool(
+                "google_calendar_create_event",
+                "Create a Calendar event on the user's primary calendar. Provide "
+                "summary, start and end (RFC3339), and optional attendees.",
+                {
+                    "summary": _s,
+                    "start": _s,
+                    "end": _s,
+                    "attendees": {"type": "array", "items": _s},
+                },
+                ["summary", "start", "end"],
+            )
+        )
+    if connection.has_scope(SCOPE_CALENDAR_FREEBUSY):
+        specs.append(
+            _tool(
                 "google_free_busy",
                 "Find the user's busy periods in an RFC3339 window to propose "
-                "free meeting slots. Creating the event needs the user's action.",
+                "free meeting slots.",
                 {"time_min": _s, "time_max": _s},
                 ["time_min", "time_max"],
+            )
+        )
+    if connection.has_scope(SCOPE_SHEETS):
+        specs.append(
+            _tool(
+                "google_sheets_read",
+                "Read a Google Sheet's values (read-only). Provide spreadsheet_id "
+                "and an optional A1 range.",
+                {"spreadsheet_id": _s, "range": _s},
+                ["spreadsheet_id"],
+            )
+        )
+    if connection.has_scope(SCOPE_SLIDES):
+        specs.append(
+            _tool(
+                "google_slides_read",
+                "Read a Google Slides presentation's text (read-only). Provide "
+                "presentation_id.",
+                {"presentation_id": _s},
+                ["presentation_id"],
             )
         )
     if connection.has_scope(SCOPE_DRIVE) or connection.has_scope(SCOPE_DOCS):

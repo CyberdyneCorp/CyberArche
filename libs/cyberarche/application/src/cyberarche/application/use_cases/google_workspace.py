@@ -24,11 +24,13 @@ from cyberarche.application.ports.mcp import SecretBoxPort
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.errors import ValidationFailed
 from cyberarche.domain.google_workspace import (
-    SCOPE_CALENDAR,
+    SCOPE_CALENDAR_EVENTS,
+    SCOPE_CALENDAR_FREEBUSY,
     SCOPE_DOCS,
     SCOPE_DRIVE,
-    SCOPE_GMAIL_COMPOSE,
     SCOPE_GMAIL_READ,
+    SCOPE_SHEETS,
+    SCOPE_SLIDES,
     STATUS_CONNECTED,
     STATUS_NEEDS_RECONNECT,
     GoogleConnection,
@@ -132,22 +134,18 @@ class GoogleWorkspaceUseCases:
         token = await self._token_for(caller, workspace_id, SCOPE_GMAIL_READ)
         return await self._google.gmail_read(token, message_id)
 
-    async def gmail_draft(self, caller, workspace_id, *, to, subject, body) -> str:
-        token = await self._token_for(caller, workspace_id, SCOPE_GMAIL_COMPOSE)
-        return await self._google.gmail_create_draft(
-            token, to=to, subject=subject, body=body
-        )
+    # Gmail is read-only — no draft/compose/send (least privilege).
 
-    # ---- Calendar ----------------------------------------------------------
+    # ---- Calendar (the one writable surface) -------------------------------
 
     async def calendar_list(self, caller, workspace_id, *, time_min, time_max):
-        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR)
+        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR_EVENTS)
         return await self._google.calendar_list(
             token, time_min=time_min, time_max=time_max
         )
 
     async def calendar_free_busy(self, caller, workspace_id, *, time_min, time_max):
-        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR)
+        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR_FREEBUSY)
         return await self._google.calendar_free_busy(
             token, time_min=time_min, time_max=time_max
         )
@@ -155,8 +153,8 @@ class GoogleWorkspaceUseCases:
     async def calendar_create_event(
         self, caller, workspace_id, *, summary, start, end, attendees
     ) -> str:
-        """Explicit user action only (HTTP router) — never an agent tool."""
-        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR)
+        """Create an event (the only Google write) with the calendar.events scope."""
+        token = await self._token_for(caller, workspace_id, SCOPE_CALENDAR_EVENTS)
         return await self._google.calendar_create_event(
             token, summary=summary, start=start, end=end, attendees=attendees
         )
@@ -174,6 +172,16 @@ class GoogleWorkspaceUseCases:
         for block in blocks:
             block.setdefault("data", {}).setdefault("source_doc", doc_id)
         return blocks
+
+    # ---- Sheets / Slides (read-only) ---------------------------------------
+
+    async def sheets_read(self, caller, workspace_id, spreadsheet_id: str, *, range=""):
+        token = await self._token_for(caller, workspace_id, SCOPE_SHEETS)
+        return await self._google.sheets_read(token, spreadsheet_id, range=range)
+
+    async def slides_read(self, caller, workspace_id, presentation_id: str) -> str:
+        token = await self._token_for(caller, workspace_id, SCOPE_SLIDES)
+        return await self._google.slides_read(token, presentation_id)
 
     # ---- internals ---------------------------------------------------------
 

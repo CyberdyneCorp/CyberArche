@@ -151,14 +151,64 @@ async def test_missing_scope_blocks_tool_without_calling_google(
     assert google_port.tokens_used == []  # Google was never called
 
 
-async def test_compose_creates_a_draft_never_sends(use_cases, google_port, alice):
-    workspace, _ = await make_document(use_cases, alice)
-    await _connect(use_cases, google_port, alice, workspace.id, ["gmail_compose"])
-    draft_id = await use_cases.google.gmail_draft(
-        alice, workspace.id, to="x@y.com", subject="Hi", body="hello"
+def test_gmail_is_read_only_no_write_scope_or_tool():
+    """Gmail must be read-only: no compose/send/modify scope, and the use case
+    exposes no write method."""
+    assert SCOPE_GROUPS["gmail_read"] == [
+        "https://www.googleapis.com/auth/gmail.readonly"
+    ]
+    assert not any(
+        w in s
+        for scopes in SCOPE_GROUPS.values()
+        for s in scopes
+        for w in ("gmail.compose", "gmail.send", "gmail.modify")
     )
-    assert draft_id == "draft-1"
-    assert len(google_port.drafts) == 1  # a draft, and no send path exists
+    from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
+
+    assert not hasattr(GoogleWorkspaceUseCases, "gmail_draft")
+
+
+def test_calendar_is_the_only_writable_surface():
+    """Calendar uses the narrow events/freebusy scopes (not full calendar), and
+    it is the only place a write scope appears; everything else is *.readonly."""
+    assert set(SCOPE_GROUPS["calendar"]) == {
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+    }
+    assert "https://www.googleapis.com/auth/calendar" not in SCOPE_GROUPS["calendar"]
+    writable = [
+        s
+        for scopes in SCOPE_GROUPS.values()
+        for s in scopes
+        if not s.endswith(".readonly") and not s.endswith(".freebusy")
+    ]
+    assert writable == ["https://www.googleapis.com/auth/calendar.events"]
+
+
+async def test_agent_can_create_a_calendar_event(use_cases, google_port, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await _connect(use_cases, google_port, alice, workspace.id, ["calendar"])
+    event_id = await use_cases.google.calendar_create_event(
+        alice, workspace.id, summary="Sync", start="2026-07-20T09:00:00Z",
+        end="2026-07-20T09:30:00Z", attendees=["x@y.com"],
+    )
+    assert event_id == "event-1"
+    assert len(google_port.created_events) == 1
+
+
+async def test_sheets_and_slides_are_read_only(use_cases, google_port, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await _connect(use_cases, google_port, alice, workspace.id, ["sheets", "slides"])
+    assert "sheet-1" in await use_cases.google.sheets_read(alice, workspace.id, "sheet-1")
+    assert "deck-1" in await use_cases.google.slides_read(alice, workspace.id, "deck-1")
+
+
+async def test_sheets_blocked_without_scope(use_cases, google_port, alice):
+    workspace, _ = await make_document(use_cases, alice)
+    await _connect(use_cases, google_port, alice, workspace.id, ["gmail_read"])
+    with pytest.raises(ValidationFailed):
+        await use_cases.google.sheets_read(alice, workspace.id, "sheet-1")
+    assert google_port.tokens_used == []
 
 
 async def test_user_b_cannot_use_user_a_connection(
