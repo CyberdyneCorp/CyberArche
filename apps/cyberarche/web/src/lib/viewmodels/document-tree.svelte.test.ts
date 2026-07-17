@@ -150,7 +150,7 @@ describe('document tree ViewModel', () => {
 		expect(tree.roots[0].expanded).toBe(true);
 
 		const childListings = (fetchMock as ReturnType<typeof vi.fn>).mock.calls.filter(
-			([url]: [string]) => String(url).includes('parent_id=d-1')
+			(call: unknown[]) => String(call[0]).includes('parent_id=d-1')
 		);
 		expect(childListings).toHaveLength(1);
 
