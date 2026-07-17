@@ -55,15 +55,35 @@ defaults and **cannot be overridden from Coolify** until a mapping is added:
   (defaults to the production URL; caller-token forwarded, works out of the box).
 - `CYBERARCHE_INTERPRETER_URL` — Cyberdyne Python interpreter for the agent's
   `run_python` tool (defaults to the production URL).
-- `CYBERARCHE_GOOGLE_CLIENT_ID / _SECRET / _REDIRECT_URI` — Google Workspace
-  connector OAuth. Default empty = **disabled**; enabling it in production
-  requires adding these to the compose `environment:` block.
 - `CYBERARCHE_IMAGE_API_KEY / _MODEL / _BASE_URL` — agent `generate_image`
-  tool. Default empty = **disabled**; same compose caveat as Google.
+  tool. Default empty = **disabled**; enabling requires adding these to the
+  compose `environment:` block.
 - `CYBERARCHE_ENABLE_SCHEDULER` / `_SCHEDULER_INTERVAL_SECONDS` — autonomous
   scheduled agents (default on, 60 s).
 - `CYBERARCHE_AUTH_AUDIENCE` / `_AUTH_TENANT_CLAIM` — token validation tuning
   (defaults: none / `org_id`).
+
+## Enabling the Google Workspace connector (optional)
+
+Disabled by default (the Integrations tab shows "not enabled"). To turn it on,
+set all three env vars in Coolify; they are already mapped in `docker-compose.yml`:
+
+- `CYBERARCHE_GOOGLE_CLIENT_ID`, `CYBERARCHE_GOOGLE_CLIENT_SECRET` — from a Google
+  Cloud OAuth 2.0 **Web application** client.
+- `CYBERARCHE_GOOGLE_REDIRECT_URI` — must exactly match an *Authorized redirect
+  URI* on that client, pointing at the API's callback:
+  `https://cyberarche.backend.coolify.cyberdynecorp.ai/api/v1/google/callback`
+  (locally, your API origin + `/api/v1/google/callback`).
+
+In the [Google Cloud Console](https://console.cloud.google.com/): create/select a
+project → **APIs & Services → Enable APIs**: Gmail, Google Calendar, Google
+Drive, Google Docs, Google Sheets, Google Slides → **OAuth consent screen**
+(add your users as test users, or publish) → **Credentials → Create OAuth client
+ID → Web application** → add the redirect URI above → copy the client id/secret.
+The connector requests only least-privilege scopes: `gmail.readonly`,
+`calendar.events` + `calendar.freebusy`, `drive.readonly` + `documents.readonly`,
+`spreadsheets.readonly`, `presentations.readonly` (read-only everywhere except
+creating Calendar events).
 
 ## Deploy
 
