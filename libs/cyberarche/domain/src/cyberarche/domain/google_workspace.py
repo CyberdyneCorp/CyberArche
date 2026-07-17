@@ -22,19 +22,24 @@ from cyberarche.domain.ids import (
 
 # Full Google OAuth scope URLs, grouped by the tool group a user consents to.
 _G = "https://www.googleapis.com/auth/"
+# Read-only everywhere except the Calendar, which is the one writable surface
+# (calendar.events = read + write of events; calendar.freebusy = read).
 SCOPE_GROUPS: dict[str, list[str]] = {
     "gmail_read": [f"{_G}gmail.readonly"],
-    "gmail_compose": [f"{_G}gmail.compose"],
-    "calendar": [f"{_G}calendar"],
+    "calendar": [f"{_G}calendar.events", f"{_G}calendar.freebusy"],
     "drive": [f"{_G}drive.readonly", f"{_G}documents.readonly"],
+    "sheets": [f"{_G}spreadsheets.readonly"],
+    "slides": [f"{_G}presentations.readonly"],
 }
 
 # The scope each tool requires before it may call Google.
 SCOPE_GMAIL_READ = f"{_G}gmail.readonly"
-SCOPE_GMAIL_COMPOSE = f"{_G}gmail.compose"
-SCOPE_CALENDAR = f"{_G}calendar"
+SCOPE_CALENDAR_EVENTS = f"{_G}calendar.events"  # list + create/update events
+SCOPE_CALENDAR_FREEBUSY = f"{_G}calendar.freebusy"
 SCOPE_DRIVE = f"{_G}drive.readonly"
 SCOPE_DOCS = f"{_G}documents.readonly"
+SCOPE_SHEETS = f"{_G}spreadsheets.readonly"
+SCOPE_SLIDES = f"{_G}presentations.readonly"
 
 STATUS_CONNECTED = "connected"
 STATUS_NEEDS_RECONNECT = "needs_reconnect"

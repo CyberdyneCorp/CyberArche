@@ -8,11 +8,13 @@ import {
 } from '$lib/api/google';
 import { ApiError } from '$lib/api/http';
 
+// Read-only everywhere except Calendar (the one writable surface).
 export const GOOGLE_GROUPS = [
-	{ id: 'gmail_read', label: 'Gmail (read)' },
-	{ id: 'gmail_compose', label: 'Gmail (compose drafts)' },
-	{ id: 'calendar', label: 'Calendar (events + free/busy)' },
-	{ id: 'drive', label: 'Docs & Drive (read + import)' }
+	{ id: 'gmail_read', label: 'Gmail (read-only)' },
+	{ id: 'calendar', label: 'Calendar (read + create events)' },
+	{ id: 'drive', label: 'Docs & Drive (read-only)' },
+	{ id: 'sheets', label: 'Sheets (read-only)' },
+	{ id: 'slides', label: 'Slides (read-only)' }
 ];
 
 export function createGoogle(workspaceId: string) {

@@ -1994,7 +1994,7 @@ async def test_google_read_tools_render_results(use_cases, google_port, alice):
     workspace, document = await make_document(use_cases, alice)
     await _connect(
         use_cases, google_port, alice, workspace.id,
-        ["gmail_read", "gmail_compose", "calendar", "drive"],
+        ["gmail_read", "calendar", "drive", "sheets", "slides"],
     )
 
     def call(name, arguments):
@@ -2009,11 +2009,9 @@ async def test_google_read_tools_render_results(use_cases, google_port, alice):
     read = await call("google_gmail_read", {"message_id": "m1"})
     assert "Subject — from a@b.com" in read and "full body" in read
 
-    draft = await call(
-        "google_gmail_draft", {"to": "x@y.z", "subject": "s", "body": "b"}
-    )
-    assert "draft created (id=draft-1)" in draft
-    assert "the agent does not send mail" in draft
+    # Gmail is read-only: the draft tool no longer exists.
+    no_draft = await call("google_gmail_draft", {"to": "x@y.z"})
+    assert no_draft == "error: unknown Google tool google_gmail_draft"
 
     events = await call(
         "google_calendar_list", {"time_min": "t0", "time_max": "t1"}
@@ -2023,11 +2021,20 @@ async def test_google_read_tools_render_results(use_cases, google_port, alice):
     busy = await call("google_free_busy", {"time_min": "t0", "time_max": "t1"})
     assert busy.startswith("busy periods:") and "t0 → t1" in busy
 
+    # Calendar is the one writable surface — the agent may create events.
+    created = await call(
+        "google_calendar_create_event",
+        {"summary": "Sync", "start": "2026-07-20T09:00:00Z", "end": "2026-07-20T09:30:00Z"},
+    )
+    assert "created calendar event (id=event-1)" in created
+
     files = await call("google_drive_search", {"query": "plan"})
     assert files.startswith("drive files:") and "id=d1" in files
 
-    unknown = await call("google_gmail_send", {})
-    assert unknown == "error: unknown Google tool google_gmail_send"
+    sheet = await call("google_sheets_read", {"spreadsheet_id": "sh-1"})
+    assert "sh-1" in sheet
+    slides = await call("google_slides_read", {"presentation_id": "pr-1"})
+    assert "pr-1" in slides
 
 
 async def test_google_empty_results_render_friendly_text(
@@ -2074,7 +2081,7 @@ async def test_google_tools_offered_match_the_granted_scopes(
     workspace, document = await make_document(use_cases, alice)
     await _connect(
         use_cases, google_port, alice, workspace.id,
-        ["gmail_read", "gmail_compose", "calendar", "drive"],
+        ["gmail_read", "calendar", "drive", "sheets", "slides"],
     )
 
     offered = {
@@ -2086,12 +2093,36 @@ async def test_google_tools_offered_match_the_granted_scopes(
     assert {
         "google_gmail_search",
         "google_gmail_read",
-        "google_gmail_draft",
         "google_calendar_list",
         "google_free_busy",
+        "google_calendar_create_event",
         "google_drive_search",
         "google_import_doc",
+        "google_sheets_read",
+        "google_slides_read",
     } <= offered
+    # Gmail is read-only — the draft tool is never offered.
+    assert "google_gmail_draft" not in offered
+
+
+async def test_gmail_only_connection_offers_no_write_tool(use_cases, google_port, alice):
+    """A Gmail-only connection exposes just read tools — no calendar write, no
+    draft (regression: Gmail is strictly read-only)."""
+    from tests.test_google_workspace import _connect
+
+    workspace, document = await make_document(use_cases, alice)
+    await _connect(use_cases, google_port, alice, workspace.id, ["gmail_read"])
+    offered = {
+        spec.name
+        for spec in await use_cases.agent._available_tools(
+            alice, workspace.id, document.id, None, None
+        )
+    }
+    assert {"google_gmail_search", "google_gmail_read"} <= offered
+    assert not any(
+        t in offered
+        for t in ("google_gmail_draft", "google_calendar_create_event")
+    )
 
 
 def test_render_gmail_and_events_empty():

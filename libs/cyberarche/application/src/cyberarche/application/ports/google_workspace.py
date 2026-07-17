@@ -58,11 +58,7 @@ class GoogleWorkspacePort(Protocol):
         self, access_token: str, message_id: str
     ) -> GmailMessage: ...
 
-    async def gmail_create_draft(
-        self, access_token: str, *, to: str, subject: str, body: str
-    ) -> str:
-        """Create a Gmail draft (never sends); returns the draft id."""
-        ...
+    # Gmail is read-only — no compose/draft/send. (audit: least privilege)
 
     # ---- Calendar ----
     async def calendar_list(
@@ -93,6 +89,17 @@ class GoogleWorkspacePort(Protocol):
 
     async def import_doc(self, access_token: str, doc_id: str) -> list[dict]:
         """Fetch a Doc and return CyberArche block dicts (headings/text/…)."""
+        ...
+
+    # ---- Sheets / Slides (read-only) ----
+    async def sheets_read(
+        self, access_token: str, spreadsheet_id: str, *, range: str = ""
+    ) -> str:
+        """Read a spreadsheet's values as text (optionally an A1 range)."""
+        ...
+
+    async def slides_read(self, access_token: str, presentation_id: str) -> str:
+        """Read a presentation's slide text."""
         ...
 
 

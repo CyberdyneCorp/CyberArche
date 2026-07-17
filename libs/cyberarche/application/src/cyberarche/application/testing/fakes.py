@@ -966,11 +966,6 @@ class FakeGoogleWorkspace:
             sender="a@b.com", snippet="snip", body="full body",
         )
 
-    async def gmail_create_draft(self, access_token, *, to, subject, body):
-        self.tokens_used.append(access_token)
-        self.drafts.append({"to": to, "subject": subject, "body": body})
-        return "draft-1"
-
     async def calendar_list(self, access_token, *, time_min, time_max):
         from cyberarche.domain.google_workspace import CalendarEvent
 
@@ -1000,6 +995,14 @@ class FakeGoogleWorkspace:
             {"type": "heading", "data": {"text": "Imported", "level": 2}},
             {"type": "paragraph", "data": {"text": f"from doc {doc_id}"}},
         ]
+
+    async def sheets_read(self, access_token, spreadsheet_id, *, range=""):
+        self.tokens_used.append(access_token)
+        return f"A1\tB1\nvalues from {spreadsheet_id}"
+
+    async def slides_read(self, access_token, presentation_id):
+        self.tokens_used.append(access_token)
+        return f"Slide 1: deck {presentation_id}"
 
 
 class NaiveSecretBox:
