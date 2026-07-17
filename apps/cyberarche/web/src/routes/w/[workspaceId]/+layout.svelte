@@ -3,10 +3,12 @@
 	import { page } from '$app/state';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import GraphModal from '$lib/components/GraphModal.svelte';
+	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
+	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { createTeamspaces, type TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
 
@@ -76,6 +78,9 @@
 		<CommandPalette {workspaceId} onclose={() => (paletteOpen = false)} />
 	{/if}
 	<GraphModal {workspaceId} />
+	{#if settingsModal.isOpen}
+		<SettingsModal {workspaceId} />
+	{/if}
 {/if}
 
 <style>

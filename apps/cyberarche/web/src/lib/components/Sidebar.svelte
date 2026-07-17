@@ -7,6 +7,7 @@
 	import { graphView } from '$lib/viewmodels/graph-view.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
+	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
@@ -633,9 +634,9 @@
 
 	<footer class="footer">
 		<NotificationsBell {workspaceId} />
-		<a class="foot-btn" href={`/w/${workspaceId}/settings`} data-testid="open-settings">
+		<button class="foot-btn" onclick={() => settingsModal.open()} data-testid="open-settings">
 			⚙ Settings &amp; connectors
-		</a>
+		</button>
 		<button class="foot-btn" onclick={() => theme.toggle()} data-testid="theme-toggle">
 			◐ {theme.mode === 'dark' ? 'Light' : 'Dark'} theme
 		</button>
