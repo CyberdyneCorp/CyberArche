@@ -64,6 +64,7 @@ from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
+from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -256,6 +257,10 @@ def use_cases(
         clock,
         ids,
     )
+    search = SearchUseCases(documents, realtime, engine, access)
+    workspace_chat = WorkspaceChatUseCases(
+        llm, rag, workspaces, search, access, persona=persona
+    )
     google = GoogleWorkspaceUseCases(
         google_repo, google_port, secret_box, access, clock, ids
     )
@@ -319,7 +324,8 @@ def use_cases(
             inferred_links=inferred_links,
             clock=clock,
         ),
-        search=SearchUseCases(documents, realtime, engine, access),
+        search=search,
+        workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notification_repo),
         templates=TemplateUseCases(
             InMemoryTemplateRepository(),

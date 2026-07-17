@@ -77,6 +77,7 @@ from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
+from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
@@ -254,6 +255,10 @@ def _build_use_cases(
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspaces, folders
     )
+    search = SearchUseCases(documents, realtime, crdt_engine, access)
+    workspace_chat = WorkspaceChatUseCases(
+        llm, rag, workspaces, search, access, persona=persona
+    )
     agent_use_cases = AgentUseCases(
         llm,
         documents,
@@ -320,7 +325,8 @@ def _build_use_cases(
             inferred_links=inferred_links,
             clock=clock,
         ),
-        search=SearchUseCases(documents, realtime, crdt_engine, access),
+        search=search,
+        workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notifications),
         skills=AgentSkillUseCases(agent_skills, access, clock, ids),
         templates=TemplateUseCases(

@@ -11,6 +11,7 @@ from cyberarche.adapters.inbound.http.routers.agent_skills import (
 )
 from cyberarche.adapters.inbound.http.routers.api_keys import router as api_keys_router
 from cyberarche.adapters.inbound.http.routers.auth import router as auth_router
+from cyberarche.adapters.inbound.http.routers.chat import router as chat_router
 from cyberarche.adapters.inbound.http.routers.connectors import (
     router as connectors_router,
 )
@@ -43,6 +44,7 @@ all_routers = [
     knowledge_router,
     webhook_router,
     agent_router,
+    chat_router,
     agent_persona_router,
     agent_skills_router,
     scheduled_agents_router,
