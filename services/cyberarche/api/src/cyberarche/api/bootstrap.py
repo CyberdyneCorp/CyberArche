@@ -86,6 +86,13 @@ def create_app(
         raise ValueError(
             "CYBERARCHE_CORS_ORIGINS must not be '*' when credentials are allowed"
         )
+    # Middleware runs outermost-last-added. Add the rate limiter and security
+    # headers FIRST, then CORS, so CORS is the OUTERMOST layer and its
+    # Access-Control-Allow-Origin header is attached even to a short-circuited
+    # 429 from the rate limiter — otherwise the browser reports a CORS failure
+    # instead of the real 429 (regression from the audit hardening).
+    app.add_middleware(AuthRateLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -93,8 +100,6 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(AuthRateLimitMiddleware)
     install_observability(app)
     install_error_handlers(app)
     for router in all_routers:

@@ -38,10 +38,12 @@ class CyberdyneAuthConfig:
     client_id: str = ""
     client_secret: str = ""
     audience: str | None = None
-    # Expected `iss` claim. Enforced when set; defaults to the realm issuer so a
-    # token from a different issuer is rejected even if its signature validates
-    # against a JWKS key (security audit F-008).
-    issuer: str | None = "cyberdyne-auth"
+    # Expected `iss` claim. Enforced when set; the wiring defaults it to the auth
+    # service's own base URL — the OIDC issuer — so a token from a different
+    # issuer is rejected even if its signature validates against a JWKS key
+    # (security audit F-008). Deriving it from base_url (rather than hard-coding
+    # a name) keeps it aligned when the auth service changes its issuer string.
+    issuer: str | None = None
     tenant_claim: str = "org_id"
 
     @property

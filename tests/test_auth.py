@@ -19,8 +19,13 @@ from cyberarche.adapters.outbound.auth.cyberdyne import (
 from cyberarche.domain.errors import NotAuthenticated
 
 KID = "test-key-1"
+# issuer is set explicitly here (the wiring derives it from base_url in prod);
+# it matches the iss that sign() stamps.
 CONFIG = CyberdyneAuthConfig(
-    base_url="https://auth.test", client_id="cyberarche", client_secret="s3cret"
+    base_url="https://auth.test",
+    client_id="cyberarche",
+    client_secret="s3cret",
+    issuer="cyberdyne-auth",
 )
 
 

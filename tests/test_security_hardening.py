@@ -46,3 +46,22 @@ def test_non_auth_endpoints_are_not_rate_limited(api):
     # Health is not in the limited prefix — many calls stay 200.
     for _ in range(30):
         assert api.get("/api/v1/health").status_code == 200
+
+
+def test_rate_limited_429_still_carries_cors_headers(api):
+    """Regression (prod incident 2026-07-17): the rate limiter must sit INSIDE
+    CORS, so a short-circuited 429 still gets Access-Control-Allow-Origin —
+    otherwise the browser reports a CORS failure and the SPA can't read the 429
+    to back off."""
+    origin = "http://localhost:5173"  # the api fixture's allowed origin
+    last = None
+    for _ in range(15):
+        last = api.post(
+            "/api/v1/auth/session",
+            json={"email": "u@t.io", "password": "pw"},
+            headers={"Origin": origin},
+        )
+        if last.status_code == 429:
+            break
+    assert last is not None and last.status_code == 429
+    assert last.headers.get("access-control-allow-origin") == origin

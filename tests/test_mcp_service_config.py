@@ -45,6 +45,7 @@ def test_wiring_maps_settings_to_the_composition_root():
         auth_client_id="cid",
         auth_client_secret="sec",
         auth_audience="aud",
+        auth_issuer="iss.test",
         rag_base_url="https://rag.test",
         rag_api_token="rag-token",
         dao_url="https://dao.test",
@@ -61,7 +62,7 @@ def test_wiring_maps_settings_to_the_composition_root():
     assert config.auth_client_id == "cid"
     assert config.auth_client_secret == "sec"
     assert config.auth_audience == "aud"
-    assert config.auth_issuer == "cyberdyne-auth"
+    assert config.auth_issuer == "iss.test"  # explicit value maps through
     assert config.rag_base_url == "https://rag.test"
     assert config.rag_api_token == "rag-token"
     assert config.dao_base_url == "https://dao.test"
