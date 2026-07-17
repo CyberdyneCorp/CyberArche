@@ -47,6 +47,39 @@ def test_tenant_comes_from_claims_not_body(api):
     assert mallory_view.json() == []
 
 
+def test_content_search_endpoint_returns_title_and_content_hits(api):
+    headers = auth("alice-token")
+    workspace = api.post(
+        "/api/v1/workspaces", json={"name": "Eng"}, headers=headers
+    ).json()
+    titled = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Roadmap"},
+        headers=headers,
+    ).json()
+    contentful = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Untitled"},
+        headers=headers,
+    ).json()
+    api.post(
+        f"/api/v1/documents/{contentful['id']}/agent/blocks",
+        json={"blocks": [{"id": "b1", "type": "paragraph", "data": {"text": "the roadmap ships in Q3"}}]},
+        headers=headers,
+    )
+
+    hits = api.get(
+        f"/api/v1/workspaces/{workspace['id']}/search/content",
+        params={"q": "roadmap"},
+        headers=headers,
+    ).json()
+
+    by_id = {h["id"]: h for h in hits}
+    assert by_id[titled["id"]]["field"] == "title"
+    assert by_id[contentful["id"]]["field"] == "content"
+    assert "roadmap" in by_id[contentful["id"]]["snippet"].lower()
+
+
 def test_vertical_flow_workspace_document_snapshot_trash_restore(api):
     headers = auth("alice-token")
 

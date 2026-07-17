@@ -15,6 +15,7 @@ from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import NotificationUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.teamspaces import (
@@ -47,6 +48,7 @@ class UseCases:
     folders: FolderUseCases
     files: FileUseCases
     links: LinksUseCases
+    search: SearchUseCases
     notifications: NotificationUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases

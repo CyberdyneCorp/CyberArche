@@ -1,8 +1,7 @@
 # document-search Specification
 
-## Purpose
-TBD - created by archiving change wikilinks-search-palette. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: Search documents in a workspace
 
 The system SHALL let a caller search a workspace's documents by **title and
@@ -28,17 +27,7 @@ match, SHALL include a short surrounding snippet.
 - **THEN** only documents the caller may view SHALL be returned, whether the
   match was in the title or the content
 
-### Requirement: Command palette
-The app SHALL provide a keyboard-invoked command palette (Cmd/Ctrl+K) to search
-documents by title and open one, or create a new document.
-
-#### Scenario: Jump to a document
-- **WHEN** the user opens the palette, types a title, and selects a result
-- **THEN** that document SHALL open
-
-#### Scenario: Create from the palette
-- **WHEN** the user chooses to create a new document from the palette
-- **THEN** a new document SHALL be created and opened
+## ADDED Requirements
 
 ### Requirement: Ask the workspace (RAG answer)
 
@@ -52,4 +41,3 @@ workspace and SHALL require workspace membership.
 - **GIVEN** a member of a workspace with ingested knowledge
 - **WHEN** the member asks a question from the search UI
 - **THEN** the system SHALL return a RAG-grounded answer for that workspace
-

@@ -162,3 +162,30 @@ async def search_documents(
         caller, WorkspaceId(workspace_id), query=q, limit=limit
     )
     return [DocumentResponse.from_domain(d) for d in documents]
+
+
+class SearchHitResponse(BaseModel):
+    id: str
+    title: str
+    field: str  # "title" | "content"
+    snippet: str
+
+
+@router.get("/api/v1/workspaces/{workspace_id}/search/content")
+async def search_content(
+    workspace_id: str, cases: Cases, caller: Caller, q: str = "", limit: int = 20
+) -> list[SearchHitResponse]:
+    """Full-text search over document titles and block content, each hit marked
+    with the field it matched and (for content) a surrounding snippet."""
+    hits = await cases.search.search(
+        caller, WorkspaceId(workspace_id), query=q, limit=limit
+    )
+    return [
+        SearchHitResponse(
+            id=hit.document.id,
+            title=hit.document.title,
+            field=hit.field,
+            snippet=hit.snippet,
+        )
+        for hit in hits
+    ]
