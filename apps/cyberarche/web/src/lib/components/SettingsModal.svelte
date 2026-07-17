@@ -680,11 +680,13 @@
 	/* ---- content pane ---- */
 	.pane {
 		min-width: 0;
+		min-height: 0; /* let the grid item be capped at the dialog height... */
 		display: flex;
 		flex-direction: column;
 	}
 	.pane-scroll {
 		flex: 1;
+		min-height: 0; /* ...and the flex child shrink, so overflow-y actually scrolls */
 		overflow-y: auto;
 		padding: 34px 40px 24px;
 	}
@@ -925,6 +927,10 @@
 		flex-wrap: wrap;
 		gap: 4px;
 		margin-top: 8px;
+		/* A connector can advertise dozens of tools — cap the chip list and let
+		 * it scroll on its own instead of making the whole card very long. */
+		max-height: 168px;
+		overflow-y: auto;
 	}
 	.none {
 		color: var(--tx3);
