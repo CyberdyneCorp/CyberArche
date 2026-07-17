@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { Document } from '$lib/api/documents';
+	import { askKnowledge, searchContent, type SearchHit } from '$lib/api/search';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
 
@@ -8,22 +9,55 @@
 
 	let query = $state('');
 	let selected = $state(0);
+	let contentHits = $state<SearchHit[]>([]);
+	let answer = $state<string | null>(null);
+	let asking = $state(false);
 
-	const results = $derived(linkIndex.matches(query, 20));
+	const titleResults = $derived(linkIndex.matches(query, 20));
 	// A trailing "create" action appears when the query names no exact match.
 	const canCreate = $derived(
 		query.trim().length > 0 &&
-			!results.some((d) => d.title.trim().toLowerCase() === query.trim().toLowerCase())
+			!titleResults.some((d) => d.title.trim().toLowerCase() === query.trim().toLowerCase())
 	);
-	const count = $derived(results.length + (canCreate ? 1 : 0));
 
-	$effect(() => {
-		query; // reset highlight as the query changes
-		selected = 0;
+	// One flat list drives rendering and keyboard nav: title matches, then
+	// content matches, then create, then the "Ask AI" row.
+	type Item =
+		| { kind: 'doc'; doc: Document }
+		| { kind: 'content'; hit: SearchHit }
+		| { kind: 'create' }
+		| { kind: 'ask' };
+
+	const items = $derived.by<Item[]>(() => {
+		const list: Item[] = titleResults.map((doc) => ({ kind: 'doc', doc }));
+		for (const hit of contentHits) list.push({ kind: 'content', hit });
+		if (canCreate) list.push({ kind: 'create' });
+		if (query.trim().length > 0) list.push({ kind: 'ask' });
+		return list;
 	});
 
-	function open(doc: Document) {
-		goto(`/w/${doc.workspace_id}/d/${doc.id}`);
+	$effect(() => {
+		query; // reset highlight + any prior answer as the query changes
+		selected = 0;
+		answer = null;
+	});
+
+	// Content search is debounced; title matches stay instant (they are local).
+	$effect(() => {
+		const q = query.trim();
+		if (!q) {
+			contentHits = [];
+			return;
+		}
+		const handle = setTimeout(async () => {
+			const hits = await searchContent(workspaceId, q);
+			contentHits = hits.filter((h) => h.field === 'content');
+		}, 200);
+		return () => clearTimeout(handle);
+	});
+
+	function openDocument(id: string) {
+		goto(`/w/${workspaceId}/d/${id}`);
 		onclose();
 	}
 
@@ -34,15 +68,30 @@
 		onclose();
 	}
 
+	async function ask() {
+		asking = true;
+		answer = null;
+		try {
+			const { result } = await askKnowledge(workspaceId, query.trim());
+			answer = result;
+		} finally {
+			asking = false;
+		}
+	}
+
 	function activate(index: number) {
-		if (index < results.length) open(results[index]);
-		else if (canCreate) create();
+		const item = items[index];
+		if (!item) return;
+		if (item.kind === 'doc') openDocument(item.doc.id);
+		else if (item.kind === 'content') openDocument(item.hit.id);
+		else if (item.kind === 'create') create();
+		else ask();
 	}
 
 	function onkeydown(event: KeyboardEvent) {
 		if (event.key === 'ArrowDown') {
 			event.preventDefault();
-			selected = Math.min(selected + 1, count - 1);
+			selected = Math.min(selected + 1, items.length - 1);
 		} else if (event.key === 'ArrowUp') {
 			event.preventDefault();
 			selected = Math.max(selected - 1, 0);
@@ -77,39 +126,80 @@
 			data-testid="palette-input"
 		/>
 		<div class="results" role="listbox">
-			{#each results as doc, index (doc.id)}
-				<button
-					class="row"
-					class:selected={index === selected}
-					role="option"
-					aria-selected={index === selected}
-					data-testid="palette-result"
-					onmousedown={(e) => {
-						e.preventDefault();
-						open(doc);
-					}}
-				>
-					<span class="icon">▤</span>
-					<span class="title">{doc.title || 'Untitled'}</span>
-				</button>
+			{#each items as item, index (item.kind + ':' + index)}
+				{#if item.kind === 'doc'}
+					<button
+						class="row"
+						class:selected={index === selected}
+						role="option"
+						aria-selected={index === selected}
+						data-testid="palette-result"
+						onmousedown={(e) => {
+							e.preventDefault();
+							openDocument(item.doc.id);
+						}}
+					>
+						<span class="icon">▤</span>
+						<span class="title">{item.doc.title || 'Untitled'}</span>
+					</button>
+				{:else if item.kind === 'content'}
+					<button
+						class="row content"
+						class:selected={index === selected}
+						role="option"
+						aria-selected={index === selected}
+						data-testid="palette-content-result"
+						onmousedown={(e) => {
+							e.preventDefault();
+							openDocument(item.hit.id);
+						}}
+					>
+						<span class="icon">¶</span>
+						<span class="body">
+							<span class="title">{item.hit.title || 'Untitled'}</span>
+							<span class="snippet">{item.hit.snippet}</span>
+						</span>
+						<span class="label">in text</span>
+					</button>
+				{:else if item.kind === 'create'}
+					<button
+						class="row create"
+						class:selected={index === selected}
+						role="option"
+						aria-selected={index === selected}
+						data-testid="palette-create"
+						onmousedown={(e) => {
+							e.preventDefault();
+							create();
+						}}
+					>
+						<span class="icon">＋</span>
+						<span class="title">Create “{query.trim()}”</span>
+					</button>
+				{:else}
+					<button
+						class="row ask"
+						class:selected={index === selected}
+						role="option"
+						aria-selected={index === selected}
+						data-testid="palette-ask"
+						onmousedown={(e) => {
+							e.preventDefault();
+							ask();
+						}}
+					>
+						<span class="icon">✦</span>
+						<span class="title">Ask AI “{query.trim()}”</span>
+					</button>
+				{/if}
 			{/each}
-			{#if canCreate}
-				<button
-					class="row create"
-					class:selected={selected === results.length}
-					role="option"
-					aria-selected={selected === results.length}
-					data-testid="palette-create"
-					onmousedown={(e) => {
-						e.preventDefault();
-						create();
-					}}
-				>
-					<span class="icon">＋</span>
-					<span class="title">Create “{query.trim()}”</span>
-				</button>
+			{#if asking}
+				<p class="none" data-testid="palette-asking">Asking…</p>
 			{/if}
-			{#if count === 0}
+			{#if answer !== null}
+				<div class="answer" data-testid="palette-answer">{answer}</div>
+			{/if}
+			{#if items.length === 0}
 				<p class="none">No documents. Type a name to create one.</p>
 			{/if}
 		</div>
@@ -171,8 +261,40 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.content .body {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1;
+	}
+	.snippet {
+		color: var(--tx3);
+		font-size: 12px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.label {
+		margin-left: auto;
+		color: var(--tx3);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
 	.create .title {
 		color: var(--acc-strong);
+	}
+	.ask .title {
+		color: var(--acc-strong);
+	}
+	.answer {
+		margin: 8px 10px;
+		padding: 10px 12px;
+		border-radius: 8px;
+		background: var(--accbg);
+		color: var(--tx);
+		font-size: 13px;
+		white-space: pre-wrap;
 	}
 	.none {
 		margin: 10px;
