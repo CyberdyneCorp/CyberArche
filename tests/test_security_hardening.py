@@ -48,6 +48,39 @@ def test_non_auth_endpoints_are_not_rate_limited(api):
         assert api.get("/api/v1/health").status_code == 200
 
 
+def test_refresh_endpoint_is_not_rate_limited(api):
+    """Regression (prod incident 2026-07-17): the SPA calls /session/refresh on
+    every load and after any 401, so it must NOT be throttled — only login is.
+    Throttling refresh 429'd normal use and locked users out."""
+    codes = set()
+    for _ in range(20):
+        codes.add(api.post("/api/v1/auth/session/refresh").status_code)
+    assert 429 not in codes  # never rate-limited (401 without a cookie is fine)
+
+
+def test_rate_limit_is_keyed_per_client_ip(api):
+    """Regression: the limiter must key on the real client IP (X-Forwarded-For),
+    not the shared proxy IP — otherwise one client's attempts 429 everyone."""
+    # Client A burns its budget.
+    a = {"X-Forwarded-For": "203.0.113.1"}
+    for _ in range(15):
+        api.post("/api/v1/auth/session", json={"email": "a@t.io", "password": "x"}, headers=a)
+    assert (
+        api.post(
+            "/api/v1/auth/session", json={"email": "a@t.io", "password": "x"}, headers=a
+        ).status_code
+        == 429
+    )
+    # Client B (different forwarded IP) is unaffected.
+    b = {"X-Forwarded-For": "203.0.113.2"}
+    assert (
+        api.post(
+            "/api/v1/auth/session", json={"email": "b@t.io", "password": "x"}, headers=b
+        ).status_code
+        != 429
+    )
+
+
 def test_rate_limited_429_still_carries_cors_headers(api):
     """Regression (prod incident 2026-07-17): the rate limiter must sit INSIDE
     CORS, so a short-circuited 429 still gets Access-Control-Allow-Origin —
