@@ -44,6 +44,27 @@
 
 	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
 
+	type TabId = 'connectors' | 'agent' | 'keys';
+	const TABS: { id: TabId; label: string; sub: string }[] = [
+		{
+			id: 'connectors',
+			label: 'Connectors',
+			sub: 'Attach external MCP servers and connect Google Workspace to give the agent extra tools. Credentials are encrypted at rest and never shown again.'
+		},
+		{
+			id: 'agent',
+			label: 'Agent',
+			sub: "Shape this workspace's agent — instructions, durable memory, reusable skills, and scheduled background runs."
+		},
+		{
+			id: 'keys',
+			label: 'API keys',
+			sub: 'Personal keys let external MCP clients (Claude, ChatGPT) act as you against CyberArche.'
+		}
+	];
+	let activeTab = $state<TabId>('connectors');
+	const activeSub = $derived(TABS.find((tab) => tab.id === activeTab)?.sub ?? '');
+
 	$effect(() => {
 		const vm = createConnectors(workspaceId);
 		connectors = vm;
@@ -120,12 +141,25 @@
 <div class="settings">
 	<header class="head">
 		<h1>Settings &amp; connectors</h1>
-		<p class="sub">
-			Attach external MCP servers to give the agent extra tools. Tools are namespaced by
-			connector; credentials are encrypted at rest and never shown again.
-		</p>
+		<p class="sub">{activeSub}</p>
 	</header>
 
+	<div class="tabs" role="tablist" aria-label="Settings sections">
+		{#each TABS as tab (tab.id)}
+			<button
+				class="tab"
+				class:active={activeTab === tab.id}
+				role="tab"
+				aria-selected={activeTab === tab.id}
+				data-testid="settings-tab-{tab.id}"
+				onclick={() => (activeTab = tab.id)}
+			>
+				{tab.label}
+			</button>
+		{/each}
+	</div>
+
+	{#if activeTab === 'keys'}
 	{#if apiKeys}
 		<section class="card">
 			<h2>API keys — connect Claude / ChatGPT to CyberArche</h2>
@@ -192,7 +226,9 @@
 			{/if}
 		</section>
 	{/if}
+	{/if}
 
+	{#if activeTab === 'agent'}
 	{#if persona}
 		<section class="card">
 			<h2>Agent instructions &amp; memory</h2>
@@ -364,7 +400,9 @@
 			{/if}
 		</section>
 	{/if}
+	{/if}
 
+	{#if activeTab === 'connectors'}
 	{#if google && google.status?.configured}
 		<section class="card">
 			<h2>Google Workspace</h2>
@@ -490,6 +528,7 @@
 				<p class="none" data-testid="no-connectors">No external MCP servers attached yet.</p>
 			{/each}
 		</section>
+	{/if}
 	{/if}
 </div>
 
@@ -668,6 +707,35 @@
 	.sub {
 		color: var(--tx2);
 		margin: 6px 0 0;
+		min-height: 40px; /* stable height as the per-tab text changes */
+	}
+	.tabs {
+		display: flex;
+		gap: 4px;
+		border-bottom: 1px solid var(--line);
+		margin-top: 8px;
+	}
+	.tab {
+		appearance: none;
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
+		padding: 8px 14px;
+		font: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--tx2);
+		cursor: pointer;
+		border-radius: var(--r-control) var(--r-control) 0 0;
+	}
+	.tab:hover {
+		color: var(--tx);
+		background: var(--bg1);
+	}
+	.tab.active {
+		color: var(--acc, #4f46e5);
+		border-bottom-color: var(--acc, #4f46e5);
 	}
 	.card {
 		margin-top: 22px;

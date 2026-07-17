@@ -31,6 +31,7 @@ test('create in UI (shown once), authenticate like an MCP client, revoke', async
 		localStorage.setItem('cyberarche.session', JSON.stringify(stored));
 	}, session);
 	await page.goto(`/w/${workspaceId}/settings`);
+	await page.getByTestId('settings-tab-keys').click(); // API keys live on their tab
 
 	// Create a key; the secret appears exactly once.
 	await page.getByTestId('apikey-name').fill('Claude Desktop');

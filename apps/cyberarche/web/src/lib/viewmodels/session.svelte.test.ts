@@ -7,11 +7,11 @@ const ACCESS = { access_token: 'access-1', token_type: 'bearer' };
 /** Mock fetch. The refresh token lives in an HttpOnly cookie the browser
  * manages, so it never appears in these bodies (F-004). */
 function mockFetch(status: number, body: unknown) {
-	return vi.fn(async () => ({
-		ok: status < 400,
-		status,
-		json: async () => body
-	})) as unknown as typeof fetch;
+	// Params are typed so callers can read .mock.calls[i][1] (the RequestInit);
+	// returned as a vitest Mock (vi.stubGlobal accepts it).
+	return vi.fn((_input?: unknown, _init?: RequestInit) =>
+		Promise.resolve({ ok: status < 400, status, json: async () => body })
+	);
 }
 
 const jwt = (payload: Record<string, unknown>) =>
@@ -32,7 +32,7 @@ describe('session ViewModel', () => {
 		// F-004: nothing sensitive is persisted to JS-readable storage.
 		expect(localStorage.getItem('cyberarche.session')).toBeNull();
 		// The login request opts into cookies so the Set-Cookie is stored.
-		const init = fetchMock.mock.calls[0][1] as RequestInit;
+		const init = fetchMock.mock.calls[0][1]!;
 		expect(init.credentials).toBe('include');
 	});
 
@@ -75,7 +75,7 @@ describe('session ViewModel', () => {
 
 		expect(await session.tryRefresh()).toBe(true);
 		expect(session.getAccessToken()).toBe('access-2');
-		const init = fetchMock.mock.calls[0][1] as RequestInit;
+		const init = fetchMock.mock.calls[0][1]!;
 		expect(init.credentials).toBe('include');
 		expect(init.body).toBeUndefined();
 	});
@@ -98,7 +98,8 @@ describe('session ViewModel', () => {
 		await session.logout();
 
 		expect(session.isAuthenticated).toBe(false);
-		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		const url = fetchMock.mock.calls[0][0] as string;
+		const init = fetchMock.mock.calls[0][1]!;
 		expect(url).toContain('/api/v1/auth/session/logout');
 		expect(init.credentials).toBe('include');
 	});

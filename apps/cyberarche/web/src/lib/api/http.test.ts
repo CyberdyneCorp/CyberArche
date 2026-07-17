@@ -108,7 +108,7 @@ describe('http core', () => {
 		});
 		configureAuth({ getAccessToken: () => token, tryRefresh });
 		const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: 1 }) }));
-		fetchMock.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) });
+		fetchMock.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) } as never);
 		vi.stubGlobal('fetch', fetchMock);
 
 		expect(await get('/api/v1/thing')).toEqual({ ok: 1 });
@@ -232,7 +232,7 @@ describe('http core', () => {
 			});
 			const blob = new Blob(['img']);
 			const fetchMock = vi.fn(async () => ({ ok: true, status: 200, blob: async () => blob }));
-			fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+			fetchMock.mockResolvedValueOnce({ ok: false, status: 401 } as never);
 			vi.stubGlobal('fetch', fetchMock);
 
 			expect(await getBlob('/api/v1/files/1')).toBe(blob);

@@ -5,7 +5,7 @@ import { createSharing } from './sharing.svelte';
 const LINK = (id: string, revoked = false) => ({
 	id,
 	document_id: 'doc-1',
-	permission: 'view',
+	permission: 'view' as const,
 	created_at: '2026-01-01T00:00:00Z',
 	expires_at: null,
 	revoked
