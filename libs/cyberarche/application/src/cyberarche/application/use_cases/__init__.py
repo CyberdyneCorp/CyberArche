@@ -26,6 +26,7 @@ from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseC
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.snapshots import SnapshotUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
+from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
 from cyberarche.application.use_cases.workspaces import WorkspaceUseCases
 
 
@@ -49,6 +50,7 @@ class UseCases:
     files: FileUseCases
     links: LinksUseCases
     search: SearchUseCases
+    workspace_chat: WorkspaceChatUseCases
     notifications: NotificationUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases

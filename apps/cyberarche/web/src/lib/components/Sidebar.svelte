@@ -8,6 +8,7 @@
 	import { session } from '$lib/viewmodels/session.svelte';
 	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
+	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
@@ -357,6 +358,14 @@
 		>
 	</div>
 
+	<button
+		class="chat-btn"
+		data-testid="open-workspace-chat"
+		onclick={() => workspaceChatOpen.open()}
+	>
+		<span aria-hidden="true">💬</span> Chat with workspace
+	</button>
+
 	{#if teamspaces && teamspaces.favorites.length > 0}
 		<nav class="section">
 			<h2>Favorites</h2>
@@ -695,6 +704,22 @@
 		flex: 0 0 auto;
 		justify-content: center;
 		padding: 6px 9px;
+	}
+	.chat-btn {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
+		padding: 6px 8px;
+		margin-bottom: 4px;
+		border-radius: var(--r-control);
+		color: var(--tx2);
+		font-weight: 500;
+		text-align: left;
+	}
+	.chat-btn:hover {
+		background: var(--bg2);
+		color: var(--tx);
 	}
 	.plus {
 		font-size: 12px;
