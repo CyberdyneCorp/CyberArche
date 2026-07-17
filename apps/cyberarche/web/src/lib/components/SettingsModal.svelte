@@ -49,14 +49,21 @@
 
 	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
 
-	type TabId = 'connectors' | 'agent' | 'keys';
+	type TabId = 'connectors' | 'integrations' | 'agent' | 'keys';
 	const TABS: { id: TabId; label: string; icon: string; title: string; sub: string }[] = [
 		{
 			id: 'connectors',
 			label: 'Connectors',
 			icon: '🔌',
 			title: 'Connectors',
-			sub: 'Attach external MCP servers and connect Google Workspace to give the agent extra tools. Credentials are encrypted at rest and never shown again.'
+			sub: 'Attach external MCP servers so the agent gains their tools. Credentials are encrypted at rest and never shown again.'
+		},
+		{
+			id: 'integrations',
+			label: 'Integrations',
+			icon: '🔗',
+			title: 'Integrations',
+			sub: 'Connect first-party services so the agent can use them — read-only, except creating Calendar events.'
 		},
 		{
 			id: 'agent',
@@ -436,46 +443,55 @@
 	{/if}
 	{/if}
 
-	{#if activeTab === 'connectors'}
-	{#if google && google.status?.configured}
+	{#if activeTab === 'integrations'}
 		<section class="card">
 			<h2>Google Workspace</h2>
-			<p class="hint">
-				Connect your Google account to give the agent Gmail, Calendar, and
-				Docs/Drive tools. The connection is personal to you; the agent drafts mail
-				and proposes meetings but never sends or books without your action.
-			</p>
-			{#if google.status.connected}
-				<div class="google-connected">
-					<span>Connected as <strong>{google.status.email}</strong></span>
-					<button class="save" onclick={() => google?.disconnect()}>Disconnect</button>
-				</div>
-				<p class="task-meta">Granted: {google.status.scopes.length} scope(s)</p>
+			{#if google && google.status?.configured}
+				<p class="hint">
+					Connect your Google account to give the agent read-only Gmail,
+					Calendar, Drive/Docs, Sheets, and Slides — plus the ability to create
+					Calendar events. The connection is personal to you.
+				</p>
+				{#if google.status.connected}
+					<div class="google-connected">
+						<span>Connected as <strong>{google.status.email}</strong></span>
+						<button class="save" onclick={() => google?.disconnect()}>Disconnect</button>
+					</div>
+					<p class="task-meta">Granted: {google.status.scopes.length} scope(s)</p>
+				{:else}
+					<div class="google-groups">
+						{#each GOOGLE_GROUPS as grp (grp.id)}
+							<label class="google-group">
+								<input
+									type="checkbox"
+									checked={googleGroups.includes(grp.id)}
+									onchange={() => toggleGroup(grp.id)}
+								/>
+								{grp.label}
+							</label>
+						{/each}
+					</div>
+					<button
+						class="save"
+						disabled={googleGroups.length === 0}
+						onclick={() => google?.connect(googleGroups)}>Connect Google</button
+					>
+				{/if}
+				{#if google.error}
+					<p class="error" role="alert">{google.error}</p>
+				{/if}
 			{:else}
-				<div class="google-groups">
-					{#each GOOGLE_GROUPS as grp (grp.id)}
-						<label class="google-group">
-							<input
-								type="checkbox"
-								checked={googleGroups.includes(grp.id)}
-								onchange={() => toggleGroup(grp.id)}
-							/>
-							{grp.label}
-						</label>
-					{/each}
-				</div>
-				<button
-					class="save"
-					disabled={googleGroups.length === 0}
-					onclick={() => google?.connect(googleGroups)}>Connect Google</button
-				>
-			{/if}
-			{#if google.error}
-				<p class="error" role="alert">{google.error}</p>
+				<p class="none" data-testid="google-not-configured">
+					Google Workspace isn't enabled on this deployment. An administrator
+					needs to configure the Google OAuth client
+					(<code>CYBERARCHE_GOOGLE_CLIENT_ID</code> / <code>_SECRET</code> /
+					<code>_REDIRECT_URI</code>) before it can be connected.
+				</p>
 			{/if}
 		</section>
 	{/if}
 
+	{#if activeTab === 'connectors'}
 	{#if connectors}
 		<section class="card">
 			<h2>Attach an MCP server</h2>
