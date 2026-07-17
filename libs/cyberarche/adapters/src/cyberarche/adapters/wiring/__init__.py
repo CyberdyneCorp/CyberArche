@@ -118,7 +118,7 @@ class WiringConfig:
     auth_client_id: str = ""
     auth_client_secret: str = ""
     auth_audience: str | None = None
-    auth_issuer: str | None = "cyberdyne-auth"
+    auth_issuer: str | None = None  # None => derive from auth_base_url (OIDC issuer)
     auth_tenant_claim: str = "org_id"
     rag_base_url: str = ""
     rag_api_token: str = ""
@@ -618,7 +618,10 @@ def _auth_config(config: WiringConfig) -> CyberdyneAuthConfig:
         client_id=config.auth_client_id,
         client_secret=config.auth_client_secret,
         audience=config.auth_audience,
-        issuer=config.auth_issuer,
+        # Default the expected issuer to the auth service's own base URL (its
+        # OIDC issuer). CyberdyneAuth issues iss = the discovery issuer = base
+        # URL; hard-coding a name would drift when it changes (see #47).
+        issuer=config.auth_issuer or config.auth_base_url.rstrip("/") or None,
         tenant_claim=config.auth_tenant_claim,
     )
 

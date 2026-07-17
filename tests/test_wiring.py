@@ -145,6 +145,23 @@ async def test_auth_stack_built_from_config():
     await container.aclose()
 
 
+def test_expected_issuer_defaults_to_the_auth_base_url():
+    """Regression: the expected iss must follow the auth service's URL (its OIDC
+    issuer), not a hard-coded name that drifts when the auth service changes it
+    and locks every client out (prod incident 2026-07-17)."""
+    from cyberarche.adapters.wiring import _auth_config
+
+    derived = _auth_config(
+        WiringConfig(auth_base_url="https://auth.test/", auth_issuer=None)
+    )
+    assert derived.issuer == "https://auth.test"  # trailing slash trimmed
+
+    explicit = _auth_config(
+        WiringConfig(auth_base_url="https://auth.test", auth_issuer="custom-iss")
+    )
+    assert explicit.issuer == "custom-iss"  # explicit override wins
+
+
 async def test_injected_token_port_still_gets_api_key_seam():
     container = await build(auth_base_url="")
     assert isinstance(container.token_port, CompositeTokenVerifier)
