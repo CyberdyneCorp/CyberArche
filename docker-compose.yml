@@ -56,6 +56,11 @@ services:
       CYBERARCHE_LLM_BASE_URL: ${CYBERARCHE_LLM_BASE_URL:-}
       CYBERARCHE_MEETINGS_URL: ${CYBERARCHE_MEETINGS_URL:-https://cyberflies.backend.coolify.cyberdynecorp.ai}
       CYBERARCHE_CONNECTOR_SECRET_KEY: ${CYBERARCHE_CONNECTOR_SECRET_KEY}
+      # Google Workspace connector — empty = disabled (the Integrations tab shows
+      # "not enabled"). Set all three to turn it on.
+      CYBERARCHE_GOOGLE_CLIENT_ID: ${CYBERARCHE_GOOGLE_CLIENT_ID:-}
+      CYBERARCHE_GOOGLE_CLIENT_SECRET: ${CYBERARCHE_GOOGLE_CLIENT_SECRET:-}
+      CYBERARCHE_GOOGLE_REDIRECT_URI: ${CYBERARCHE_GOOGLE_REDIRECT_URI:-}
       CYBERARCHE_CORS_ORIGINS: ${CYBERARCHE_CORS_ORIGINS:-["https://cyberarche.coolify.cyberdynecorp.ai"]}
     volumes:
       - blob_data:/data/blobs
