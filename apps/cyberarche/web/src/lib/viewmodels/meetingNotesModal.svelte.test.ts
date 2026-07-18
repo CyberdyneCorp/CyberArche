@@ -1,6 +1,44 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createMeetingNotes_VM } from './meetingNotesModal.svelte';
+import { createMeetingNotes_VM, groupRecordingsByMonth } from './meetingNotesModal.svelte';
+
+const REC = (id: string, captured_at: string | null) => ({
+	id,
+	status: 'completed',
+	captured_at,
+	headline: id
+});
+
+describe('groupRecordingsByMonth', () => {
+	it('groups by capture month, newest month and recording first', () => {
+		const groups = groupRecordingsByMonth([
+			REC('may-a', '2026-05-10T09:00:00Z'),
+			REC('jun-old', '2026-06-02T09:00:00Z'),
+			REC('jun-new', '2026-06-28T17:00:00Z')
+		]);
+
+		expect(groups.map((g) => g.key)).toEqual(['2026-06', '2026-05']);
+		expect(groups[0]).toMatchObject({ year: 2026, month0: 5 });
+		// newest recording first within the month
+		expect(groups[0].recordings.map((r) => r.id)).toEqual(['jun-new', 'jun-old']);
+		expect(groups[1].recordings.map((r) => r.id)).toEqual(['may-a']);
+	});
+
+	it('puts undated/unparseable recordings in a trailing group', () => {
+		const groups = groupRecordingsByMonth([
+			REC('none', null),
+			REC('jun', '2026-06-15T12:00:00Z'),
+			REC('bad', 'not-a-date')
+		]);
+
+		expect(groups.map((g) => g.key)).toEqual(['2026-06', 'undated']);
+		expect(groups[1].recordings.map((r) => r.id).sort()).toEqual(['bad', 'none']);
+	});
+
+	it('returns nothing for no recordings', () => {
+		expect(groupRecordingsByMonth([])).toEqual([]);
+	});
+});
 
 /** Replies with `body` while capturing request shapes for assertions. */
 function capturingFetch(body: unknown) {
