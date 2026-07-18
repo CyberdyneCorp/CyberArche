@@ -63,6 +63,7 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
+from cyberarche.application.use_cases.meeting_notes import MeetingNotesUseCases
 from cyberarche.application.use_cases.notifications import (
     NotificationDigestUseCases,
     NotificationDispatcher,
@@ -311,6 +312,9 @@ def use_cases(
             access,
             clock,
             ids,
+        ),
+        meeting_notes=MeetingNotesUseCases(
+            meetings, llm, document_use_cases, agent_use_cases, ids
         ),
         persona=persona,
         google=google,

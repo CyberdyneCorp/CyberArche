@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import GraphModal from '$lib/components/GraphModal.svelte';
+	import MeetingNotesModal from '$lib/components/MeetingNotesModal.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import WorkspaceChat from '$lib/components/WorkspaceChat.svelte';
@@ -12,6 +13,7 @@
 	import { session } from '$lib/viewmodels/session.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
+	import { meetingNotesModal } from '$lib/viewmodels/meetingNotesModal.svelte';
 	import { createTeamspaces, type TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
 	import { workspaces } from '$lib/viewmodels/workspaces.svelte';
 
@@ -85,6 +87,9 @@
 	{/if}
 	{#if workspaceChatOpen.isOpen}
 		<WorkspaceChat {workspaceId} />
+	{/if}
+	{#if meetingNotesModal.isOpen}
+		<MeetingNotesModal {workspaceId} />
 	{/if}
 {/if}
 

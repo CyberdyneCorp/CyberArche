@@ -77,6 +77,7 @@ from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
+from cyberarche.application.use_cases.meeting_notes import MeetingNotesUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -316,6 +317,9 @@ def _build_use_cases(
             access,
             clock,
             ids,
+        ),
+        meeting_notes=MeetingNotesUseCases(
+            meetings, llm, document_use_cases, agent_use_cases, ids
         ),
         google=google,
         persona=persona,
