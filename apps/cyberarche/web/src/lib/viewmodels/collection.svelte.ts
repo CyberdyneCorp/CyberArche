@@ -163,6 +163,18 @@ export function createCollection(collectionId: string) {
 	const selectProperties = (): PropertyDef[] =>
 		collection?.properties.filter((p) => p.type === 'select') ?? [];
 
+	/** Date properties available to anchor a Calendar view on. */
+	const dateProperties = (): PropertyDef[] =>
+		collection?.properties.filter((p) => p.type === 'date') ?? [];
+
+	/** The date property the current Calendar is anchored on, if any. */
+	const dateByProperty = (): PropertyDef | undefined => {
+		const id = currentView()?.date_by;
+		if (!id) return undefined;
+		const property = collection?.properties.find((p) => p.id === id);
+		return property?.type === 'date' ? property : undefined;
+	};
+
 	function replaceView(updated: View) {
 		if (!collection) return;
 		collection = {
@@ -265,6 +277,27 @@ export function createCollection(collectionId: string) {
 		/** Move a card between Board columns by setting its grouping property. */
 		setRowGroup(rowId: string, propertyId: string, value: string | null) {
 			return writeCell(rowId, propertyId, value);
+		},
+
+		// ---- Calendar date anchoring ----
+		get dateProperties() {
+			return dateProperties();
+		},
+		get dateByProperty() {
+			return dateByProperty();
+		},
+
+		/** Set the Calendar's date property (null clears it). Updates the view
+		 * in-memory immediately so rows re-place without a round-trip. */
+		async setDateBy(propertyId: string | null) {
+			const view = currentView();
+			if (!view) return;
+			replaceView({ ...view, date_by: propertyId });
+			try {
+				await updateView(collectionId, view.id, { date_by: propertyId });
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to set date property';
+			}
 		},
 
 		async addRow(title = ''): Promise<CollectionRow | null> {

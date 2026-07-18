@@ -2,6 +2,7 @@
 	import type { PropertyType, ViewKind } from '$lib/api/collections';
 	import type { CollectionVM } from '$lib/viewmodels/collection.svelte';
 	import CollectionBoard from './CollectionBoard.svelte';
+	import CollectionCalendar from './CollectionCalendar.svelte';
 	import CollectionCell from './CollectionCell.svelte';
 	import CollectionFilterMenu from './CollectionFilterMenu.svelte';
 	import CollectionGallery from './CollectionGallery.svelte';
@@ -143,7 +144,7 @@
 	{:else if vm.currentView?.kind === 'gallery'}
 		<CollectionGallery {vm} {onOpenRow} />
 	{:else if vm.currentView?.kind === 'calendar'}
-		<p class="placeholder">The calendar view is coming soon.</p>
+		<CollectionCalendar {vm} {onOpenRow} />
 	{:else}
 		<div class="table-wrap">
 			<table class="table" data-testid="collection-table">
@@ -386,10 +387,6 @@
 		background: var(--acc);
 		color: #fff;
 		font-weight: 500;
-	}
-	.placeholder {
-		color: var(--tx3);
-		padding: 24px 0;
 	}
 	.error {
 		margin-top: 10px;
