@@ -46,6 +46,7 @@ class McpSettings(BaseSettings):
     # MCP server shares the wiring/composition root, which fails closed without
     # it (security audit F-001).
     connector_secret_key: str = ""
+    notification_webhook_url: str = ""
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -65,6 +66,7 @@ class McpSettings(BaseSettings):
             llm_api_key=self.llm_api_key,
             llm_base_url=self.llm_base_url,
             connector_secret_key=self.connector_secret_key,
+            notification_webhook_url=self.notification_webhook_url,
         )
 
     def allowed_hosts(self) -> list[str] | None:

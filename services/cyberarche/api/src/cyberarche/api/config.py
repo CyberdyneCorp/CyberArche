@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # Cyberflies meeting transcripts (agent meeting tools). Called with the
     # caller's own access token; empty disables the tools.
     meetings_url: str = "https://cyberflies.backend.coolify.cyberdynecorp.ai"
+    # Outbound notification webhook (Slack-style / HTTP receiver). Empty = no
+    # channel, so notifications stay in-app only (today's behaviour).
+    notification_webhook_url: str = ""
     # DAO backend for agent web search + YouTube tools. Called with the caller's
     # own forwarded access token; empty disables the tools.
     dao_url: str = "https://dao.backend.coolify.cyberdynecorp.ai"
@@ -72,6 +75,7 @@ class Settings(BaseSettings):
             image_base_url=self.image_base_url,
             interpreter_base_url=self.interpreter_url,
             meetings_base_url=self.meetings_url,
+            notification_webhook_url=self.notification_webhook_url,
             dao_base_url=self.dao_url,
             google_client_id=self.google_client_id,
             google_client_secret=self.google_client_secret,

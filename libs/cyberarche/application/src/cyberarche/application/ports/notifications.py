@@ -1,11 +1,11 @@
-"""Notification repository port (notifications spec)."""
+"""Notification ports (notifications spec)."""
 
 from __future__ import annotations
 
 from typing import Protocol
 
 from cyberarche.domain.ids import NotificationId, TenantId, UserId
-from cyberarche.domain.notifications import Notification
+from cyberarche.domain.notifications import Notification, NotificationPreferences
 
 
 class NotificationRepository(Protocol):
@@ -26,3 +26,27 @@ class NotificationRepository(Protocol):
         ...
 
     async def mark_all_read(self, tenant_id: TenantId, user_id: UserId) -> None: ...
+
+
+class NotificationPreferencesRepository(Protocol):
+    async def get(
+        self, tenant_id: TenantId, user_id: UserId
+    ) -> NotificationPreferences | None:
+        """The user's saved preferences, or None if they never set any."""
+        ...
+
+    async def upsert(self, prefs: NotificationPreferences) -> None:
+        """Insert or replace the user's preferences."""
+        ...
+
+
+class NotificationChannelPort(Protocol):
+    """An outbound delivery channel (e.g. webhook, email). Built only when the
+    deployment configures it; a channel failure must never break the in-app
+    store, so the dispatcher swallows exceptions raised here."""
+
+    channel: str
+
+    async def send(
+        self, notification: Notification, *, recipient_email: str | None
+    ) -> None: ...

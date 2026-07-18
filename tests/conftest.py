@@ -44,6 +44,7 @@ from cyberarche.application.testing.fakes import (
     ScriptedLLM,
     InMemoryInferredLinkRepository,
     InMemoryNotificationRepository,
+    InMemoryNotificationPreferencesRepository,
     InMemoryTemplateRepository,
     ScriptedMeetings,
     ScriptedWebMedia,
@@ -62,7 +63,11 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
-from cyberarche.application.use_cases.notifications import NotificationUseCases
+from cyberarche.application.use_cases.notifications import (
+    NotificationDispatcher,
+    NotificationPreferencesUseCases,
+    NotificationUseCases,
+)
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
 from cyberarche.application.use_cases.templates import TemplateUseCases
@@ -237,6 +242,8 @@ def use_cases(
         connector_repo, mcp_client, secret_box, access, clock, ids
     )
     notification_repo = InMemoryNotificationRepository()
+    notification_prefs_repo = InMemoryNotificationPreferencesRepository()
+    dispatcher = NotificationDispatcher(notification_repo, notification_prefs_repo)
     sharing = SharingUseCases(
         documents,
         memberships,
@@ -245,7 +252,7 @@ def use_cases(
         access,
         clock,
         ids,
-        notifications=notification_repo,
+        notifications=dispatcher,
     )
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspace_repo, folder_repo
@@ -299,7 +306,7 @@ def use_cases(
             scheduled_repo,
             agent_use_cases,
             document_use_cases,
-            notification_repo,
+            dispatcher,
             access,
             clock,
             ids,
@@ -327,6 +334,7 @@ def use_cases(
         search=search,
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notification_repo),
+        notification_prefs=NotificationPreferencesUseCases(notification_prefs_repo),
         templates=TemplateUseCases(
             InMemoryTemplateRepository(),
             document_use_cases,

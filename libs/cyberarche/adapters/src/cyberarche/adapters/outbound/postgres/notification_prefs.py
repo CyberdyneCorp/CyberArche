@@ -1,0 +1,59 @@
+"""NotificationPreferencesRepository adapter over the notification_preferences
+table (one row per tenant+user; absent row => defaults)."""
+
+from __future__ import annotations
+
+import asyncpg
+
+from cyberarche.domain.ids import TenantId, UserId
+from cyberarche.domain.notifications import NotificationPreferences
+
+
+def _from_row(row: asyncpg.Record) -> NotificationPreferences:
+    return NotificationPreferences(
+        tenant_id=TenantId(row["tenant_id"]),
+        user_id=UserId(row["user_id"]),
+        email_enabled=row["email_enabled"],
+        push_enabled=row["push_enabled"],
+        mentions_enabled=row["mentions_enabled"],
+        agent_results_enabled=row["agent_results_enabled"],
+    )
+
+
+class PostgresNotificationPreferencesRepository:
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def get(
+        self, tenant_id: TenantId, user_id: UserId
+    ) -> NotificationPreferences | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT * FROM notification_preferences
+            WHERE tenant_id = $1 AND user_id = $2
+            """,
+            tenant_id,
+            user_id,
+        )
+        return _from_row(row) if row else None
+
+    async def upsert(self, prefs: NotificationPreferences) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO notification_preferences
+                (tenant_id, user_id, email_enabled, push_enabled,
+                 mentions_enabled, agent_results_enabled)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+                email_enabled = EXCLUDED.email_enabled,
+                push_enabled = EXCLUDED.push_enabled,
+                mentions_enabled = EXCLUDED.mentions_enabled,
+                agent_results_enabled = EXCLUDED.agent_results_enabled
+            """,
+            prefs.tenant_id,
+            prefs.user_id,
+            prefs.email_enabled,
+            prefs.push_enabled,
+            prefs.mentions_enabled,
+            prefs.agent_results_enabled,
+        )

@@ -285,3 +285,282 @@ async def test_postgres_mark_all_read_binds_tenant_and_recipient():
     assert query.startswith("UPDATE notifications SET read = TRUE")
     assert "read = FALSE" in query
     assert args == ("acme", "bob")
+
+
+# --- Preferences + dispatcher (domain + use case + dispatch) ----------------
+
+from cyberarche.application.kernel import CallerContext
+from cyberarche.application.testing.fakes import (
+    InMemoryNotificationPreferencesRepository,
+    InMemoryNotificationRepository,
+)
+from cyberarche.application.use_cases.notifications import (
+    NotificationDispatcher,
+    NotificationPreferencesUseCases,
+)
+from cyberarche.domain.notifications import NotificationPreferences
+
+BOB = CallerContext(user_id=UserId("bob"), tenant_id=TenantId("acme"))
+
+
+class RecordingChannel:
+    """NotificationChannelPort fake: records what it was asked to deliver."""
+
+    def __init__(self, channel: str = "webhook") -> None:
+        self.channel = channel
+        self.sent: list[Notification] = []
+
+    async def send(self, notification, *, recipient_email=None) -> None:
+        self.sent.append(notification)
+
+
+class BrokenChannel:
+    channel = "webhook"
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def send(self, notification, *, recipient_email=None) -> None:
+        self.attempts += 1
+        raise RuntimeError("channel is down")
+
+
+async def test_default_preferences_have_in_app_and_mentions_on():
+    prefs = NotificationPreferencesUseCases(
+        InMemoryNotificationPreferencesRepository()
+    )
+
+    resolved = await prefs.get(BOB)
+
+    assert resolved.mentions_enabled is True
+    assert resolved.agent_results_enabled is True
+    assert resolved.email_enabled is False
+    assert resolved.push_enabled is False
+    # In-app is always on — it is not a stored field.
+    assert not hasattr(resolved, "in_app_enabled")
+
+
+async def test_update_preferences_persists():
+    prefs = NotificationPreferencesUseCases(
+        InMemoryNotificationPreferencesRepository()
+    )
+
+    await prefs.update(
+        BOB,
+        email_enabled=True,
+        push_enabled=False,
+        mentions_enabled=False,
+        agent_results_enabled=True,
+    )
+    resolved = await prefs.get(BOB)
+
+    assert resolved.email_enabled is True
+    assert resolved.mentions_enabled is False
+    assert resolved.agent_results_enabled is True
+
+
+async def test_dispatcher_always_stores_in_app_even_without_channels():
+    repo = InMemoryNotificationRepository()
+    dispatcher = NotificationDispatcher(
+        repo, InMemoryNotificationPreferencesRepository()
+    )
+
+    await dispatcher.notify(make_notification())
+
+    (stored,) = await repo.list_for_user(TenantId("acme"), UserId("bob"))
+    assert stored == make_notification()
+
+
+async def test_dispatcher_delivers_to_an_enabled_channel():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"), user_id=UserId("bob"), email_enabled=True
+        )
+    )
+    channel = RecordingChannel()
+    dispatcher = NotificationDispatcher(repo, prefs, [channel])
+
+    await dispatcher.notify(make_notification())
+
+    assert len(channel.sent) == 1
+    # In-app store still happened.
+    assert len(await repo.list_for_user(TenantId("acme"), UserId("bob"))) == 1
+
+
+async def test_dispatcher_skips_a_channel_the_user_disabled():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    # email_enabled defaults to False -> the webhook channel (email toggle) is off.
+    channel = RecordingChannel()
+    dispatcher = NotificationDispatcher(repo, prefs, [channel])
+
+    await dispatcher.notify(make_notification())
+
+    assert channel.sent == []
+    assert len(await repo.list_for_user(TenantId("acme"), UserId("bob"))) == 1
+
+
+async def test_dispatcher_skips_a_disabled_kind():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("bob"),
+            email_enabled=True,
+            mentions_enabled=False,
+        )
+    )
+    channel = RecordingChannel()
+    dispatcher = NotificationDispatcher(repo, prefs, [channel])
+
+    await dispatcher.notify(make_notification(kind="mention"))
+
+    assert channel.sent == []
+
+
+async def test_unconfigured_channel_is_a_noop_but_still_stored():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"), user_id=UserId("bob"), email_enabled=True
+        )
+    )
+    # No channels configured (empty) — like today's deployment.
+    dispatcher = NotificationDispatcher(repo, prefs, [])
+
+    await dispatcher.notify(make_notification())
+
+    assert len(await repo.list_for_user(TenantId("acme"), UserId("bob"))) == 1
+
+
+async def test_a_channel_that_raises_does_not_break_the_store():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"), user_id=UserId("bob"), email_enabled=True
+        )
+    )
+    channel = BrokenChannel()
+    dispatcher = NotificationDispatcher(repo, prefs, [channel])
+
+    # Must not raise.
+    await dispatcher.notify(make_notification())
+
+    assert channel.attempts == 1
+    assert len(await repo.list_for_user(TenantId("acme"), UserId("bob"))) == 1
+
+
+# --- Preferences HTTP endpoints ---------------------------------------------
+
+
+def test_preferences_default_over_http(api):
+    prefs = api.get("/api/v1/notification-preferences", headers=auth("bob-token"))
+    assert prefs.status_code == 200
+    assert prefs.json() == {
+        "email_enabled": False,
+        "push_enabled": False,
+        "mentions_enabled": True,
+        "agent_results_enabled": True,
+    }
+
+
+def test_update_preferences_over_http_persists(api):
+    body = {
+        "email_enabled": True,
+        "push_enabled": True,
+        "mentions_enabled": False,
+        "agent_results_enabled": True,
+    }
+    updated = api.put(
+        "/api/v1/notification-preferences", json=body, headers=auth("bob-token")
+    )
+    assert updated.status_code == 200
+    assert updated.json() == body
+
+    # A fresh read returns the persisted values.
+    reread = api.get("/api/v1/notification-preferences", headers=auth("bob-token"))
+    assert reread.json() == body
+
+
+def test_preferences_endpoints_require_auth(api):
+    assert api.get("/api/v1/notification-preferences").status_code == 401
+    assert api.put("/api/v1/notification-preferences", json={}).status_code == 401
+
+
+# --- PostgresNotificationPreferencesRepository ------------------------------
+
+from cyberarche.adapters.outbound.postgres.notification_prefs import (
+    PostgresNotificationPreferencesRepository,
+)
+
+
+class FakePrefsPool(FakePool):
+    """FakePool with fetchrow, for the single-row preferences read."""
+
+    def __init__(self, *, row: dict | None = None) -> None:
+        super().__init__()
+        self.row = row
+
+    async def fetchrow(self, query: str, *args: object):
+        self.calls.append((" ".join(query.split()), args))
+        return self.row
+
+
+async def test_postgres_prefs_get_returns_none_when_absent():
+    pool = FakePrefsPool(row=None)
+    result = await PostgresNotificationPreferencesRepository(pool).get(
+        TenantId("acme"), UserId("bob")
+    )
+
+    assert result is None
+    _, args = pool.calls[0]
+    assert args == ("acme", "bob")
+
+
+async def test_postgres_prefs_get_maps_row():
+    pool = FakePrefsPool(
+        row={
+            "tenant_id": "acme",
+            "user_id": "bob",
+            "email_enabled": True,
+            "push_enabled": False,
+            "mentions_enabled": True,
+            "agent_results_enabled": False,
+        }
+    )
+    result = await PostgresNotificationPreferencesRepository(pool).get(
+        TenantId("acme"), UserId("bob")
+    )
+
+    assert result == NotificationPreferences(
+        tenant_id=TenantId("acme"),
+        user_id=UserId("bob"),
+        email_enabled=True,
+        push_enabled=False,
+        mentions_enabled=True,
+        agent_results_enabled=False,
+    )
+
+
+async def test_postgres_prefs_upsert_binds_every_column():
+    pool = FakePrefsPool()
+    await PostgresNotificationPreferencesRepository(pool).upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("bob"),
+            email_enabled=True,
+            push_enabled=True,
+            mentions_enabled=False,
+            agent_results_enabled=True,
+        )
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("INSERT INTO notification_preferences")
+    assert "ON CONFLICT (tenant_id, user_id) DO UPDATE" in query
+    assert args == ("acme", "bob", True, True, False, True)

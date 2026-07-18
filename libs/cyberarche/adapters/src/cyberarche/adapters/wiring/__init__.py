@@ -36,7 +36,11 @@ from cyberarche.application.ports.images import ImageGenerationPort
 from cyberarche.application.ports.inferred_links import InferredLinkRepository
 from cyberarche.application.ports.meetings import MeetingsPort
 from cyberarche.application.ports.web_media import WebMediaPort
-from cyberarche.application.ports.notifications import NotificationRepository
+from cyberarche.application.ports.notifications import (
+    NotificationChannelPort,
+    NotificationPreferencesRepository,
+    NotificationRepository,
+)
 from cyberarche.application.ports.agent_memory import (
     AgentMemoryRepository,
     CustomInstructionsRepository,
@@ -78,7 +82,11 @@ from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
-from cyberarche.application.use_cases.notifications import NotificationUseCases
+from cyberarche.application.use_cases.notifications import (
+    NotificationDispatcher,
+    NotificationPreferencesUseCases,
+    NotificationUseCases,
+)
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
 from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
@@ -153,6 +161,10 @@ class WiringConfig:
     # Redis; unset falls back to single-process in-memory implementations.
     redis_url: str = ""
     blob_dir: str = ""  # filesystem blob storage root; empty = in-memory
+    # Outbound notification webhook (Slack-style incoming webhook / HTTP receiver).
+    # Empty = no channel is built, so notifications stay in-app only (today's
+    # behaviour). Set it to fan enabled notifications out to the URL.
+    notification_webhook_url: str = ""
 
 
 @dataclass(slots=True)
@@ -221,6 +233,8 @@ def _build_use_cases(
     api_keys: ApiKeyRepository,
     inferred_links: InferredLinkRepository,
     notifications: NotificationRepository,
+    notification_prefs: NotificationPreferencesRepository,
+    dispatcher: NotificationDispatcher,
     templates: TemplateRepository,
     custom_instructions: CustomInstructionsRepository,
     agent_memories: AgentMemoryRepository,
@@ -294,7 +308,7 @@ def _build_use_cases(
             scheduled_agents,
             agent_use_cases,
             document_use_cases,
-            notifications,
+            dispatcher,
             access,
             clock,
             ids,
@@ -309,7 +323,7 @@ def _build_use_cases(
             access,
             clock,
             ids,
-            notifications=notifications,
+            notifications=dispatcher,
         ),
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
         teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
@@ -328,6 +342,7 @@ def _build_use_cases(
         search=search,
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notifications),
+        notification_prefs=NotificationPreferencesUseCases(notification_prefs),
         skills=AgentSkillUseCases(agent_skills, access, clock, ids),
         templates=TemplateUseCases(
             templates,
@@ -429,6 +444,20 @@ def _build_google_port(config: WiringConfig, shared_http):
     )
 
 
+def _build_notification_channels(
+    config: WiringConfig, shared_http
+) -> tuple[NotificationChannelPort, ...]:
+    """The configured outbound notification channels. Empty when nothing is
+    configured, so notifications stay in-app only (today's behaviour)."""
+    if not config.notification_webhook_url:
+        return ()
+    from cyberarche.adapters.outbound.notifications.webhook import (
+        WebhookNotificationChannel,
+    )
+
+    return (WebhookNotificationChannel(config.notification_webhook_url, shared_http()),)
+
+
 @dataclass(slots=True)
 class _Repositories:
     workspaces: WorkspaceRepository
@@ -447,6 +476,7 @@ class _Repositories:
     folders: FolderRepository
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
+    notification_prefs: NotificationPreferencesRepository
     templates: TemplateRepository
     custom_instructions: CustomInstructionsRepository
     agent_memories: AgentMemoryRepository
@@ -491,6 +521,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.notifications import (
         PostgresNotificationRepository,
     )
+    from cyberarche.adapters.outbound.postgres.notification_prefs import (
+        PostgresNotificationPreferencesRepository,
+    )
     from cyberarche.adapters.outbound.postgres.templates import (
         PostgresTemplateRepository,
     )
@@ -528,6 +561,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         folders=PostgresFolderRepository(pool),
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
+        notification_prefs=PostgresNotificationPreferencesRepository(pool),
         templates=PostgresTemplateRepository(pool),
         custom_instructions=PostgresCustomInstructionsRepository(pool),
         agent_memories=PostgresAgentMemoryRepository(pool),
@@ -557,6 +591,7 @@ def _memory_repositories() -> _Repositories:
         folders=fakes.InMemoryFolderRepository(),
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
+        notification_prefs=fakes.InMemoryNotificationPreferencesRepository(),
         templates=fakes.InMemoryTemplateRepository(),
         custom_instructions=fakes.InMemoryCustomInstructionsRepository(),
         agent_memories=fakes.InMemoryAgentMemoryRepository(),
@@ -825,6 +860,10 @@ async def build_container(
         repos.comments,
     )
     crdt_engine = PycrdtEngine()
+    channels = _build_notification_channels(config, shared_http)
+    dispatcher = NotificationDispatcher(
+        repos.notifications, repos.notification_prefs, channels
+    )
     return Container(
         config=config,
         token_port=token_port,
@@ -882,6 +921,8 @@ async def build_container(
             repos.api_keys,
             repos.inferred_links,
             repos.notifications,
+            repos.notification_prefs,
+            dispatcher,
             repos.templates,
             repos.custom_instructions,
             repos.agent_memories,

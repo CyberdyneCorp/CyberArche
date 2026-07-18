@@ -36,6 +36,7 @@ class WorkerSettings(BaseSettings):
     connector_secret_key: str = ""
     redis_url: str = ""
     blob_dir: str = "./data/blobs"
+    notification_webhook_url: str = ""
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -56,6 +57,7 @@ class WorkerSettings(BaseSettings):
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,
+            notification_webhook_url=self.notification_webhook_url,
         )
 
 
