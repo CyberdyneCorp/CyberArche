@@ -6,6 +6,7 @@ from typing import Protocol
 
 from cyberarche.domain.documents import Document
 from cyberarche.domain.ids import (
+    CollectionId,
     FolderId,
     DocumentId,
     SnapshotId,
@@ -71,6 +72,12 @@ class DocumentRepository(Protocol):
         self, tenant_id: TenantId, folder_id: FolderId
     ) -> list[Document]:
         """Non-trashed documents grouped directly under a folder."""
+        ...
+
+    async def list_by_collection(
+        self, tenant_id: TenantId, collection_id: CollectionId
+    ) -> list[Document]:
+        """Non-trashed rows (documents) belonging to a collection."""
         ...
 
     async def update(self, document: Document) -> None: ...

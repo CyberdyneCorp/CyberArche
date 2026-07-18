@@ -12,6 +12,9 @@ from cyberarche.adapters.inbound.http.routers.agent_skills import (
 from cyberarche.adapters.inbound.http.routers.api_keys import router as api_keys_router
 from cyberarche.adapters.inbound.http.routers.auth import router as auth_router
 from cyberarche.adapters.inbound.http.routers.chat import router as chat_router
+from cyberarche.adapters.inbound.http.routers.collections import (
+    router as collections_router,
+)
 from cyberarche.adapters.inbound.http.routers.connectors import (
     router as connectors_router,
 )
@@ -58,6 +61,7 @@ all_routers = [
     connectors_router,
     sharing_router,
     teamspaces_router,
+    collections_router,
     folders_router,
     files_router,
     notifications_router,

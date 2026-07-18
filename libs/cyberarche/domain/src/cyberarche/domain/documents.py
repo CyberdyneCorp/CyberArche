@@ -7,11 +7,12 @@ siblings is an explicit integer position. Deletion is soft (trash).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from cyberarche.domain.errors import ValidationFailed
 from cyberarche.domain.ids import (
+    CollectionId,
     DocumentId,
     FolderId,
     TeamspaceId,
@@ -42,6 +43,10 @@ class Document:
     teamspace_id: TeamspaceId | None = None
     # Optional folder grouping this document (add-folders-and-private).
     folder_id: FolderId | None = None
+    # Optional collection this document is a row of (collections-foundation).
+    collection_id: CollectionId | None = None
+    # Typed property values keyed by PropertyDef.id, when this is a row.
+    properties: dict[str, object] = field(default_factory=dict)
 
     @staticmethod
     def create(
@@ -55,6 +60,7 @@ class Document:
         created_by: UserId,
         created_at: datetime,
         teamspace_id: TeamspaceId | None = None,
+        collection_id: CollectionId | None = None,
     ) -> "Document":
         return Document(
             id=id,
@@ -67,10 +73,17 @@ class Document:
             created_at=created_at,
             updated_at=created_at,
             teamspace_id=teamspace_id,
+            collection_id=collection_id,
         )
 
     def retitle(self, title: str, *, now: datetime) -> "Document":
         return replace(self, title=_valid_title(title), updated_at=now)
+
+    def with_properties(
+        self, properties: dict[str, object], *, now: datetime
+    ) -> "Document":
+        """Replace this row's stored property values (collections-foundation)."""
+        return replace(self, properties=dict(properties), updated_at=now)
 
     def moved(
         self, *, parent_id: DocumentId | None, position: int, now: datetime

@@ -24,6 +24,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryApiKeyRepository,
     InMemoryCustomInstructionsRepository,
     InMemoryBlobStorage,
+    InMemoryCollectionRepository,
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
@@ -59,6 +60,7 @@ from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUse
 from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
+from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
@@ -328,6 +330,14 @@ def use_cases(
             teamspace_repo, documents, folder_repo, access, clock, ids
         ),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
+        collections=CollectionUseCases(
+            InMemoryCollectionRepository(),
+            documents,
+            document_use_cases,
+            access,
+            clock,
+            ids,
+        ),
         folders=FolderUseCases(folder_repo, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
         links=LinksUseCases(

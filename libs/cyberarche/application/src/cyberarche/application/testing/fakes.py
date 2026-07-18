@@ -28,9 +28,11 @@ from cyberarche.application.ports.rag import (
     RagTask,
     RagTaskStatus,
 )
+from cyberarche.domain.collections import Collection
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotAuthenticated, NotFound
 from cyberarche.domain.ids import (
+    CollectionId,
     DocumentId,
     FolderId,
     SnapshotId,
@@ -188,6 +190,18 @@ class InMemoryDocumentRepository:
             for d in self._items.values()
             if d.tenant_id == tenant_id
             and d.teamspace_id == teamspace_id
+            and not d.trashed
+        ]
+        return sorted(matches, key=lambda d: d.position)
+
+    async def list_by_collection(
+        self, tenant_id: TenantId, collection_id: CollectionId
+    ) -> list[Document]:
+        matches = [
+            d
+            for d in self._items.values()
+            if d.tenant_id == tenant_id
+            and d.collection_id == collection_id
             and not d.trashed
         ]
         return sorted(matches, key=lambda d: d.position)
@@ -1360,6 +1374,42 @@ class InMemoryFavoriteRepository:
 
     async def is_favorite(self, user_id: UserId, document_id: DocumentId) -> bool:
         return (user_id, document_id) in self._items
+
+
+class InMemoryCollectionRepository:
+    def __init__(self) -> None:
+        self._items: dict[CollectionId, Collection] = {}
+
+    async def add(self, collection: Collection) -> None:
+        self._items[collection.id] = collection
+
+    async def get(
+        self, tenant_id: TenantId, collection_id: CollectionId
+    ) -> Collection | None:
+        collection = self._items.get(collection_id)
+        if collection is None or collection.tenant_id != tenant_id:
+            return None
+        return collection
+
+    async def list_in_workspace(
+        self, tenant_id: TenantId, workspace_id: WorkspaceId
+    ) -> list[Collection]:
+        matches = [
+            c
+            for c in self._items.values()
+            if c.tenant_id == tenant_id and c.workspace_id == workspace_id
+        ]
+        return sorted(matches, key=lambda c: c.created_at)
+
+    async def update(self, collection: Collection) -> None:
+        self._items[collection.id] = collection
+
+    async def delete(
+        self, tenant_id: TenantId, collection_id: CollectionId
+    ) -> None:
+        collection = self._items.get(collection_id)
+        if collection is not None and collection.tenant_id == tenant_id:
+            del self._items[collection_id]
 
 
 class StaticTokenPort:

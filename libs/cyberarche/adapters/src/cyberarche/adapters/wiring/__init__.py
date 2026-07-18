@@ -21,6 +21,7 @@ from cyberarche.application.ports.identity import (
     ServiceTokenPort,
     TokenPort,
 )
+from cyberarche.application.ports.collections import CollectionRepository
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
     MembershipRepository,
@@ -74,6 +75,7 @@ from cyberarche.application.use_cases.api_keys import (
     ApiKeyUseCases,
     CompositeTokenVerifier,
 )
+from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
@@ -238,6 +240,7 @@ def _build_use_cases(
     comments: CommentRepository,
     teamspaces: TeamspaceRepository,
     favorites: FavoriteRepository,
+    collections: CollectionRepository,
     folders: FolderRepository,
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
@@ -345,6 +348,9 @@ def _build_use_cases(
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
         teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
         favorites=FavoriteUseCases(favorites, documents, access),
+        collections=CollectionUseCases(
+            collections, documents, document_use_cases, access, clock, ids
+        ),
         folders=FolderUseCases(folders, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
         links=LinksUseCases(
@@ -509,6 +515,7 @@ class _Repositories:
     api_keys: ApiKeyRepository
     teamspaces: TeamspaceRepository
     favorites: FavoriteRepository
+    collections: CollectionRepository
     folders: FolderRepository
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
@@ -546,6 +553,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.sharing import (
         PostgresCommentRepository,
         PostgresShareLinkRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.collections import (
+        PostgresCollectionRepository,
     )
     from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
     from cyberarche.adapters.outbound.postgres.teamspaces import (
@@ -598,6 +608,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         api_keys=PostgresApiKeyRepository(pool),
         teamspaces=PostgresTeamspaceRepository(pool),
         favorites=PostgresFavoriteRepository(pool),
+        collections=PostgresCollectionRepository(pool),
         folders=PostgresFolderRepository(pool),
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
@@ -629,6 +640,7 @@ def _memory_repositories() -> _Repositories:
         api_keys=fakes.InMemoryApiKeyRepository(),
         teamspaces=fakes.InMemoryTeamspaceRepository(),
         favorites=fakes.InMemoryFavoriteRepository(),
+        collections=fakes.InMemoryCollectionRepository(),
         folders=fakes.InMemoryFolderRepository(),
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
@@ -964,6 +976,7 @@ async def build_container(
             comments,
             repos.teamspaces,
             repos.favorites,
+            repos.collections,
             repos.folders,
             blobs,
             queue,
