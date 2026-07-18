@@ -14,6 +14,7 @@ from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUse
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import (
+    NotificationDigestUseCases,
     NotificationPreferencesUseCases,
     NotificationUseCases,
 )
@@ -56,6 +57,7 @@ class UseCases:
     workspace_chat: WorkspaceChatUseCases
     notifications: NotificationUseCases
     notification_prefs: NotificationPreferencesUseCases
+    notification_digest: NotificationDigestUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases
     scheduled_agents: ScheduledAgentUseCases

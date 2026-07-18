@@ -83,6 +83,7 @@ from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
 from cyberarche.application.use_cases.notifications import (
+    NotificationDigestUseCases,
     NotificationDispatcher,
     NotificationPreferencesUseCases,
     NotificationUseCases,
@@ -165,6 +166,8 @@ class WiringConfig:
     # Empty = no channel is built, so notifications stay in-app only (today's
     # behaviour). Set it to fan enabled notifications out to the URL.
     notification_webhook_url: str = ""
+    # Per-user minimum interval between scheduled email digests (seconds).
+    digest_interval_seconds: int = 86400
 
 
 @dataclass(slots=True)
@@ -235,6 +238,7 @@ def _build_use_cases(
     notifications: NotificationRepository,
     notification_prefs: NotificationPreferencesRepository,
     dispatcher: NotificationDispatcher,
+    notification_digest: NotificationDigestUseCases,
     templates: TemplateRepository,
     custom_instructions: CustomInstructionsRepository,
     agent_memories: AgentMemoryRepository,
@@ -343,6 +347,7 @@ def _build_use_cases(
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notifications),
         notification_prefs=NotificationPreferencesUseCases(notification_prefs),
+        notification_digest=notification_digest,
         skills=AgentSkillUseCases(agent_skills, access, clock, ids),
         templates=TemplateUseCases(
             templates,
@@ -864,6 +869,12 @@ async def build_container(
     dispatcher = NotificationDispatcher(
         repos.notifications, repos.notification_prefs, channels
     )
+    notification_digest = NotificationDigestUseCases(
+        repos.notifications,
+        repos.notification_prefs,
+        channels,
+        min_interval_seconds=config.digest_interval_seconds,
+    )
     return Container(
         config=config,
         token_port=token_port,
@@ -923,6 +934,7 @@ async def build_container(
             repos.notifications,
             repos.notification_prefs,
             dispatcher,
+            notification_digest,
             repos.templates,
             repos.custom_instructions,
             repos.agent_memories,

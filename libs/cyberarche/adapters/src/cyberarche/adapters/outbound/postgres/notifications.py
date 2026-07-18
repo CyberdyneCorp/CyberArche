@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import asyncpg
 
 from cyberarche.domain.ids import (
@@ -65,6 +67,22 @@ class PostgresNotificationRepository:
             tenant_id,
             user_id,
             limit,
+        )
+        return [_from_row(r) for r in rows]
+
+    async def unread_since(
+        self, tenant_id: TenantId, user_id: UserId, *, since: datetime | None
+    ) -> list[Notification]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM notifications
+            WHERE tenant_id = $1 AND recipient_id = $2 AND read = FALSE
+              AND ($3::timestamptz IS NULL OR created_at > $3)
+            ORDER BY created_at DESC
+            """,
+            tenant_id,
+            user_id,
+            since,
         )
         return [_from_row(r) for r in rows]
 

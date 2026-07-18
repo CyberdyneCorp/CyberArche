@@ -39,6 +39,11 @@ class NotificationPreferences:
     push_enabled: bool = False
     mentions_enabled: bool = True
     agent_results_enabled: bool = True
+    # Email captured from the user's verified token claims when they save their
+    # preferences; the scheduled digest addresses their email delivery to it.
+    email: str | None = None
+    # When the scheduled digest last ran for this user (cadence + de-dup).
+    last_digest_at: datetime | None = None
 
     @classmethod
     def defaults(

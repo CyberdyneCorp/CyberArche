@@ -531,6 +531,8 @@ async def test_postgres_prefs_get_maps_row():
             "push_enabled": False,
             "mentions_enabled": True,
             "agent_results_enabled": False,
+            "email": "bob@acme.test",
+            "last_digest_at": None,
         }
     )
     result = await PostgresNotificationPreferencesRepository(pool).get(
@@ -544,6 +546,7 @@ async def test_postgres_prefs_get_maps_row():
         push_enabled=False,
         mentions_enabled=True,
         agent_results_enabled=False,
+        email="bob@acme.test",
     )
 
 
@@ -557,10 +560,259 @@ async def test_postgres_prefs_upsert_binds_every_column():
             push_enabled=True,
             mentions_enabled=False,
             agent_results_enabled=True,
+            email="bob@acme.test",
+            last_digest_at=NOW,
         )
     )
 
     query, args = pool.calls[0]
     assert query.startswith("INSERT INTO notification_preferences")
     assert "ON CONFLICT (tenant_id, user_id) DO UPDATE" in query
-    assert args == ("acme", "bob", True, True, False, True)
+    assert args == ("acme", "bob", True, True, False, True, "bob@acme.test", NOW)
+
+
+async def test_postgres_prefs_list_email_recipients_filters_enabled_with_email():
+    pool = FakePrefsPool()
+    pool.rows = [
+        {
+            "tenant_id": "acme",
+            "user_id": "bob",
+            "email_enabled": True,
+            "push_enabled": False,
+            "mentions_enabled": True,
+            "agent_results_enabled": True,
+            "email": "bob@acme.test",
+            "last_digest_at": None,
+        }
+    ]
+    recipients = await PostgresNotificationPreferencesRepository(
+        pool
+    ).list_email_recipients()
+
+    (pref,) = recipients
+    assert pref.email == "bob@acme.test"
+    query, args = pool.calls[0]
+    assert "email_enabled = TRUE" in query
+    assert "email IS NOT NULL AND email <> ''" in query
+    assert args == ()
+
+
+async def test_postgres_prefs_mark_digested_updates_last_digest_at():
+    pool = FakePrefsPool()
+    await PostgresNotificationPreferencesRepository(pool).mark_digested(
+        TenantId("acme"), UserId("bob"), NOW
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("UPDATE notification_preferences SET last_digest_at")
+    assert args == ("acme", "bob", NOW)
+
+
+async def test_postgres_unread_since_filters_unread_and_since():
+    pool = FakePool(rows=[notification_row()])
+    since = datetime(2026, 1, 1, tzinfo=UTC)
+    listed = await PostgresNotificationRepository(pool).unread_since(
+        TenantId("acme"), UserId("bob"), since=since
+    )
+
+    assert listed[0] == make_notification()
+    query, args = pool.calls[0]
+    assert "read = FALSE" in query
+    assert "created_at > $3" in query
+    assert "ORDER BY created_at DESC" in query
+    assert args == ("acme", "bob", since)
+
+
+# --- NotificationDigestUseCases (scheduled email digest) ---------------------
+
+from datetime import timedelta
+
+from cyberarche.application.use_cases.notifications import NotificationDigestUseCases
+
+DIGEST_NOW = datetime(2026, 2, 1, 12, 0, tzinfo=UTC)
+
+
+class RecordingEmailChannel:
+    """Records both the notification and the recipient_email it was given."""
+
+    def __init__(self, channel: str = "webhook") -> None:
+        self.channel = channel
+        self.sent: list[tuple[Notification, str | None]] = []
+
+    async def send(self, notification, *, recipient_email=None) -> None:
+        self.sent.append((notification, recipient_email))
+
+
+async def _seed_recipient(prefs, *, email="bob@acme.test", last_digest_at=None):
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("bob"),
+            email_enabled=True,
+            email=email,
+            last_digest_at=last_digest_at,
+        )
+    )
+
+
+async def test_digest_aggregates_unread_into_one_send_with_email():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await _seed_recipient(prefs)
+    for i in range(3):
+        await repo.add(
+            make_notification(
+                id=NotificationId(f"n-{i}"),
+                snippet=f"unread {i}",
+                created_at=DIGEST_NOW - timedelta(minutes=3 - i),
+            )
+        )
+    channel = RecordingEmailChannel()
+    digest = NotificationDigestUseCases(repo, prefs, [channel], min_interval_seconds=60)
+
+    sent = await digest.run_due(DIGEST_NOW)
+
+    assert sent == 1
+    assert len(channel.sent) == 1
+    notification, email = channel.sent[0]
+    assert email == "bob@acme.test"
+    assert notification.kind == "digest"
+    assert notification.recipient_id == UserId("bob")
+    assert "You have 3 unread notifications" in notification.snippet
+    # last_digest_at recorded so the same items are not resent.
+    stored = await prefs.get(TenantId("acme"), UserId("bob"))
+    assert stored.last_digest_at == DIGEST_NOW
+
+
+async def test_digest_respects_the_per_user_interval():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await _seed_recipient(prefs)
+    await repo.add(make_notification(created_at=DIGEST_NOW - timedelta(minutes=1)))
+    channel = RecordingEmailChannel()
+    digest = NotificationDigestUseCases(
+        repo, prefs, [channel], min_interval_seconds=3600
+    )
+
+    assert await digest.run_due(DIGEST_NOW) == 1
+    # A second immediate run within the interval sends nothing more.
+    assert await digest.run_due(DIGEST_NOW + timedelta(seconds=10)) == 0
+    assert len(channel.sent) == 1
+
+
+async def test_digest_skips_when_nothing_unread_since_last_digest():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    last = DIGEST_NOW - timedelta(days=1)
+    await _seed_recipient(prefs, last_digest_at=last)
+    # The only unread notification predates the last digest.
+    await repo.add(make_notification(created_at=last - timedelta(hours=1)))
+    channel = RecordingEmailChannel()
+    digest = NotificationDigestUseCases(repo, prefs, [channel], min_interval_seconds=1)
+
+    assert await digest.run_due(DIGEST_NOW) == 0
+    assert channel.sent == []
+    stored = await prefs.get(TenantId("acme"), UserId("bob"))
+    assert stored.last_digest_at == last  # unchanged
+
+
+async def test_digest_only_considers_email_enabled_users_with_an_email():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    # email_enabled but no email address -> not a recipient.
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("noemail"),
+            email_enabled=True,
+        )
+    )
+    # email set but delivery disabled -> not a recipient.
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("disabled"),
+            email_enabled=False,
+            email="disabled@acme.test",
+        )
+    )
+    await repo.add(
+        make_notification(recipient_id=UserId("noemail"), created_at=DIGEST_NOW)
+    )
+    await repo.add(
+        make_notification(recipient_id=UserId("disabled"), created_at=DIGEST_NOW)
+    )
+    channel = RecordingEmailChannel()
+    digest = NotificationDigestUseCases(repo, prefs, [channel], min_interval_seconds=1)
+
+    assert await digest.run_due(DIGEST_NOW) == 0
+    assert channel.sent == []
+
+
+async def test_digest_skips_a_channel_the_user_disabled():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    # push channel only; the user has push disabled (email_enabled gates webhook,
+    # push_enabled gates push) -> no enabled channel, nothing sent or digested.
+    await prefs.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("bob"),
+            email_enabled=True,
+            push_enabled=False,
+            email="bob@acme.test",
+        )
+    )
+    await repo.add(make_notification(created_at=DIGEST_NOW))
+    channel = RecordingEmailChannel(channel="push")
+    digest = NotificationDigestUseCases(repo, prefs, [channel], min_interval_seconds=1)
+
+    assert await digest.run_due(DIGEST_NOW) == 0
+    assert channel.sent == []
+    stored = await prefs.get(TenantId("acme"), UserId("bob"))
+    assert stored.last_digest_at is None  # not digested
+
+
+async def test_digest_returns_zero_when_no_channels_configured():
+    repo = InMemoryNotificationRepository()
+    prefs = InMemoryNotificationPreferencesRepository()
+    await _seed_recipient(prefs)
+    await repo.add(make_notification(created_at=DIGEST_NOW))
+    digest = NotificationDigestUseCases(repo, prefs, [], min_interval_seconds=1)
+
+    assert await digest.run_due(DIGEST_NOW) == 0
+
+
+# --- Preferences capture (email + last_digest_at carry-forward) --------------
+
+from cyberarche.application.use_cases.notifications import (
+    NotificationPreferencesUseCases as _PrefsUC,
+)
+
+BOB_WITH_EMAIL = CallerContext(
+    user_id=UserId("bob"), tenant_id=TenantId("acme"), email="bob@acme.test"
+)
+
+
+async def test_update_captures_caller_email_and_preserves_last_digest_at():
+    repo = InMemoryNotificationPreferencesRepository()
+    # A prior digest ran for this user.
+    await repo.upsert(
+        NotificationPreferences(
+            tenant_id=TenantId("acme"),
+            user_id=UserId("bob"),
+            last_digest_at=DIGEST_NOW,
+        )
+    )
+    prefs = _PrefsUC(repo)
+
+    saved = await prefs.update(
+        BOB_WITH_EMAIL,
+        email_enabled=True,
+        push_enabled=False,
+        mentions_enabled=True,
+        agent_results_enabled=True,
+    )
+
+    assert saved.email == "bob@acme.test"
+    assert saved.last_digest_at == DIGEST_NOW  # carried forward, not clobbered

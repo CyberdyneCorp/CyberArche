@@ -679,6 +679,18 @@ class InMemoryNotificationRepository:
             and not n.read
         )
 
+    async def unread_since(self, tenant_id, user_id, *, since):
+        mine = [
+            n
+            for n in self._items
+            if str(n.tenant_id) == str(tenant_id)
+            and str(n.recipient_id) == str(user_id)
+            and not n.read
+            and (since is None or n.created_at > since)
+        ]
+        mine.sort(key=lambda n: n.created_at, reverse=True)
+        return mine
+
     async def mark_read(self, tenant_id, user_id, notification_id) -> None:
         from dataclasses import replace
 
@@ -713,6 +725,21 @@ class InMemoryNotificationPreferencesRepository:
 
     async def upsert(self, prefs) -> None:
         self._prefs[(str(prefs.tenant_id), str(prefs.user_id))] = prefs
+
+    async def list_email_recipients(self):
+        return [
+            prefs
+            for prefs in self._prefs.values()
+            if prefs.email_enabled and prefs.email
+        ]
+
+    async def mark_digested(self, tenant_id, user_id, at) -> None:
+        from dataclasses import replace
+
+        key = (str(tenant_id), str(user_id))
+        prefs = self._prefs.get(key)
+        if prefs is not None:
+            self._prefs[key] = replace(prefs, last_digest_at=at)
 
 
 class InMemoryInferredLinkRepository:

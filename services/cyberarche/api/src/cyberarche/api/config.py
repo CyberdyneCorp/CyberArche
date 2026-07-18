@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # deployments only). Disable to run the API without background execution.
     enable_scheduler: bool = True
     scheduler_interval_seconds: int = 60
+    # Scheduled email digest of unread notifications (postgres deployments only).
+    # Disable to run the API without the background digest; the interval is the
+    # per-user minimum between digests (default daily).
+    enable_digest: bool = True
+    digest_interval_seconds: int = 86400
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(
@@ -83,4 +88,5 @@ class Settings(BaseSettings):
             connector_secret_key=self.connector_secret_key,
             redis_url=self.redis_url,
             blob_dir=self.blob_dir,
+            digest_interval_seconds=self.digest_interval_seconds,
         )

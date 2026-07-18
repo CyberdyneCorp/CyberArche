@@ -64,6 +64,7 @@ from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.notifications import (
+    NotificationDigestUseCases,
     NotificationDispatcher,
     NotificationPreferencesUseCases,
     NotificationUseCases,
@@ -335,6 +336,11 @@ def use_cases(
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notification_repo),
         notification_prefs=NotificationPreferencesUseCases(notification_prefs_repo),
+        notification_digest=NotificationDigestUseCases(
+            notification_repo,
+            notification_prefs_repo,
+            min_interval_seconds=86400,
+        ),
         templates=TemplateUseCases(
             InMemoryTemplateRepository(),
             document_use_cases,
