@@ -399,6 +399,34 @@ class AgentUseCases:
         response = await self._llm.complete(messages)
         return response.text.strip()
 
+    async def continue_writing(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        *,
+        preceding_text: str,
+    ) -> str:
+        """Suggest a natural continuation of the text (continue-writing spec).
+
+        Like `transform_text`, this is a single TOOL-FREE LLM call that loads no
+        document context and never writes to the document — the caller applies
+        the accepted continuation through the normal CRDT edit path. It requires
+        VIEW access, enforced through the same access-checked read path, so a
+        caller without access is refused before any LLM call.
+        """
+        # Access check only (raises NotAuthorized/NotFound); result unused.
+        await self._document_context(caller, document_id)
+        if not preceding_text.strip():
+            return ""  # nothing to continue — skip the LLM call
+        messages = [
+            LLMMessage(role="system", content=_CONTINUE_SYSTEM_PROMPT),
+            LLMMessage(role="user", content=preceding_text),
+        ]
+        response = await self._llm.complete(messages)
+        # Keep a leading space if the model produced one (it helps the join),
+        # but drop trailing whitespace and any surrounding quotes.
+        return response.text.rstrip().strip('"')
+
     # ---- document editing (agent as a CRDT peer) ---------------------------
 
     async def update_block(
@@ -1284,6 +1312,15 @@ def _transform_system_prompt(instruction: str) -> str:
         "transformed text: no preamble, no explanation, no surrounding quotes, "
         f"and no markdown code fences. {instruction}"
     )
+
+
+# System prompt for ghost-text autocomplete (continue-writing spec).
+_CONTINUE_SYSTEM_PROMPT = (
+    "You are an inline writing assistant. Continue the user's text naturally "
+    "from exactly where it ends. Output ONLY the continuation text to append — "
+    "no preamble, no quotes, no markdown, no repetition of the given text. "
+    "Keep it to one or two sentences."
+)
 
 
 # Destructive tools refused in background (no human to confirm) — ai-agent spec.

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	askAgent,
+	continueWriting,
 	draftContent,
 	ingestFile,
 	insertBlocks,
@@ -195,6 +196,22 @@ describe('agent API client', () => {
 		await transformText('doc-1', 'translate', 'text', 'Español');
 
 		expect(calls[0].body).toEqual({ action: 'translate', text: 'text', target: 'Español' });
+	});
+
+	it('continueWriting POSTs the preceding text to the continue endpoint', async () => {
+		const { fn, calls } = capturingFetch({ text: ' and then it ended.' });
+		vi.stubGlobal('fetch', fn);
+
+		const result = await continueWriting('doc-1', 'The story began');
+
+		expect(calls).toEqual([
+			{
+				url: '/api/v1/documents/doc-1/agent/continue',
+				method: 'POST',
+				body: { preceding_text: 'The story began' }
+			}
+		]);
+		expect(result).toEqual({ text: ' and then it ended.' });
 	});
 
 	it('surfaces an ApiError on rejection', async () => {

@@ -89,3 +89,14 @@ export const transformText = (documentId: string, action: string, text: string, 
 		text,
 		target: target ?? null
 	});
+
+/**
+ * Suggest a natural continuation of `precedingText` ("continue writing" ghost
+ * text). Returns only the suggested continuation; the caller renders it as
+ * dimmed inline text and, if accepted, applies it through the editor's normal
+ * (undoable, CRDT-synced) text-update path.
+ */
+export const continueWriting = (documentId: string, precedingText: string) =>
+	post<{ text: string }>(`/api/v1/documents/${documentId}/agent/continue`, {
+		preceding_text: precedingText
+	});
