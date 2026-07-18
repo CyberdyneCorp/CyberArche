@@ -426,6 +426,64 @@ describe('collection ViewModel — board views', () => {
 	});
 });
 
+describe('collection ViewModel — calendar views', () => {
+	beforeEach(() => vi.restoreAllMocks());
+
+	const CAL_COLLECTION = () =>
+		COLLECTION({
+			properties: [
+				{ id: 'p1', name: 'Status', type: 'select', options: ['todo', 'done'] },
+				{ id: 'due', name: 'Due', type: 'date', options: [] }
+			]
+		});
+
+	function calFetch() {
+		return recordingFetch({
+			'GET /api/v1/collections/c1': CAL_COLLECTION(),
+			'GET /api/v1/collections/c1/views/v1/rows': [ROW('r1')],
+			'PATCH /api/v1/collections/c1/views/v1': (body: Record<string, unknown>) =>
+				VIEW({ date_by: body.date_by ?? null })
+		});
+	}
+
+	it('dateProperties lists only date-typed properties', async () => {
+		const { fetch } = calFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		expect(vm.dateProperties.map((p) => p.id)).toEqual(['due']);
+	});
+
+	it('setDateBy persists date_by and updates the in-memory view', async () => {
+		const { fetch, calls } = calFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		calls.length = 0;
+
+		await vm.setDateBy('due');
+
+		const patch = calls.find((c) => c.method === 'PATCH');
+		expect(patch?.url).toBe('/api/v1/collections/c1/views/v1');
+		expect(patch?.body?.date_by).toBe('due');
+		expect(vm.currentView?.date_by).toBe('due');
+		expect(vm.dateByProperty?.id).toBe('due');
+	});
+
+	it('setDateBy(null) clears the anchored date property', async () => {
+		const { fetch } = calFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		await vm.setDateBy('due');
+
+		await vm.setDateBy(null);
+
+		expect(vm.currentView?.date_by).toBeNull();
+		expect(vm.dateByProperty).toBeUndefined();
+	});
+});
+
 describe('groupRows', () => {
 	const property: PropertyDef = {
 		id: 'status',

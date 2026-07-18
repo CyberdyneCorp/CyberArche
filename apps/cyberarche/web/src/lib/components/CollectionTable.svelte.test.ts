@@ -37,6 +37,9 @@ function fakeVm(overrides: Record<string, unknown> = {}) {
 		activeSortCount: 0,
 		groupByProperty: undefined,
 		selectProperties: [{ id: 'status', name: 'Status', type: 'select', options: ['todo', 'done'] }],
+		dateProperties: [],
+		dateByProperty: undefined,
+		setDateBy: vi.fn(),
 		rename: vi.fn(),
 		selectView: vi.fn(),
 		createViewOfKind: vi.fn(),
@@ -159,12 +162,13 @@ describe('CollectionTable component', () => {
 		);
 	});
 
-	it('still shows a placeholder for the calendar view kind', () => {
+	it('renders the calendar surface for a calendar view', () => {
 		const vm = fakeVm({
 			currentView: { id: 'v4', name: 'Cal', kind: 'calendar', filters: [], sorts: [], group_by: null, date_by: null }
 		});
 		render(vm);
-		expect(target.querySelector('.placeholder')?.textContent).toContain('calendar');
+		// No date_by property configured yet, so the calendar prompts to pick one.
+		expect(target.querySelector('[data-testid="calendar-dateby-prompt"]')).not.toBeNull();
 		expect(target.querySelector('[data-testid="collection-table"]')).toBeNull();
 	});
 
