@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getDocument, type Document } from '$lib/api/documents';
+	import { goto } from '$app/navigation';
+	import { getDocument, getDocumentPath, type Document, type PathCrumb } from '$lib/api/documents';
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
@@ -25,6 +27,20 @@
 	const workspaceId = $derived(page.params.workspaceId!);
 
 	let doc = $state<Document | null>(null);
+	let crumbs = $state<PathCrumb[]>([]);
+
+	// The last crumb (the current document) reflects the live title, so a rename
+	// updates the breadcrumb without a reload. When the path failed to load, fall
+	// back to a single crumb carrying just the title.
+	const displayCrumbs = $derived.by<PathCrumb[]>(() => {
+		if (crumbs.length === 0) {
+			return doc ? [{ kind: 'document', id: doc.id, label: doc.title }] : [];
+		}
+		const last = crumbs.length - 1;
+		return crumbs.map((crumb, index) =>
+			index === last && doc ? { ...crumb, label: doc.title } : crumb
+		);
+	});
 
 	async function saveAsTemplate() {
 		const name = await dialogs.prompt({
@@ -73,6 +89,15 @@
 		let instance: EditorVM | null = null;
 		let cancelled = false;
 		doc = null;
+		crumbs = [];
+
+		// Load the breadcrumb path in parallel; a failure leaves crumbs empty and
+		// the header falls back to just the title.
+		getDocumentPath(id)
+			.then((path) => {
+				if (!cancelled) crumbs = path;
+			})
+			.catch(() => {});
 
 		getDocument(id).then((loaded) => {
 			if (cancelled) return;
@@ -115,9 +140,7 @@
 	<div class="split">
 	<article class="doc">
 		<header class="topbar">
-			<nav class="crumbs" aria-label="Breadcrumb">
-				<span class="crumb">{doc.title}</span>
-			</nav>
+			<Breadcrumb crumbs={displayCrumbs} {workspaceId} onNavigate={(path) => goto(path)} />
 			<div class="right">
 				{#if editor && editor.peers.length > 0}
 					<div class="presence" data-testid="presence">
@@ -249,9 +272,6 @@
 		padding: 10px 20px;
 		background: var(--bg1);
 		border-bottom: 1px solid var(--line);
-	}
-	.crumbs {
-		color: var(--tx2);
 	}
 	.right {
 		display: flex;

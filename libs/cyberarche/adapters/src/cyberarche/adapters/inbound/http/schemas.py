@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from cyberarche.application.use_cases.documents import PathCrumb
 from cyberarche.domain.documents import Document
 from cyberarche.domain.snapshots import BlockDiff, Snapshot
 from cyberarche.domain.workspaces import Workspace
@@ -93,6 +94,18 @@ class DocumentResponse(BaseModel):
             teamspace_id=document.teamspace_id,
             folder_id=document.folder_id,
         )
+
+
+class PathCrumbResponse(BaseModel):
+    """One crumb of a document's breadcrumb path (document-breadcrumb change)."""
+
+    kind: str
+    id: str
+    label: str
+
+    @staticmethod
+    def from_domain(crumb: PathCrumb) -> "PathCrumbResponse":
+        return PathCrumbResponse(kind=crumb.kind, id=crumb.id, label=crumb.label)
 
 
 class PurgeResponse(BaseModel):

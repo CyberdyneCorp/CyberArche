@@ -189,6 +189,185 @@ async def test_purge_requires_edit_permission(use_cases: UseCases, alice):
     assert restored.trashed is False
 
 
+# ---- breadcrumb path --------------------------------------------------------
+
+
+async def test_path_of_a_nested_document_is_ordered_with_labels(use_cases: UseCases, alice):
+    workspace = await make_workspace(use_cases, alice)  # name "Docs"
+    teamspace = await use_cases.teamspaces.create(alice, workspace.id, name="Team")
+    outer = await use_cases.folders.create(
+        alice, workspace.id, name="Outer", teamspace_id=teamspace.id
+    )
+    inner = await use_cases.folders.create(
+        alice, workspace.id, name="Inner", parent_folder_id=outer.id
+    )
+    parent = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Parent", teamspace_id=teamspace.id
+    )
+    child = await use_cases.documents.create(
+        alice,
+        workspace_id=workspace.id,
+        title="Child",
+        parent_id=parent.id,
+        teamspace_id=teamspace.id,
+    )
+    await use_cases.documents.place_in_folder(alice, child.id, inner.id)
+
+    crumbs = await use_cases.documents.path(alice, child.id)
+
+    assert [(c.kind, c.label) for c in crumbs] == [
+        ("workspace", "Docs"),
+        ("teamspace", "Team"),
+        ("folder", "Outer"),  # outermost first
+        ("folder", "Inner"),
+        ("document", "Parent"),  # ancestor before self
+        ("document", "Child"),
+    ]
+    assert crumbs[0].id == workspace.id
+    assert crumbs[1].id == teamspace.id
+    assert crumbs[-1].id == child.id
+
+
+async def test_path_of_a_root_document_is_workspace_then_self(use_cases: UseCases, alice):
+    workspace = await make_workspace(use_cases, alice)
+    doc = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Solo"
+    )
+
+    crumbs = await use_cases.documents.path(alice, doc.id)
+
+    assert [(c.kind, c.label, c.id) for c in crumbs] == [
+        ("workspace", "Docs", workspace.id),
+        ("document", "Solo", doc.id),
+    ]
+
+
+async def test_path_includes_ancestor_documents_without_teamspace_or_folder(
+    use_cases: UseCases, alice
+):
+    workspace = await make_workspace(use_cases, alice)
+    top = await use_cases.documents.create(alice, workspace_id=workspace.id, title="Top")
+    mid = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Mid", parent_id=top.id
+    )
+    leaf = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Leaf", parent_id=mid.id
+    )
+
+    crumbs = await use_cases.documents.path(alice, leaf.id)
+
+    assert [(c.kind, c.label) for c in crumbs] == [
+        ("workspace", "Docs"),
+        ("document", "Top"),
+        ("document", "Mid"),
+        ("document", "Leaf"),
+    ]
+
+
+async def test_path_requires_view_access(use_cases: UseCases, alice):
+    from cyberarche.domain.errors import NotAuthorized
+
+    workspace = await make_workspace(use_cases, alice)
+    doc = await use_cases.documents.create(
+        alice, workspace_id=workspace.id, title="Private"
+    )
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.documents.path(BOB, doc.id)
+
+
+async def test_path_of_unknown_document_is_not_found(use_cases: UseCases, alice):
+    from cyberarche.domain.ids import DocumentId
+
+    with pytest.raises(NotFound):
+        await use_cases.documents.path(alice, DocumentId("ghost"))
+
+
+def _standalone_document_cases():
+    """A DocumentUseCases over bare in-memory repos, for the cycle-guard tests
+    that need to seed a corrupt tree the use cases would never build."""
+    from cyberarche.application.authz import AccessControl
+    from cyberarche.application.testing.fakes import (
+        FixedClock,
+        InMemoryDocumentRepository,
+        InMemoryFolderRepository,
+        InMemoryMembershipRepository,
+        InMemoryTeamspaceRepository,
+        SequentialIds,
+    )
+    from cyberarche.application.use_cases.documents import DocumentUseCases
+
+    documents = InMemoryDocumentRepository()
+    folders = InMemoryFolderRepository()
+    access = AccessControl(InMemoryMembershipRepository(), InMemoryTeamspaceRepository())
+    cases = DocumentUseCases(
+        documents, access, FixedClock(), SequentialIds(), folders=folders
+    )
+    return cases, documents, folders
+
+
+async def test_document_ancestor_walk_terminates_on_a_cycle():
+    from datetime import UTC, datetime
+
+    from cyberarche.domain.documents import Document
+    from cyberarche.domain.ids import DocumentId, TenantId, UserId, WorkspaceId
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _doc(did: str, parent: str) -> Document:
+        return Document(
+            id=DocumentId(did),
+            workspace_id=WorkspaceId("ws"),
+            tenant_id=TenantId("acme"),
+            title=did,
+            parent_id=DocumentId(parent),
+            position=0,
+            created_by=UserId("alice"),
+            created_at=now,
+            updated_at=now,
+        )
+
+    cases, documents, _ = _standalone_document_cases()
+    a, b = _doc("a", "b"), _doc("b", "a")  # a <-> b cycle
+    await documents.add(a)
+    await documents.add(b)
+
+    ancestors = await cases._document_ancestors(TenantId("acme"), a)
+
+    # b is a's parent; b's parent (a) is already visited, so the walk stops.
+    assert [d.id for d in ancestors] == ["b"]
+
+
+async def test_folder_chain_terminates_at_the_depth_cap_on_a_cycle():
+    from datetime import UTC, datetime
+
+    from cyberarche.application.use_cases.documents import _MAX_CHAIN
+    from cyberarche.domain.folders import Folder
+    from cyberarche.domain.ids import FolderId, TenantId, UserId, WorkspaceId
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _folder(fid: str, parent: str) -> Folder:
+        return Folder(
+            id=FolderId(fid),
+            workspace_id=WorkspaceId("ws"),
+            tenant_id=TenantId("acme"),
+            name=fid,
+            created_by=UserId("alice"),
+            created_at=now,
+            parent_folder_id=FolderId(parent),
+        )
+
+    cases, _, folders = _standalone_document_cases()
+    await folders.add(_folder("f1", "f2"))
+    await folders.add(_folder("f2", "f1"))  # f1 <-> f2 cycle
+
+    chain = await cases._folder_chain(TenantId("acme"), FolderId("f1"))
+
+    # No visited-set on folders, so the depth cap is what stops the walk.
+    assert len(chain) == _MAX_CHAIN
+
+
 # ---- HTTP surface (routers/documents.py) ------------------------------------
 
 import base64  # noqa: E402
@@ -366,3 +545,41 @@ def test_list_snapshots_over_http(api):
 
 def test_get_unknown_document_is_404_over_http(api):
     assert api.get("/api/v1/documents/missing", headers=_auth()).status_code == 404
+
+
+def test_document_path_over_http(api):
+    headers = _auth()
+    ws = _make_workspace_http(api, headers)
+    ts = api.post(
+        f"/api/v1/workspaces/{ws['id']}/teamspaces", json={"name": "Team"}, headers=headers
+    ).json()
+    parent = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": ws["id"], "title": "Parent", "teamspace_id": ts["id"]},
+        headers=headers,
+    ).json()
+    child = api.post(
+        "/api/v1/documents",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Child",
+            "parent_id": parent["id"],
+            "teamspace_id": ts["id"],
+        },
+        headers=headers,
+    ).json()
+
+    response = api.get(f"/api/v1/documents/{child['id']}/path", headers=headers)
+    assert response.status_code == 200
+    assert [(c["kind"], c["label"]) for c in response.json()] == [
+        ("workspace", "Docs"),
+        ("teamspace", "Team"),
+        ("document", "Parent"),
+        ("document", "Child"),
+    ]
+
+
+def test_document_path_unknown_document_is_404_over_http(api):
+    assert (
+        api.get("/api/v1/documents/missing/path", headers=_auth()).status_code == 404
+    )

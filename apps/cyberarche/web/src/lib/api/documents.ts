@@ -29,6 +29,18 @@ export const createDocument = (
 
 export const getDocument = (id: string) => get<Document>(`/api/v1/documents/${id}`);
 
+/** One crumb of a document's breadcrumb path. */
+export interface PathCrumb {
+	kind: 'workspace' | 'teamspace' | 'folder' | 'document';
+	id: string;
+	label: string;
+}
+
+/** The document's breadcrumb path: workspace → teamspace? → folders →
+ * ancestor documents → the document itself. */
+export const getDocumentPath = (id: string) =>
+	get<PathCrumb[]>(`/api/v1/documents/${id}/path`);
+
 /** A document's current block tree (for reading content outside the editor,
  * e.g. exporting a whole teamspace/folder). */
 export const documentBlocks = (id: string) =>

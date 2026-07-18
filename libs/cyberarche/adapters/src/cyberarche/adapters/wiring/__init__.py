@@ -284,7 +284,7 @@ def _build_use_cases(
         connectors, mcp_client, secret_box, access, clock, ids
     )
     document_use_cases = DocumentUseCases(
-        documents, access, clock, ids, teamspaces, folders
+        documents, access, clock, ids, teamspaces, folders, workspaces
     )
     search = SearchUseCases(documents, realtime, crdt_engine, access)
     workspace_chat = WorkspaceChatUseCases(
