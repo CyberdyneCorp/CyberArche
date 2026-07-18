@@ -10,6 +10,7 @@ from cyberarche.adapters.inbound.http.schemas import (
     CreateDocumentRequest,
     DocumentResponse,
     MoveDocumentRequest,
+    PathCrumbResponse,
     PurgeResponse,
     RecordSnapshotRequest,
     RenameSnapshotRequest,
@@ -40,6 +41,16 @@ async def create_document(
 async def get_document(document_id: str, cases: Cases, caller: Caller) -> DocumentResponse:
     document = await cases.documents.get(caller, DocumentId(document_id))
     return DocumentResponse.from_domain(document)
+
+
+@router.get("/{document_id}/path")
+async def document_path(
+    document_id: str, cases: Cases, caller: Caller
+) -> list[PathCrumbResponse]:
+    """The document's breadcrumb path: workspace → teamspace? → folders →
+    ancestor documents → the document itself."""
+    crumbs = await cases.documents.path(caller, DocumentId(document_id))
+    return [PathCrumbResponse.from_domain(c) for c in crumbs]
 
 
 @router.get("/{document_id}/backlinks")

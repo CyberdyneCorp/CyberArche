@@ -262,7 +262,7 @@ def use_cases(
         notifications=dispatcher,
     )
     document_use_cases = DocumentUseCases(
-        documents, access, clock, ids, teamspace_repo, folder_repo
+        documents, access, clock, ids, teamspace_repo, folder_repo, workspaces
     )
     persona = AgentPersonaUseCases(
         InMemoryCustomInstructionsRepository(),

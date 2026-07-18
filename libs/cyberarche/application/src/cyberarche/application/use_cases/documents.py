@@ -6,18 +6,37 @@ Tenant scope always comes from the caller, never from request input.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.folders import FolderRepository
-from cyberarche.application.ports.repositories import DocumentRepository
+from cyberarche.application.ports.repositories import (
+    DocumentRepository,
+    WorkspaceRepository,
+)
 from cyberarche.application.ports.teamspaces import TeamspaceRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound, ValidationFailed
-from cyberarche.domain.ids import DocumentId, FolderId, TeamspaceId, WorkspaceId
+from cyberarche.domain.folders import Folder
+from cyberarche.domain.ids import DocumentId, FolderId, TeamspaceId, TenantId, WorkspaceId
 from cyberarche.domain.memberships import Role
+
+# Guards the ancestor walks against a corrupt cycle in the tree.
+_MAX_CHAIN = 50
+
+
+@dataclass(frozen=True, slots=True)
+class PathCrumb:
+    """One step of a document's breadcrumb path (document-breadcrumb change).
+
+    `kind` is one of "workspace", "teamspace", "folder", or "document".
+    """
+
+    kind: str
+    id: str
+    label: str
 
 
 class DocumentUseCases:
@@ -29,6 +48,7 @@ class DocumentUseCases:
         ids: IdPort,
         teamspaces: TeamspaceRepository | None = None,
         folders: "FolderRepository | None" = None,
+        workspaces: "WorkspaceRepository | None" = None,
     ) -> None:
         self._documents = documents
         self._access = access
@@ -36,6 +56,7 @@ class DocumentUseCases:
         self._ids = ids
         self._teamspaces = teamspaces
         self._folders = folders
+        self._workspaces = workspaces
 
     async def create(
         self,
@@ -95,6 +116,76 @@ class DocumentUseCases:
         document = await self._get_or_raise(caller, document_id)
         await self._access.require_document(caller, document, Role.VIEWER)
         return document
+
+    async def path(
+        self, caller: CallerContext, document_id: DocumentId
+    ) -> list[PathCrumb]:
+        """The breadcrumb path of a document, view-access scoped: workspace,
+        teamspace (if any), folder chain (outermost→innermost), ancestor
+        documents (topmost→parent), then the document itself."""
+        document = await self._get_or_raise(caller, document_id)
+        await self._access.require_document(caller, document, Role.VIEWER)
+        crumbs: list[PathCrumb] = []
+        workspace = (
+            await self._workspaces.get(caller.tenant_id, document.workspace_id)
+            if self._workspaces is not None
+            else None
+        )
+        if workspace is not None:
+            crumbs.append(PathCrumb("workspace", workspace.id, workspace.name))
+        teamspace = (
+            await self._teamspaces.get(caller.tenant_id, document.teamspace_id)
+            if document.teamspace_id is not None and self._teamspaces is not None
+            else None
+        )
+        if teamspace is not None:
+            crumbs.append(PathCrumb("teamspace", teamspace.id, teamspace.name))
+        if document.folder_id is not None and self._folders is not None:
+            folders = await self._folder_chain(caller.tenant_id, document.folder_id)
+            crumbs.extend(PathCrumb("folder", f.id, f.name) for f in folders)
+        ancestors = await self._document_ancestors(caller.tenant_id, document)
+        crumbs.extend(PathCrumb("document", a.id, a.title) for a in ancestors)
+        crumbs.append(PathCrumb("document", document.id, document.title))
+        return crumbs
+
+    async def _folder_chain(
+        self, tenant_id: TenantId, folder_id: FolderId
+    ) -> list[Folder]:
+        """Folders from `folder_id` up to the outermost, returned outermost-first."""
+        chain: list[Folder] = []
+        current: FolderId | None = folder_id
+        for _ in range(_MAX_CHAIN):
+            if current is None:
+                break
+            folder = await self._folders.get(tenant_id, current)  # type: ignore[union-attr]
+            if folder is None:
+                break
+            chain.append(folder)
+            current = folder.parent_folder_id
+        chain.reverse()
+        return chain
+
+    async def _document_ancestors(
+        self, tenant_id: TenantId, document: Document
+    ) -> list[Document]:
+        """Ancestor documents (excluding `document`), returned topmost-first.
+
+        A visited set plus a depth cap keep a corrupt parent cycle from hanging.
+        """
+        ancestors: list[Document] = []
+        visited: set[DocumentId] = {document.id}
+        current: DocumentId | None = document.parent_id
+        for _ in range(_MAX_CHAIN):
+            if current is None or current in visited:
+                break
+            parent = await self._documents.get(tenant_id, current)
+            if parent is None:
+                break
+            ancestors.append(parent)
+            visited.add(parent.id)
+            current = parent.parent_id
+        ancestors.reverse()
+        return ancestors
 
     async def children(
         self,

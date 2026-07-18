@@ -5,6 +5,7 @@ import {
 	createDocument,
 	documentBlocks,
 	getDocument,
+	getDocumentPath,
 	listChildren,
 	listTrashed,
 	purgeDocument,
@@ -84,6 +85,20 @@ describe('documents API client', () => {
 
 		expect(await getDocument('doc-1')).toEqual(DOCUMENT);
 		expect(calls).toEqual([{ url: '/api/v1/documents/doc-1', method: 'GET', body: undefined }]);
+	});
+
+	it('getDocumentPath GETs the breadcrumb path', async () => {
+		const path = [
+			{ kind: 'workspace', id: 'ws-1', label: 'Docs' },
+			{ kind: 'document', id: 'doc-1', label: 'Notes' }
+		];
+		const { fn, calls } = capturingFetch(path);
+		vi.stubGlobal('fetch', fn);
+
+		expect(await getDocumentPath('doc-1')).toEqual(path);
+		expect(calls).toEqual([
+			{ url: '/api/v1/documents/doc-1/path', method: 'GET', body: undefined }
+		]);
 	});
 
 	it('documentBlocks GETs the block tree', async () => {
