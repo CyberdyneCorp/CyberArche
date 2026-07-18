@@ -24,6 +24,7 @@ from cyberarche.adapters.inbound.http.routers.knowledge import (
     router as knowledge_router,
     webhook_router,
 )
+from cyberarche.adapters.inbound.http.routers.meetings import router as meetings_router
 from cyberarche.adapters.inbound.http.routers.notification_prefs import (
     router as notification_prefs_router,
 )
@@ -51,6 +52,7 @@ all_routers = [
     agent_persona_router,
     agent_skills_router,
     scheduled_agents_router,
+    meetings_router,
     google_router,
     connectors_router,
     sharing_router,

@@ -13,6 +13,7 @@ from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
+from cyberarche.application.use_cases.meeting_notes import MeetingNotesUseCases
 from cyberarche.application.use_cases.notifications import (
     NotificationDigestUseCases,
     NotificationPreferencesUseCases,
@@ -61,4 +62,5 @@ class UseCases:
     templates: TemplateUseCases
     skills: AgentSkillUseCases
     scheduled_agents: ScheduledAgentUseCases
+    meeting_notes: MeetingNotesUseCases
     google: GoogleWorkspaceUseCases | None

@@ -10,6 +10,7 @@
 	import { commandPalette } from '$lib/viewmodels/commandPalette.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
+	import { meetingNotesModal } from '$lib/viewmodels/meetingNotesModal.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
@@ -374,6 +375,14 @@
 		onclick={() => workspaceChatOpen.open()}
 	>
 		<span aria-hidden="true">💬</span> Chat with workspace
+	</button>
+
+	<button
+		class="chat-btn"
+		data-testid="open-meeting-notes"
+		onclick={() => meetingNotesModal.open()}
+	>
+		<span aria-hidden="true">🎙️</span> Meeting notes
 	</button>
 
 	{#if teamspaces && teamspaces.favorites.length > 0}
