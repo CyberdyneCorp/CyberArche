@@ -8,6 +8,7 @@
 	import WorkspaceChat from '$lib/components/WorkspaceChat.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import { linkIndex } from '$lib/viewmodels/link-index.svelte';
+	import { commandPalette } from '$lib/viewmodels/commandPalette.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
@@ -18,7 +19,6 @@
 	const workspaceId = $derived(page.params.workspaceId!);
 
 	let teamspaces = $state<TeamspacesVM | null>(null);
-	let paletteOpen = $state(false);
 
 	$effect(() => {
 		if (session.restoring) return; // wait for the cookie-based restore to settle
@@ -43,7 +43,7 @@
 	function onWindowKeydown(event: KeyboardEvent) {
 		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 			event.preventDefault();
-			paletteOpen = !paletteOpen;
+			commandPalette.toggle();
 		}
 	}
 </script>
@@ -76,8 +76,8 @@
 			{@render children()}
 		</main>
 	</div>
-	{#if paletteOpen}
-		<CommandPalette {workspaceId} onclose={() => (paletteOpen = false)} />
+	{#if commandPalette.isOpen}
+		<CommandPalette {workspaceId} onclose={() => commandPalette.close()} />
 	{/if}
 	<GraphModal {workspaceId} />
 	{#if settingsModal.isOpen}
