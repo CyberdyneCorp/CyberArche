@@ -156,6 +156,11 @@ class UpdateViewRequest(BaseModel):
     name: str | None = None
     filters: list[FilterModel] | None = None
     sorts: list[SortModel] | None = None
+    # group_by/date_by are nullable and meaningfully settable to null (clearing
+    # the grouping/date property), so "omitted" is distinguished from "set to
+    # null" via model_fields_set in the handler.
+    group_by: str | None = None
+    date_by: str | None = None
 
 
 class AddRowRequest(BaseModel):
@@ -296,6 +301,13 @@ async def update_view(
         if body.sorts is not None
         else None
     )
+    # Only forward group_by/date_by when the client actually sent them, so an
+    # omitted field leaves the view unchanged while an explicit null clears it.
+    extra: dict[str, Any] = {}
+    if "group_by" in body.model_fields_set:
+        extra["group_by"] = body.group_by
+    if "date_by" in body.model_fields_set:
+        extra["date_by"] = body.date_by
     view = await cases.collections.update_view(
         caller,
         CollectionId(collection_id),
@@ -303,6 +315,7 @@ async def update_view(
         name=body.name,
         filters=filters,
         sorts=sorts,
+        **extra,
     )
     return ViewResponse.from_domain(view)
 

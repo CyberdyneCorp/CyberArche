@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { PropertyType } from '$lib/api/collections';
-import { createCollection, createCollectionList, operatorsForType } from './collection.svelte';
+import type { CollectionRow, PropertyDef, PropertyType } from '$lib/api/collections';
+import {
+	createCollection,
+	createCollectionList,
+	groupRows,
+	operatorsForType
+} from './collection.svelte';
 
 const COLLECTION = (overrides: Record<string, unknown> = {}) => ({
 	id: 'c1',
@@ -318,6 +323,146 @@ describe('collection ViewModel — sorts', () => {
 		await vm.removeSort(0);
 		expect(vm.sorts).toEqual([]);
 		expect(vm.activeSortCount).toBe(0);
+	});
+});
+
+describe('collection ViewModel — board views', () => {
+	beforeEach(() => vi.restoreAllMocks());
+
+	function boardFetch() {
+		return recordingFetch({
+			'GET /api/v1/collections/c1': COLLECTION(),
+			'GET /api/v1/collections/c1/views/v1/rows': [
+				ROW('r1', { properties: { p1: 'todo' } }),
+				ROW('r2', { properties: { p1: 'done' } })
+			],
+			'GET /api/v1/collections/c1/views/v2/rows': [ROW('r1', { properties: { p1: 'todo' } })],
+			'POST /api/v1/collections/c1/views': VIEW({ id: 'v2', name: 'Board', kind: 'board' }),
+			'PATCH /api/v1/collections/c1/views/v1': (body: Record<string, unknown>) =>
+				VIEW({ group_by: body.group_by ?? null }),
+			'PATCH /api/v1/collections/c1/rows/r1': (body: Record<string, unknown>) =>
+				ROW('r1', {
+					properties: { p1: (body.values as Record<string, unknown>)?.p1 ?? null }
+				})
+		});
+	}
+
+	it('createViewOfKind creates, appends, selects, and re-queries', async () => {
+		const { fetch, calls } = boardFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		calls.length = 0;
+
+		const view = await vm.createViewOfKind('Board', 'board');
+
+		expect(view?.id).toBe('v2');
+		expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+			name: 'Board',
+			kind: 'board'
+		});
+		expect(vm.collection?.views.map((v) => v.id)).toEqual(['v1', 'v2']);
+		expect(vm.currentView?.id).toBe('v2');
+		// Re-queried the new view's rows.
+		expect(calls.some((c) => c.url.endsWith('/views/v2/rows'))).toBe(true);
+		expect(vm.rows.map((r) => r.id)).toEqual(['r1']);
+	});
+
+	it('setBoardGroupBy persists group_by and updates the in-memory view', async () => {
+		const { fetch, calls } = boardFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		calls.length = 0;
+
+		await vm.setBoardGroupBy('p1');
+
+		const patch = calls.find((c) => c.method === 'PATCH');
+		expect(patch?.url).toBe('/api/v1/collections/c1/views/v1');
+		expect(patch?.body?.group_by).toBe('p1');
+		expect(vm.currentView?.group_by).toBe('p1');
+		expect(vm.groupByProperty?.id).toBe('p1');
+	});
+
+	it('exposes the select properties available to group by', async () => {
+		const { fetch } = boardFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		expect(vm.selectProperties.map((p) => p.id)).toEqual(['p1']);
+	});
+
+	it('setRowGroup sets the property and moves the row to the new group', async () => {
+		const { fetch } = boardFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		await vm.setBoardGroupBy('p1');
+
+		const before = groupRows(vm.rows, vm.groupByProperty);
+		expect(before.find((g) => g.key === 'todo')?.rows.map((r) => r.id)).toEqual(['r1']);
+
+		await vm.setRowGroup('r1', 'p1', 'done');
+
+		expect(vm.rows.find((r) => r.id === 'r1')?.properties.p1).toBe('done');
+		const after = groupRows(vm.rows, vm.groupByProperty);
+		expect(after.find((g) => g.key === 'todo')?.rows).toEqual([]);
+		// r1 moved into the "done" group; row-array order (r1 before r2) is kept.
+		expect(after.find((g) => g.key === 'done')?.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+	});
+
+	it('setRowGroup with null moves the row to Uncategorized', async () => {
+		const { fetch } = boardFetch();
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		await vm.setBoardGroupBy('p1');
+
+		await vm.setRowGroup('r1', 'p1', null);
+
+		const groups = groupRows(vm.rows, vm.groupByProperty);
+		expect(groups.at(-1)?.key).toBeNull();
+		expect(groups.at(-1)?.rows.map((r) => r.id)).toEqual(['r1']);
+	});
+});
+
+describe('groupRows', () => {
+	const property: PropertyDef = {
+		id: 'status',
+		name: 'Status',
+		type: 'select',
+		options: ['todo', 'doing', 'done']
+	};
+	const row = (id: string, status?: string): CollectionRow =>
+		({ id, properties: status === undefined ? {} : { status } }) as unknown as CollectionRow;
+
+	it('creates a group per option in option order plus a trailing Uncategorized', () => {
+		const groups = groupRows(
+			[row('a', 'done'), row('b', 'todo'), row('c')],
+			property
+		);
+		expect(groups.map((g) => g.key)).toEqual(['todo', 'doing', 'done', null]);
+		expect(groups.map((g) => g.label)).toEqual(['todo', 'doing', 'done', 'Uncategorized']);
+	});
+
+	it('routes empty and unknown values to Uncategorized', () => {
+		const groups = groupRows([row('a'), row('b', 'archived'), row('c', 'todo')], property);
+		expect(groups.find((g) => g.key === 'todo')?.rows.map((r) => r.id)).toEqual(['c']);
+		expect(groups.at(-1)?.key).toBeNull();
+		expect(groups.at(-1)?.rows.map((r) => r.id)).toEqual(['a', 'b']);
+	});
+
+	it('preserves incoming order within a group', () => {
+		const groups = groupRows([row('a', 'todo'), row('b', 'done'), row('c', 'todo')], property);
+		expect(groups.find((g) => g.key === 'todo')?.rows.map((r) => r.id)).toEqual(['a', 'c']);
+	});
+
+	it('returns a single All group when no property is given', () => {
+		const groups = groupRows([row('a', 'todo'), row('b')], undefined);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].key).toBeNull();
+		expect(groups[0].label).toBe('All');
+		expect(groups[0].rows.map((r) => r.id)).toEqual(['a', 'b']);
 	});
 });
 

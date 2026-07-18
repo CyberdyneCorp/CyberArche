@@ -35,10 +35,15 @@ function fakeVm(overrides: Record<string, unknown> = {}) {
 		sorts: [],
 		activeFilterCount: 0,
 		activeSortCount: 0,
+		groupByProperty: undefined,
+		selectProperties: [{ id: 'status', name: 'Status', type: 'select', options: ['todo', 'done'] }],
 		rename: vi.fn(),
 		selectView: vi.fn(),
+		createViewOfKind: vi.fn(),
 		addRow: vi.fn(),
 		setCell: vi.fn(),
+		setRowGroup: vi.fn(),
+		setBoardGroupBy: vi.fn(),
 		renameRow: vi.fn(),
 		addProperty: vi.fn(),
 		addFilter: vi.fn(),
@@ -154,12 +159,48 @@ describe('CollectionTable component', () => {
 		);
 	});
 
-	it('renders a placeholder for non-table view kinds (the future-view seam)', () => {
+	it('still shows a placeholder for the calendar view kind', () => {
+		const vm = fakeVm({
+			currentView: { id: 'v4', name: 'Cal', kind: 'calendar', filters: [], sorts: [], group_by: null, date_by: null }
+		});
+		render(vm);
+		expect(target.querySelector('.placeholder')?.textContent).toContain('calendar');
+		expect(target.querySelector('[data-testid="collection-table"]')).toBeNull();
+	});
+
+	it('renders the board surface for a board view', () => {
 		const vm = fakeVm({
 			currentView: { id: 'v2', name: 'Board', kind: 'board', filters: [], sorts: [], group_by: null, date_by: null }
 		});
 		render(vm);
-		expect(target.querySelector('.placeholder')?.textContent).toContain('board');
+		// No group_by yet, so the board prompts for a group-by property.
+		expect(target.querySelector('[data-testid="board-groupby-prompt"]')).not.toBeNull();
 		expect(target.querySelector('[data-testid="collection-table"]')).toBeNull();
+	});
+
+	it('renders the gallery surface for a gallery view', () => {
+		const vm = fakeVm({
+			currentView: { id: 'v3', name: 'Gallery', kind: 'gallery', filters: [], sorts: [], group_by: null, date_by: null }
+		});
+		render(vm);
+		expect(target.querySelector('[data-testid="collection-gallery"]')).not.toBeNull();
+		expect(target.querySelector('[data-testid="collection-table"]')).toBeNull();
+	});
+
+	it('adding a view submits the name and kind to createViewOfKind', () => {
+		const vm = fakeVm();
+		render(vm);
+		target.querySelector<HTMLButtonElement>('[data-testid="add-view"]')!.click();
+		flushSync();
+		const name = target.querySelector<HTMLInputElement>('[data-testid="view-name"]')!;
+		name.value = 'My board';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		const kind = target.querySelector<HTMLSelectElement>('[data-testid="view-kind"]')!;
+		kind.value = 'board';
+		kind.dispatchEvent(new Event('change', { bubbles: true }));
+		target.querySelector<HTMLFormElement>('[data-testid="add-view-form"]')!.dispatchEvent(
+			new Event('submit', { bubbles: true, cancelable: true })
+		);
+		expect(vm.createViewOfKind).toHaveBeenCalledWith('My board', 'board');
 	});
 });
