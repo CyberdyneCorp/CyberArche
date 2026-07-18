@@ -103,7 +103,7 @@ export const createView = (collectionId: string, name: string, kind: ViewKind = 
 export const updateView = (
 	collectionId: string,
 	viewId: string,
-	patchBody: { name?: string; filters?: Filter[]; sorts?: Sort[] }
+	patchBody: { name?: string; filters?: Filter[]; sorts?: Sort[]; group_by?: string | null }
 ) => patch<View>(`/api/v1/collections/${collectionId}/views/${viewId}`, patchBody);
 
 export const deleteView = (collectionId: string, viewId: string) =>

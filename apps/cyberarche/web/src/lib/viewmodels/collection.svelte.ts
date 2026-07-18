@@ -8,6 +8,7 @@ import {
 	addProperty,
 	addRow as apiAddRow,
 	createCollection as apiCreateCollection,
+	createView,
 	deleteRow as apiDeleteRow,
 	getCollection,
 	listCollections,
@@ -18,9 +19,11 @@ import {
 	type Collection,
 	type CollectionRow,
 	type Filter,
+	type PropertyDef,
 	type PropertyType,
 	type Sort,
-	type View
+	type View,
+	type ViewKind
 } from '$lib/api/collections';
 import { retitleDocument } from '$lib/api/documents';
 
@@ -53,6 +56,39 @@ const OPS_BY_TYPE: Record<PropertyType, string[]> = {
  * The Title pseudo-property is filtered as text — pass `'text'`. */
 export function operatorsForType(type: PropertyType): { value: string; label: string }[] {
 	return (OPS_BY_TYPE[type] ?? OPS_BY_TYPE.text).map((op) => ({ value: op, label: OP_LABELS[op] }));
+}
+
+/** One Board column: rows sharing a single-select option value (or the trailing
+ * `key: null` "Uncategorized" bucket for empty / unknown values). */
+export interface RowGroup {
+	key: string | null;
+	label: string;
+	rows: CollectionRow[];
+}
+
+/** Pure: partition already-filtered/sorted rows into Board columns.
+ *
+ * One group per option of `property`, in the property's option order, followed
+ * by a trailing "Uncategorized" group (`key: null`) for rows whose value is
+ * empty or not one of the options. When `property` is undefined a single "All"
+ * group holds every row. Within-group order mirrors the incoming row order. */
+export function groupRows(rows: CollectionRow[], property: PropertyDef | undefined): RowGroup[] {
+	if (!property) return [{ key: null, label: 'All', rows: [...rows] }];
+
+	const groups: RowGroup[] = property.options.map((option) => ({
+		key: option,
+		label: option,
+		rows: []
+	}));
+	const byKey = new Map(groups.map((g) => [g.key, g]));
+	const uncategorized: RowGroup = { key: null, label: 'Uncategorized', rows: [] };
+
+	for (const row of rows) {
+		const value = row.properties[property.id];
+		const bucket = (typeof value === 'string' && byKey.get(value)) || uncategorized;
+		bucket.rows.push(row);
+	}
+	return [...groups, uncategorized];
 }
 
 export function createCollectionList(workspaceId: string) {
@@ -104,6 +140,28 @@ export function createCollection(collectionId: string) {
 	function replaceRow(updated: CollectionRow) {
 		rows = rows.map((r) => (r.id === updated.id ? updated : r));
 	}
+
+	/** Persist a single property value, then reflect the server row locally so
+	 * table cells and board cards move to their new group. */
+	async function writeCell(rowId: string, propertyId: string, value: unknown) {
+		try {
+			replaceRow(await setRowValues(collectionId, rowId, { [propertyId]: value }));
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'failed to update cell';
+			await reloadRows(); // fall back to server truth on failure
+		}
+	}
+
+	/** The single-select property the current Board groups by, if any. */
+	const groupByProperty = (): PropertyDef | undefined => {
+		const id = currentView()?.group_by;
+		if (!id) return undefined;
+		const property = collection?.properties.find((p) => p.id === id);
+		return property?.type === 'select' ? property : undefined;
+	};
+
+	const selectProperties = (): PropertyDef[] =>
+		collection?.properties.filter((p) => p.type === 'select') ?? [];
 
 	function replaceView(updated: View) {
 		if (!collection) return;
@@ -168,6 +226,47 @@ export function createCollection(collectionId: string) {
 			await reloadRows();
 		},
 
+		/** Create a view of the given kind, append it, select it, and load rows. */
+		async createViewOfKind(name: string, kind: ViewKind): Promise<View | null> {
+			if (!collection) return null;
+			try {
+				const view = await createView(collectionId, name, kind);
+				collection = { ...collection, views: [...collection.views, view] };
+				currentViewId = view.id;
+				await reloadRows();
+				return view;
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to create view';
+				return null;
+			}
+		},
+
+		// ---- Board grouping ----
+		get groupByProperty() {
+			return groupByProperty();
+		},
+		get selectProperties() {
+			return selectProperties();
+		},
+
+		/** Set the Board's group-by property (null clears it). Updates the view
+		 * in-memory immediately so the columns re-partition without a round-trip. */
+		async setBoardGroupBy(propertyId: string | null) {
+			const view = currentView();
+			if (!view) return;
+			replaceView({ ...view, group_by: propertyId });
+			try {
+				await updateView(collectionId, view.id, { group_by: propertyId });
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to set group-by';
+			}
+		},
+
+		/** Move a card between Board columns by setting its grouping property. */
+		setRowGroup(rowId: string, propertyId: string, value: string | null) {
+			return writeCell(rowId, propertyId, value);
+		},
+
 		async addRow(title = ''): Promise<CollectionRow | null> {
 			try {
 				const row = await apiAddRow(collectionId, title);
@@ -179,14 +278,8 @@ export function createCollection(collectionId: string) {
 			}
 		},
 
-		async setCell(rowId: string, propertyId: string, value: unknown) {
-			try {
-				const updated = await setRowValues(collectionId, rowId, { [propertyId]: value });
-				replaceRow(updated);
-			} catch (e) {
-				error = e instanceof Error ? e.message : 'failed to update cell';
-				await reloadRows(); // fall back to server truth on failure
-			}
+		setCell(rowId: string, propertyId: string, value: unknown) {
+			return writeCell(rowId, propertyId, value);
 		},
 
 		async deleteRow(rowId: string) {

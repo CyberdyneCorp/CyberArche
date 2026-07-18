@@ -311,3 +311,51 @@ def test_delete_teamspace_over_http_moves_documents_to_trash(api):
     restored = api.post(f"/api/v1/documents/{doc['id']}/restore", headers=headers).json()
     assert restored["trashed"] is False
     assert restored["teamspace_id"] is None
+
+
+def test_update_view_persists_group_by_over_http(api):
+    """Regression: the PATCH view endpoint must forward group_by/date_by. The
+    board view groups by a select property, so if the HTTP layer drops group_by
+    the grouping silently resets on reload (collections-board-gallery)."""
+    headers = auth("alice-token")
+    ws = api.post("/api/v1/workspaces", json={"name": "WS"}, headers=headers).json()
+    collection = api.post(
+        f"/api/v1/workspaces/{ws['id']}/collections",
+        json={"name": "Tasks"},
+        headers=headers,
+    ).json()
+    prop = api.post(
+        f"/api/v1/collections/{collection['id']}/properties",
+        json={"name": "Status", "type": "select", "options": ["Todo", "Done"]},
+        headers=headers,
+    ).json()
+    property_id = next(p["id"] for p in prop["properties"] if p["name"] == "Status")
+    view_id = collection["views"][0]["id"]
+
+    updated = api.patch(
+        f"/api/v1/collections/{collection['id']}/views/{view_id}",
+        json={"group_by": property_id},
+        headers=headers,
+    ).json()
+    assert updated["group_by"] == property_id
+
+    # It survives a reload (fetched fresh from the repository).
+    reloaded = api.get(f"/api/v1/collections/{collection['id']}", headers=headers).json()
+    view = next(v for v in reloaded["views"] if v["id"] == view_id)
+    assert view["group_by"] == property_id
+
+    # Omitting group_by on a later patch leaves it unchanged; explicit null clears.
+    api.patch(
+        f"/api/v1/collections/{collection['id']}/views/{view_id}",
+        json={"name": "Board"},
+        headers=headers,
+    )
+    after_omit = api.get(f"/api/v1/collections/{collection['id']}", headers=headers).json()
+    assert next(v for v in after_omit["views"] if v["id"] == view_id)["group_by"] == property_id
+    api.patch(
+        f"/api/v1/collections/{collection['id']}/views/{view_id}",
+        json={"group_by": None},
+        headers=headers,
+    )
+    after_clear = api.get(f"/api/v1/collections/{collection['id']}", headers=headers).json()
+    assert next(v for v in after_clear["views"] if v["id"] == view_id)["group_by"] is None

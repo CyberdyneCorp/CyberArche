@@ -1,8 +1,10 @@
 <script lang="ts">
-	import type { PropertyType } from '$lib/api/collections';
+	import type { PropertyType, ViewKind } from '$lib/api/collections';
 	import type { CollectionVM } from '$lib/viewmodels/collection.svelte';
+	import CollectionBoard from './CollectionBoard.svelte';
 	import CollectionCell from './CollectionCell.svelte';
 	import CollectionFilterMenu from './CollectionFilterMenu.svelte';
+	import CollectionGallery from './CollectionGallery.svelte';
 	import CollectionSortMenu from './CollectionSortMenu.svelte';
 
 	let {
@@ -13,6 +15,21 @@
 		/** Open a row as a full document page. */
 		onOpenRow: (rowId: string) => void;
 	} = $props();
+
+	// --- add view mini-form ---
+	const VIEW_KINDS: ViewKind[] = ['table', 'board', 'gallery', 'calendar'];
+	let addingView = $state(false);
+	let viewName = $state('');
+	let viewKind = $state<ViewKind>('board');
+
+	async function submitView() {
+		const name = viewName.trim();
+		if (!name) return;
+		await vm.createViewOfKind(name, viewKind);
+		viewName = '';
+		viewKind = 'board';
+		addingView = false;
+	}
 
 	// --- editable collection name ---
 	let nameDraft = $state('');
@@ -72,8 +89,8 @@
 		{/if}
 	</header>
 
-	<!-- View tabs. A clean seam for later PRs: more view kinds render their own
-	     surface; only the table view is built today. -->
+	<!-- View tabs. Each view kind renders its own surface below; the "+" adds a
+	     new view of a chosen kind. -->
 	<nav class="view-tabs" data-testid="view-tabs">
 		{#each vm.collection?.views ?? [] as view (view.id)}
 			<button
@@ -85,15 +102,49 @@
 				{view.name}
 			</button>
 		{/each}
+		<button
+			class="add-view"
+			data-testid="add-view"
+			title="Add view"
+			onclick={() => (addingView = !addingView)}>＋</button
+		>
 	</nav>
 
-	{#if vm.currentView && vm.currentView.kind !== 'table'}
-		<p class="placeholder">The {vm.currentView.kind} view is coming soon.</p>
-	{:else}
+	{#if addingView}
+		<form
+			class="prop-form"
+			data-testid="add-view-form"
+			onsubmit={(e) => {
+				e.preventDefault();
+				submitView();
+			}}
+		>
+			<input class="input" placeholder="View name" bind:value={viewName} data-testid="view-name" />
+			<select class="input" bind:value={viewKind} data-testid="view-kind">
+				{#each VIEW_KINDS as kind (kind)}
+					<option value={kind}>{kind}</option>
+				{/each}
+			</select>
+			<button type="submit" class="btn" data-testid="view-submit">Add</button>
+		</form>
+	{/if}
+
+	<!-- Filters/sorts apply to every data view (the server returns already
+	     filtered+sorted rows); the calendar placeholder omits the toolbar. -->
+	{#if vm.currentView && vm.currentView.kind !== 'calendar'}
 		<div class="toolbar" data-testid="collection-toolbar">
 			<CollectionFilterMenu {vm} />
 			<CollectionSortMenu {vm} />
 		</div>
+	{/if}
+
+	{#if vm.currentView?.kind === 'board'}
+		<CollectionBoard {vm} {onOpenRow} />
+	{:else if vm.currentView?.kind === 'gallery'}
+		<CollectionGallery {vm} {onOpenRow} />
+	{:else if vm.currentView?.kind === 'calendar'}
+		<p class="placeholder">The calendar view is coming soon.</p>
+	{:else}
 		<div class="table-wrap">
 			<table class="table" data-testid="collection-table">
 				<thead>
@@ -223,6 +274,13 @@
 		color: var(--tx);
 		border-bottom-color: var(--acc);
 		font-weight: 500;
+	}
+	.add-view {
+		padding: 6px 8px;
+		color: var(--tx3);
+	}
+	.add-view:hover {
+		color: var(--tx);
 	}
 	.toolbar {
 		display: flex;
