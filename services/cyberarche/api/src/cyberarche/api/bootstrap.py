@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +42,45 @@ async def _run_scheduler(container: Container, interval: int) -> None:
             logger.exception("scheduled-agent tick failed")
 
 
+async def _run_digest_scheduler(container: Container, interval: int) -> None:
+    """Tick the email-digest scheduler forever; a failing tick is logged and
+    does not stop the loop."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await container.use_cases.notification_digest.run_due(datetime.now(UTC))
+        except Exception:  # a bad tick must never kill the scheduler
+            logger.exception("notification-digest tick failed")
+
+
+def _start_schedulers(active: Container, settings: Settings) -> list[asyncio.Task]:
+    """The in-process background schedulers for the real (postgres) deployment.
+    The memory backend (tests/local) has no persistent state and none run."""
+    tasks: list[asyncio.Task] = []
+    if settings.backend != "postgres":
+        return tasks
+    if settings.enable_scheduler:
+        tasks.append(
+            asyncio.create_task(
+                _run_scheduler(active, settings.scheduler_interval_seconds)
+            )
+        )
+    if settings.enable_digest:
+        tasks.append(
+            asyncio.create_task(
+                _run_digest_scheduler(active, settings.digest_interval_seconds)
+            )
+        )
+    return tasks
+
+
+async def _stop_schedulers(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -61,21 +101,14 @@ def create_app(
         app.state.container = active
         # Local socket registry bridged to the shared peer bus (12.5).
         app.state.document_peers = DocumentPeers(active.peer_bus)
-        # Autonomous agents: an in-process scheduler ticks due tasks. Only in the
-        # real (postgres) deployment — the memory backend (tests/local) has no
-        # persistent tasks and no scheduler.
-        scheduler = None
-        if settings.backend == "postgres" and settings.enable_scheduler:
-            scheduler = asyncio.create_task(
-                _run_scheduler(active, settings.scheduler_interval_seconds)
-            )
+        # Autonomous agents + the email digest run on in-process schedulers, only
+        # in the real (postgres) deployment — the memory backend (tests/local)
+        # has no persistent state and starts none.
+        schedulers = _start_schedulers(active, settings)
         try:
             yield
         finally:
-            if scheduler is not None:
-                scheduler.cancel()
-                with suppress(asyncio.CancelledError):
-                    await scheduler
+            await _stop_schedulers(schedulers)
             if owned:
                 await active.aclose()
 

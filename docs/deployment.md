@@ -60,6 +60,8 @@ defaults and **cannot be overridden from Coolify** until a mapping is added:
   compose `environment:` block.
 - `CYBERARCHE_ENABLE_SCHEDULER` / `_SCHEDULER_INTERVAL_SECONDS` — autonomous
   scheduled agents (default on, 60 s).
+- `CYBERARCHE_ENABLE_DIGEST` / `_DIGEST_INTERVAL_SECONDS` — scheduled email
+  digest of unread notifications (default on, daily).
 - `CYBERARCHE_AUTH_AUDIENCE` / `_AUTH_TENANT_CLAIM` — token validation tuning
   (defaults: none / `org_id`).
 

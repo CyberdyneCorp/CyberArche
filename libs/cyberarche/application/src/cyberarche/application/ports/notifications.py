@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from cyberarche.domain.ids import NotificationId, TenantId, UserId
@@ -18,6 +19,13 @@ class NotificationRepository(Protocol):
         ...
 
     async def unread_count(self, tenant_id: TenantId, user_id: UserId) -> int: ...
+
+    async def unread_since(
+        self, tenant_id: TenantId, user_id: UserId, *, since: datetime | None
+    ) -> list[Notification]:
+        """The user's UNREAD notifications created strictly after `since` (all
+        unread when `since` is None), newest first."""
+        ...
 
     async def mark_read(
         self, tenant_id: TenantId, user_id: UserId, notification_id: NotificationId
@@ -37,6 +45,17 @@ class NotificationPreferencesRepository(Protocol):
 
     async def upsert(self, prefs: NotificationPreferences) -> None:
         """Insert or replace the user's preferences."""
+        ...
+
+    async def list_email_recipients(self) -> list[NotificationPreferences]:
+        """Every user, across all tenants (this is a background job), whose
+        preferences have email delivery enabled and a non-empty email."""
+        ...
+
+    async def mark_digested(
+        self, tenant_id: TenantId, user_id: UserId, at: datetime
+    ) -> None:
+        """Record when the scheduled digest last ran for this user."""
         ...
 
 
