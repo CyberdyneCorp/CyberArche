@@ -2,6 +2,7 @@
  * meeting recordings and turn one into a new structured document. DOM-free —
  * the component only reads state and calls these methods. */
 
+import type { Document } from '$lib/api/documents';
 import { ApiError } from '$lib/api/http';
 import { createMeetingNotes, listRecordings, type Recording } from '$lib/api/meetings';
 
@@ -50,14 +51,14 @@ export function createMeetingNotes_VM(workspaceId: string) {
 			}
 		},
 
-		/** Generate a document from one recording; returns its id on success. */
-		async generate(recordingId: string): Promise<string | null> {
+		/** Generate a document from one recording; returns the new (private)
+		 * document on success so the caller can add it to the sidebar and open it. */
+		async generate(recordingId: string): Promise<Document | null> {
 			if (pendingId) return null;
 			pendingId = recordingId;
 			error = null;
 			try {
-				const document = await createMeetingNotes(workspaceId, recordingId);
-				return document.id;
+				return await createMeetingNotes(workspaceId, recordingId);
 			} catch (err) {
 				error = friendlyError(err);
 				return null;

@@ -123,6 +123,26 @@ export function createDocumentTree() {
 			return document;
 		},
 
+		/** Insert an already-created document into the tree so it appears without
+		 * a reload (e.g. a doc generated from meeting notes, which is created via
+		 * its own endpoint rather than `create`). Only documents of the open
+		 * workspace that aren't already present are added; a document with no
+		 * teamspace and no parent lands as a private root (the sidebar's Private
+		 * section), matching where `create` puts one. */
+		addRoot(document: Document) {
+			if (document.workspace_id !== workspaceId) return;
+			if (document.teamspace_id) return; // listed under its teamspace, not here
+			if (findNode(roots, document.id)) return;
+			if (document.parent_id) {
+				const parent = findNode(roots, document.parent_id);
+				if (parent?.childrenLoaded) {
+					parent.children = [...parent.children, node(document)];
+				}
+				return;
+			}
+			roots = [...roots, node(document)];
+		},
+
 		async rename(id: string, title: string) {
 			await settled();
 			const updated = await retitleDocument(id, title);

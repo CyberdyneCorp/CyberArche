@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import {
 		createMeetingNotes_VM,
 		meetingNotesModal,
@@ -28,10 +29,13 @@
 
 	async function generate(recordingId: string) {
 		if (!vm) return;
-		const docId = await vm.generate(recordingId);
-		if (!docId) return;
+		const doc = await vm.generate(recordingId);
+		if (!doc) return;
+		// The doc is created private (no teamspace) — surface it under Private
+		// immediately instead of waiting for a reload.
+		documentTree.addRoot(doc);
 		meetingNotesModal.close();
-		await goto(`/w/${workspaceId}/d/${docId}`);
+		await goto(`/w/${workspaceId}/d/${doc.id}`);
 	}
 </script>
 

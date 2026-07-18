@@ -63,6 +63,32 @@ describe('document tree ViewModel', () => {
 		expect(tree.find('new-1')).not.toBeNull();
 	});
 
+	it('addRoot surfaces an externally-created private document under the roots', async () => {
+		// A doc created via its own endpoint (e.g. meeting notes) must appear in
+		// the sidebar's Private section without a full reload.
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/documents?workspace_id=ws-1': [],
+				'GET /api/v1/workspaces/ws-1/trash': []
+			})
+		);
+		const tree = createDocumentTree();
+		await tree.open('ws-1');
+
+		tree.addRoot(DOC('m-1', 'Meeting notes'));
+		expect(tree.roots.map((n) => n.document.id)).toEqual(['m-1']);
+
+		tree.addRoot(DOC('m-1', 'Meeting notes')); // idempotent: no duplicate
+		expect(tree.roots.map((n) => n.document.id)).toEqual(['m-1']);
+
+		// A teamspace doc is listed under its teamspace, and a doc from another
+		// workspace never belongs to this tree.
+		tree.addRoot({ ...DOC('t-1', 'Team'), teamspace_id: 'ts-1' });
+		tree.addRoot({ ...DOC('o-1', 'Other'), workspace_id: 'ws-2' });
+		expect(tree.roots.map((n) => n.document.id)).toEqual(['m-1']);
+	});
+
 	it('rename updates the node the sidebar renders', async () => {
 		vi.stubGlobal(
 			'fetch',
