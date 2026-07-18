@@ -31,12 +31,23 @@ function fakeVm(overrides: Record<string, unknown> = {}) {
 		currentView: { id: 'v1', name: 'Table', kind: 'table', filters: [], sorts: [], group_by: null, date_by: null },
 		busy: false,
 		error: null,
+		filters: [],
+		sorts: [],
+		activeFilterCount: 0,
+		activeSortCount: 0,
 		rename: vi.fn(),
 		selectView: vi.fn(),
 		addRow: vi.fn(),
 		setCell: vi.fn(),
 		renameRow: vi.fn(),
 		addProperty: vi.fn(),
+		addFilter: vi.fn(),
+		updateFilter: vi.fn(),
+		removeFilter: vi.fn(),
+		addSort: vi.fn(),
+		updateSort: vi.fn(),
+		removeSort: vi.fn(),
+		moveSort: vi.fn(),
 		...overrides
 	};
 }
@@ -105,6 +116,42 @@ describe('CollectionTable component', () => {
 		render(vm, onOpenRow);
 		target.querySelector<HTMLButtonElement>('[data-testid="open-row"]')!.click();
 		expect(onOpenRow).toHaveBeenCalledWith('r1');
+	});
+
+	it('adding a filter rule calls vm.addFilter', () => {
+		const vm = fakeVm();
+		render(vm);
+		target.querySelector<HTMLButtonElement>('[data-testid="filter-button"]')!.click();
+		flushSync();
+		target.querySelector<HTMLButtonElement>('[data-testid="add-filter"]')!.click();
+		expect(vm.addFilter).toHaveBeenCalled();
+	});
+
+	it('the filter panel renders a value control matching the property type', () => {
+		const vm = fakeVm({
+			properties: [{ id: 'age', name: 'Age', type: 'number', options: [] }],
+			filters: [{ property_id: 'age', op: 'gt', value: '5' }],
+			activeFilterCount: 1
+		});
+		render(vm);
+		target.querySelector<HTMLButtonElement>('[data-testid="filter-button"]')!.click();
+		flushSync();
+		const value = target.querySelector<HTMLInputElement>('[data-testid="filter-value"]')!;
+		expect(value.type).toBe('number');
+		// The operator picker only offers number-appropriate operators (no `contains`).
+		const ops = [...target.querySelectorAll('[data-testid="filter-op"] option')].map(
+			(o) => o.getAttribute('value')
+		);
+		expect(ops).toContain('gt');
+		expect(ops).not.toContain('contains');
+	});
+
+	it('shows the empty state when rows are empty due to active filters', () => {
+		const vm = fakeVm({ rows: [], activeFilterCount: 1 });
+		render(vm);
+		expect(target.querySelector('[data-testid="no-rows"]')?.textContent).toContain(
+			'No rows match'
+		);
 	});
 
 	it('renders a placeholder for non-table view kinds (the future-view seam)', () => {

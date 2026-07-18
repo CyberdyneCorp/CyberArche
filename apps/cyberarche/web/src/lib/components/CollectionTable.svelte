@@ -2,6 +2,8 @@
 	import type { PropertyType } from '$lib/api/collections';
 	import type { CollectionVM } from '$lib/viewmodels/collection.svelte';
 	import CollectionCell from './CollectionCell.svelte';
+	import CollectionFilterMenu from './CollectionFilterMenu.svelte';
+	import CollectionSortMenu from './CollectionSortMenu.svelte';
 
 	let {
 		vm,
@@ -88,6 +90,10 @@
 	{#if vm.currentView && vm.currentView.kind !== 'table'}
 		<p class="placeholder">The {vm.currentView.kind} view is coming soon.</p>
 	{:else}
+		<div class="toolbar" data-testid="collection-toolbar">
+			<CollectionFilterMenu {vm} />
+			<CollectionSortMenu {vm} />
+		</div>
 		<div class="table-wrap">
 			<table class="table" data-testid="collection-table">
 				<thead>
@@ -139,6 +145,10 @@
 					{/each}
 				</tbody>
 			</table>
+
+			{#if vm.rows.length === 0 && vm.activeFilterCount > 0}
+				<p class="empty-rows" data-testid="no-rows">No rows match the current filters</p>
+			{/if}
 
 			<button class="add-row" data-testid="add-row" onclick={() => vm.addRow()}>
 				＋ Add row
@@ -214,8 +224,20 @@
 		border-bottom-color: var(--acc);
 		font-weight: 500;
 	}
+	.toolbar {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
 	.table-wrap {
 		overflow-x: auto;
+	}
+	.empty-rows {
+		margin: 12px 0;
+		padding: 16px;
+		color: var(--tx3);
+		text-align: center;
+		font-size: 14px;
 	}
 	.table {
 		border-collapse: collapse;

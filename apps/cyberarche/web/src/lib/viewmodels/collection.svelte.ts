@@ -14,12 +14,46 @@ import {
 	queryView,
 	renameCollection,
 	setRowValues,
+	updateView,
 	type Collection,
 	type CollectionRow,
+	type Filter,
 	type PropertyType,
+	type Sort,
 	type View
 } from '$lib/api/collections';
 import { retitleDocument } from '$lib/api/documents';
+
+/** The synthetic property id that targets a row's document title (mirrors the
+ * backend `TITLE_PROPERTY`). Filters/sorts may target it; it behaves like text. */
+export const TITLE_PROPERTY = '__title__';
+
+const OP_LABELS: Record<string, string> = {
+	eq: 'is',
+	neq: 'is not',
+	contains: 'contains',
+	gt: 'greater than',
+	lt: 'less than',
+	is_empty: 'is empty',
+	not_empty: 'is not empty'
+};
+
+// Operators the backend `apply_view` honours for each property type.
+const OPS_BY_TYPE: Record<PropertyType, string[]> = {
+	text: ['eq', 'neq', 'contains', 'is_empty', 'not_empty'],
+	url: ['eq', 'neq', 'contains', 'is_empty', 'not_empty'],
+	number: ['eq', 'neq', 'gt', 'lt', 'is_empty', 'not_empty'],
+	select: ['eq', 'neq', 'is_empty', 'not_empty'],
+	multi_select: ['contains', 'is_empty', 'not_empty'],
+	date: ['eq', 'gt', 'lt', 'is_empty', 'not_empty'],
+	checkbox: ['eq', 'neq']
+};
+
+/** Pure: the operators appropriate to a property type, as pickable options.
+ * The Title pseudo-property is filtered as text — pass `'text'`. */
+export function operatorsForType(type: PropertyType): { value: string; label: string }[] {
+	return (OPS_BY_TYPE[type] ?? OPS_BY_TYPE.text).map((op) => ({ value: op, label: OP_LABELS[op] }));
+}
 
 export function createCollectionList(workspaceId: string) {
 	let collections = $state<Collection[]>([]);
@@ -69,6 +103,30 @@ export function createCollection(collectionId: string) {
 
 	function replaceRow(updated: CollectionRow) {
 		rows = rows.map((r) => (r.id === updated.id ? updated : r));
+	}
+
+	function replaceView(updated: View) {
+		if (!collection) return;
+		collection = {
+			...collection,
+			views: collection.views.map((v) => (v.id === updated.id ? updated : v))
+		};
+	}
+
+	const filters = (): Filter[] => currentView()?.filters ?? [];
+	const sorts = (): Sort[] => currentView()?.sorts ?? [];
+
+	/** Persist a filter/sort patch to the current view, then re-query its rows so
+	 * the table reflects filters-then-sorts. */
+	async function persistView(patch: { filters?: Filter[]; sorts?: Sort[] }) {
+		const view = currentView();
+		if (!view) return;
+		try {
+			replaceView(await updateView(collectionId, view.id, patch));
+			await reloadRows();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'failed to update view';
+		}
 	}
 
 	return {
@@ -165,6 +223,60 @@ export function createCollection(collectionId: string) {
 			} catch (e) {
 				error = e instanceof Error ? e.message : 'failed to rename';
 			}
+		},
+
+		// ---- Current-view filters ----
+		get filters() {
+			return filters();
+		},
+		get activeFilterCount() {
+			return filters().length;
+		},
+
+		addFilter(propertyId: string, op: string, value?: unknown) {
+			return persistView({ filters: [...filters(), { property_id: propertyId, op, value }] });
+		},
+
+		updateFilter(index: number, patch: Partial<Filter>) {
+			return persistView({
+				filters: filters().map((f, i) => (i === index ? { ...f, ...patch } : f))
+			});
+		},
+
+		removeFilter(index: number) {
+			return persistView({ filters: filters().filter((_, i) => i !== index) });
+		},
+
+		// ---- Current-view sorts (applied in order) ----
+		get sorts() {
+			return sorts();
+		},
+		get activeSortCount() {
+			return sorts().length;
+		},
+
+		addSort(propertyId: string, direction: 'asc' | 'desc') {
+			return persistView({
+				sorts: [...sorts(), { property_id: propertyId, direction }]
+			});
+		},
+
+		updateSort(index: number, patch: Partial<Sort>) {
+			return persistView({
+				sorts: sorts().map((s, i) => (i === index ? { ...s, ...patch } : s))
+			});
+		},
+
+		removeSort(index: number) {
+			return persistView({ sorts: sorts().filter((_, i) => i !== index) });
+		},
+
+		moveSort(index: number, dir: 'up' | 'down') {
+			const next = [...sorts()];
+			const target = index + (dir === 'up' ? -1 : 1);
+			if (target < 0 || target >= next.length) return Promise.resolve();
+			[next[index], next[target]] = [next[target], next[index]];
+			return persistView({ sorts: next });
 		}
 	};
 }
