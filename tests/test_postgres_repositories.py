@@ -23,6 +23,7 @@ from cyberarche.adapters.outbound.postgres.repositories import (
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import (
+    CollectionId,
     DocumentId,
     FolderId,
     SnapshotId,
@@ -130,6 +131,8 @@ def document_row(**overrides: object) -> dict:
         "trashed_from_parent_id": None,
         "teamspace_id": None,
         "folder_id": None,
+        "collection_id": None,
+        "properties": "{}",
     }
     row.update(overrides)
     return row
@@ -231,12 +234,14 @@ async def test_workspace_update_binds_name_and_slug():
 # --- PostgresDocumentRepository ---------------------------------------------
 
 
-async def test_document_add_binds_all_thirteen_columns():
+async def test_document_add_binds_all_columns():
     pool = FakePool()
     document = make_document(
         parent_id=DocumentId("p-1"),
         teamspace_id=TeamspaceId("ts-1"),
         folder_id=FolderId("f-1"),
+        collection_id=CollectionId("col-1"),
+        properties={"p": 1},
     )
     await PostgresDocumentRepository(pool).add(document)
 
@@ -245,6 +250,7 @@ async def test_document_add_binds_all_thirteen_columns():
     assert args == (
         "d-1", "ws-1", "acme", "Doc", "p-1", 0,
         "alice", NOW, NOW, False, None, "ts-1", "f-1",
+        "col-1", json.dumps({"p": 1}),
     )
 
 
@@ -387,7 +393,9 @@ async def test_document_update_binds_the_mutable_columns():
 
     query, args = pool.calls[0]
     assert query.startswith("UPDATE documents SET")
-    assert args == ("d-1", "Renamed", "p-1", 3, NOW, True, "p-1", "ts-1", "f-1")
+    assert args == (
+        "d-1", "Renamed", "p-1", 3, NOW, True, "p-1", "ts-1", "f-1", None, "{}"
+    )
 
 
 async def test_document_search_by_title_uses_default_limit():

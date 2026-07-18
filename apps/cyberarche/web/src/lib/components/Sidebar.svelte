@@ -2,6 +2,10 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
+	import {
+		createCollectionList,
+		type CollectionListVM
+	} from '$lib/viewmodels/collection.svelte';
 	import { dialogs } from '$lib/viewmodels/dialogs.svelte';
 	import { docTitles } from '$lib/viewmodels/doc-titles';
 	import { graphView } from '$lib/viewmodels/graph-view.svelte';
@@ -27,6 +31,29 @@
 
 	let creatingTeamspace = $state(false);
 	let teamspaceName = $state('');
+
+	let collectionsVM = $state<CollectionListVM | null>(null);
+	$effect(() => {
+		const vm = createCollectionList(workspaceId);
+		collectionsVM = vm;
+		vm.load();
+	});
+
+	async function newCollection() {
+		const name = (
+			await dialogs.prompt({
+				title: 'New collection',
+				placeholder: 'Collection name',
+				confirmLabel: 'Create'
+			})
+		)?.trim();
+		if (!name || !collectionsVM) return;
+		const collection = await collectionsVM.create(name);
+		if (collection) await goto(`/w/${workspaceId}/c/${collection.id}`);
+		else toasts.error(collectionsVM.error ?? "Couldn't create collection");
+	}
+
+	const collectionHref = (id: string) => `/w/${workspaceId}/c/${id}`;
 
 	async function newDocument(teamspaceId?: string) {
 		const document = await documentTree.create('', undefined, teamspaceId);
@@ -484,6 +511,32 @@
 			{/each}
 		</nav>
 	{/if}
+
+	<nav class="section">
+		<div class="section-head">
+			<h2>Collections</h2>
+			<button
+				class="section-add"
+				title="New collection"
+				aria-label="New collection"
+				data-testid="new-collection"
+				onclick={newCollection}>＋</button
+			>
+		</div>
+		{#each collectionsVM?.collections ?? [] as collection (collection.id)}
+			<a
+				class="row"
+				class:active={page.url.pathname === collectionHref(collection.id)}
+				href={collectionHref(collection.id)}
+				data-testid="collection-row"
+			>
+				<span class="icon">▦</span>
+				<span class="title">{collection.name}</span>
+			</a>
+		{:else}
+			<p class="empty" data-testid="no-collections">No collections yet</p>
+		{/each}
+	</nav>
 
 	<nav
 		class="section grow"

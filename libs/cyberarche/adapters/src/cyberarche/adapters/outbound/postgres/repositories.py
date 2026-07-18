@@ -14,6 +14,7 @@ import asyncpg
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import (
+    CollectionId,
     DocumentId,
     FolderId,
     SnapshotId,
@@ -59,7 +60,19 @@ def _document_from_row(row: asyncpg.Record) -> Document:
             TeamspaceId(row["teamspace_id"]) if row["teamspace_id"] else None
         ),
         folder_id=FolderId(row["folder_id"]) if row["folder_id"] else None,
+        collection_id=(
+            CollectionId(row["collection_id"]) if row["collection_id"] else None
+        ),
+        properties=_load_properties(row["properties"]),
     )
+
+
+def _load_properties(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    return dict(raw)
 
 
 def _snapshot_from_row(row: asyncpg.Record) -> Snapshot:
@@ -128,8 +141,10 @@ class PostgresDocumentRepository:
             INSERT INTO documents
                 (id, workspace_id, tenant_id, title, parent_id, position,
                  created_by, created_at, updated_at, trashed,
-                 trashed_from_parent_id, teamspace_id, folder_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 trashed_from_parent_id, teamspace_id, folder_id,
+                 collection_id, properties)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                    $14, $15::jsonb)
             """,
             *_document_params(document),
         )
@@ -227,6 +242,20 @@ class PostgresDocumentRepository:
         )
         return [_document_from_row(r) for r in rows]
 
+    async def list_by_collection(
+        self, tenant_id: TenantId, collection_id: CollectionId
+    ) -> list[Document]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM documents
+            WHERE tenant_id = $1 AND collection_id = $2 AND trashed = FALSE
+            ORDER BY position
+            """,
+            tenant_id,
+            collection_id,
+        )
+        return [_document_from_row(r) for r in rows]
+
     async def update(self, document: Document) -> None:
         await self._pool.execute(_UPDATE_SQL, *_document_update_params(document))
 
@@ -294,7 +323,7 @@ _UPDATE_SQL = """
     UPDATE documents SET
         title = $2, parent_id = $3, position = $4, updated_at = $5,
         trashed = $6, trashed_from_parent_id = $7, teamspace_id = $8,
-        folder_id = $9
+        folder_id = $9, collection_id = $10, properties = $11::jsonb
     WHERE id = $1
 """
 
@@ -310,6 +339,8 @@ def _document_update_params(document: Document) -> tuple[Any, ...]:
         document.trashed_from_parent_id,
         document.teamspace_id,
         document.folder_id,
+        document.collection_id,
+        json.dumps(document.properties),
     )
 
 
@@ -337,6 +368,8 @@ def _document_params(document: Document) -> tuple[Any, ...]:
         document.trashed_from_parent_id,
         document.teamspace_id,
         document.folder_id,
+        document.collection_id,
+        json.dumps(document.properties),
     )
 
 

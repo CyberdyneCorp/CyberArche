@@ -1,0 +1,177 @@
+"""Unit tests for PostgresCollectionRepository (thin row<->aggregate mapping).
+
+Mirrors test_postgres_repositories.py: a FakePool records the SQL and bound
+parameters and replays canned rows, so both directions of the JSONB mapping
+are asserted without a live database.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+
+from cyberarche.adapters.outbound.postgres.collections import (
+    PostgresCollectionRepository,
+)
+from cyberarche.domain.collections import (
+    Collection,
+    Filter,
+    PropertyDef,
+    PropertyType,
+    Sort,
+    View,
+    ViewKind,
+)
+from cyberarche.domain.ids import CollectionId, TenantId, WorkspaceId
+
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class FakePool:
+    def __init__(self, *, rows: list | None = None, row: dict | None = None) -> None:
+        self.rows = rows or []
+        self.row = row
+        self.calls: list[tuple[str, tuple]] = []
+
+    async def execute(self, query: str, *args: object) -> None:
+        self.calls.append((" ".join(query.split()), args))
+
+    async def fetch(self, query: str, *args: object) -> list:
+        self.calls.append((" ".join(query.split()), args))
+        return self.rows
+
+    async def fetchrow(self, query: str, *args: object) -> dict | None:
+        self.calls.append((" ".join(query.split()), args))
+        return self.row
+
+
+def make_collection(**overrides: object) -> Collection:
+    view = View(
+        id="v-1",
+        name="Table",
+        kind=ViewKind.TABLE,
+        filters=(Filter("p-1", "eq", "todo"),),
+        sorts=(Sort("__title__", "desc"),),
+        group_by="p-1",
+    )
+    prop = PropertyDef(
+        id="p-1", name="Status", type=PropertyType.SELECT, options=("todo", "done")
+    )
+    fields: dict = dict(
+        id=CollectionId("col-1"),
+        tenant_id=TenantId("acme"),
+        workspace_id=WorkspaceId("ws-1"),
+        name="Tasks",
+        properties=(prop,),
+        views=(view,),
+        created_at=NOW,
+    )
+    fields.update(overrides)
+    return Collection(**fields)
+
+
+def collection_row(**overrides: object) -> dict:
+    row = {
+        "id": "col-1",
+        "tenant_id": "acme",
+        "workspace_id": "ws-1",
+        "name": "Tasks",
+        "properties": json.dumps(
+            [{"id": "p-1", "name": "Status", "type": "select", "options": ["todo", "done"]}]
+        ),
+        "views": json.dumps(
+            [
+                {
+                    "id": "v-1",
+                    "name": "Table",
+                    "kind": "table",
+                    "filters": [{"property_id": "p-1", "op": "eq", "value": "todo"}],
+                    "sorts": [{"property_id": "__title__", "direction": "desc"}],
+                    "group_by": "p-1",
+                    "date_by": None,
+                }
+            ]
+        ),
+        "created_at": NOW,
+    }
+    row.update(overrides)
+    return row
+
+
+async def test_add_serializes_schema_and_views_to_jsonb():
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).add(make_collection())
+
+    query, args = pool.calls[0]
+    assert query.startswith("INSERT INTO collections")
+    assert args[0:4] == ("col-1", "acme", "ws-1", "Tasks")
+    assert json.loads(args[4]) == [
+        {"id": "p-1", "name": "Status", "type": "select", "options": ["todo", "done"]}
+    ]
+    views = json.loads(args[5])
+    assert views[0]["kind"] == "table"
+    assert views[0]["filters"] == [{"property_id": "p-1", "op": "eq", "value": "todo"}]
+    assert args[6] == NOW
+
+
+async def test_get_maps_row_and_scopes_by_tenant():
+    pool = FakePool(row=collection_row())
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+
+    assert found == make_collection()
+    assert found.properties[0].type is PropertyType.SELECT
+    assert found.views[0].sorts[0].direction == "desc"
+    _, args = pool.calls[0]
+    assert args == ("col-1", "acme")
+
+
+async def test_get_returns_none_when_missing():
+    pool = FakePool(row=None)
+    repo = PostgresCollectionRepository(pool)
+    assert await repo.get(TenantId("acme"), CollectionId("nope")) is None
+
+
+async def test_get_handles_dict_jsonb_from_driver():
+    # asyncpg may already decode JSONB to Python objects (not a str).
+    pool = FakePool(row=collection_row(properties=[], views=[]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties == ()
+    assert found.views == ()
+
+
+async def test_list_in_workspace_maps_rows():
+    pool = FakePool(rows=[collection_row(), collection_row(id="col-2", name="Two")])
+    listed = await PostgresCollectionRepository(pool).list_in_workspace(
+        TenantId("acme"), WorkspaceId("ws-1")
+    )
+
+    assert [c.id for c in listed] == ["col-1", "col-2"]
+    _, args = pool.calls[0]
+    assert args == ("acme", "ws-1")
+
+
+async def test_update_binds_name_and_jsonb_columns():
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).update(make_collection(name="Renamed"))
+
+    query, args = pool.calls[0]
+    assert query.startswith("UPDATE collections SET")
+    assert args[0] == "col-1"
+    assert args[1] == "Renamed"
+    assert json.loads(args[2])[0]["id"] == "p-1"
+    assert json.loads(args[3])[0]["id"] == "v-1"
+
+
+async def test_delete_scopes_by_tenant():
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).delete(
+        TenantId("acme"), CollectionId("col-1")
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("DELETE FROM collections")
+    assert args == ("col-1", "acme")

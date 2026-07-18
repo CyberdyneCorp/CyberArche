@@ -14,7 +14,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from cyberarche.domain.documents import Document
-from cyberarche.domain.ids import DocumentId, TeamspaceId, TenantId, UserId, WorkspaceId
+from cyberarche.domain.ids import (
+    CollectionId,
+    DocumentId,
+    TeamspaceId,
+    TenantId,
+    UserId,
+    WorkspaceId,
+)
 from cyberarche.domain.workspaces import Workspace
 
 BACKENDS = ["memory"] + (["postgres"] if os.environ.get("TEST_DATABASE_URL") else [])
@@ -37,6 +44,7 @@ async def adapters(request):
             "api_keys": fakes.InMemoryApiKeyRepository(),
             "teamspaces": fakes.InMemoryTeamspaceRepository(),
             "favorites": fakes.InMemoryFavoriteRepository(),
+            "collections": fakes.InMemoryCollectionRepository(),
             "memberships": fakes.InMemoryMembershipRepository(),
             "connectors": fakes.InMemoryConnectorRepository(),
             "folders": fakes.InMemoryFolderRepository(),
@@ -54,6 +62,9 @@ async def adapters(request):
     from cyberarche.adapters.outbound.postgres.connectors import (
         PostgresConnectorRepository,
     )
+    from cyberarche.adapters.outbound.postgres.collections import (
+        PostgresCollectionRepository,
+    )
     from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
     from cyberarche.adapters.outbound.postgres.teamspaces import (
         PostgresFavoriteRepository,
@@ -69,7 +80,8 @@ async def adapters(request):
             "TRUNCATE workspaces, documents, snapshots, crdt_updates, "
             "workspace_memberships, document_grants, share_links, agent_runs, "
             "mcp_connectors, ingestion_tasks, comments, api_keys, "
-            "teamspaces, teamspace_memberships, favorites, folders CASCADE"
+            "teamspaces, teamspace_memberships, favorites, folders, "
+            "collections CASCADE"
         )
         yield {
             "workspaces": PostgresWorkspaceRepository(pool),
@@ -80,6 +92,7 @@ async def adapters(request):
             "api_keys": PostgresApiKeyRepository(pool),
             "teamspaces": PostgresTeamspaceRepository(pool),
             "favorites": PostgresFavoriteRepository(pool),
+            "collections": PostgresCollectionRepository(pool),
             "memberships": PostgresMembershipRepository(pool),
             "connectors": PostgresConnectorRepository(pool),
             "folders": PostgresFolderRepository(pool),
@@ -295,6 +308,72 @@ async def test_document_teamspace_listing_contract(adapters):
     await doc_repo.update(moved)
     assert (await doc_repo.get(TenantId("acme"), DocumentId("d-2"))).teamspace_id == "ts-1"
     assert len(await doc_repo.list_for_teamspace(TenantId("acme"), TeamspaceId("ts-1"))) == 2
+
+
+async def test_collection_repository_contract(adapters):
+    from cyberarche.domain.collections import Collection, PropertyDef, PropertyType
+
+    ws_repo, repo = adapters["workspaces"], adapters["collections"]
+    await ws_repo.add(workspace())
+    collection = Collection.default(
+        id=CollectionId("col-1"), tenant_id=TenantId("acme"),
+        workspace_id=WorkspaceId("ws-1"), name="Tasks",
+        view_id="view-1", created_at=NOW,
+    )
+    await repo.add(collection)
+
+    fetched = await repo.get(TenantId("acme"), CollectionId("col-1"))
+    assert fetched.name == "Tasks"
+    assert [v.id for v in fetched.views] == ["view-1"]
+    assert await repo.get(TenantId("globex"), CollectionId("col-1")) is None
+    listed = await repo.list_in_workspace(TenantId("acme"), WorkspaceId("ws-1"))
+    assert [c.id for c in listed] == ["col-1"]
+
+    # update() persists the schema and views round-trip (incl. select options).
+    prop = PropertyDef(
+        id="p-1", name="Status", type=PropertyType.SELECT, options=("todo", "done")
+    )
+    await repo.update(collection.with_name("Todos").with_properties((prop,)))
+    reloaded = await repo.get(TenantId("acme"), CollectionId("col-1"))
+    assert reloaded.name == "Todos"
+    assert reloaded.properties[0].options == ("todo", "done")
+    assert reloaded.properties[0].type is PropertyType.SELECT
+
+    await repo.delete(TenantId("acme"), CollectionId("col-1"))
+    assert await repo.get(TenantId("acme"), CollectionId("col-1")) is None
+
+
+async def test_document_collection_listing_contract(adapters):
+    from dataclasses import replace
+
+    ws_repo, doc_repo = adapters["workspaces"], adapters["documents"]
+    await ws_repo.add(workspace())
+    row = replace(
+        document("d-1"),
+        collection_id=CollectionId("col-1"),
+        properties={"p-1": "todo"},
+    )
+    await doc_repo.add(row)
+    await doc_repo.add(document("d-2"))  # not a row
+
+    listed = await doc_repo.list_by_collection(TenantId("acme"), CollectionId("col-1"))
+    assert [d.id for d in listed] == ["d-1"]
+    # collection_id + properties round-trip through add()/get().
+    stored = await doc_repo.get(TenantId("acme"), DocumentId("d-1"))
+    assert stored.collection_id == "col-1"
+    assert stored.properties == {"p-1": "todo"}
+
+    # update() persists collection_id + properties changes.
+    updated = replace(stored, properties={"p-1": "done"})
+    await doc_repo.update(updated)
+    assert (await doc_repo.get(TenantId("acme"), DocumentId("d-1"))).properties == {
+        "p-1": "done"
+    }
+    # A trashed row drops out of the collection listing.
+    await doc_repo.update(replace(stored, trashed=True))
+    assert await doc_repo.list_by_collection(
+        TenantId("acme"), CollectionId("col-1")
+    ) == []
 
 
 async def test_favorite_repository_contract(adapters):

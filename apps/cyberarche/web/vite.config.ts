@@ -7,6 +7,9 @@ const apiOrigin = process.env.CYBERARCHE_API_ORIGIN ?? 'http://localhost:8000';
 
 export default defineConfig({
 	plugins: [sveltekit()],
+	// Under Vitest, resolve Svelte's browser build so components can be mounted
+	// (mount() is unavailable in the server build). Dev/build are untouched.
+	...(process.env.VITEST ? { resolve: { conditions: ['browser'] } } : {}),
 	server: {
 		proxy: {
 			'/api': { target: apiOrigin, changeOrigin: true, ws: true }
