@@ -8,19 +8,54 @@ Three differentiators:
 
 1. **Rich technical blocks first-class** — LaTeX math, a native
    Excalidraw-style whiteboard (mind maps included), Mermaid diagrams, code
-   blocks with syntax highlighting, tables, and a typed database block with
-   table/board/calendar/gallery views.
+   blocks with syntax highlighting, tables, and databases with
+   table/board/gallery/calendar views — both as an inline block and as
+   full-page **collections** whose rows are their own documents.
 2. **AI at the center** — every document has an agent that can summarize,
    draft, restructure, ingest files (PDF/CSV/Excel), search the web, run
    Python, generate images, read meeting transcripts, and edit the document as
-   a first-class CRDT collaborator, grounded in the workspace via RAG. Agents
-   have per-workspace personas, persistent memory, saved skills, and can run
-   autonomously on a schedule.
+   a first-class CRDT collaborator, grounded in the workspace via RAG. In the
+   editor, select text to **Ask AI** (rewrite/shorten/expand/fix/translate) or
+   accept inline **continue-writing** suggestions, and turn a meeting
+   transcript into a structured notes document. Agents have per-workspace
+   personas, persistent memory, saved skills, and can run autonomously on a
+   schedule.
 3. **MCP-native** — CyberArche ships its own FastMCP server exposing tools
    over the user's documents, and users can attach external MCP servers so
    their agent gains extra capabilities. Google Workspace
    (Gmail/Calendar/Docs) is the only first-party SaaS connector; everything
    else goes through generic external MCP connectors.
+
+## Capabilities
+
+Current behavior is spec-driven; each item below maps to a capability under
+`openspec/specs/`.
+
+- **Editing & blocks** — block editor with a slash menu, drag-reorder, and a
+  bubble menu; text/headings/lists/to-dos/quotes/callouts, code, LaTeX (inline +
+  block), Mermaid, tables, images/files/embeds, an inline database block, and an
+  Excalidraw-style whiteboard/mind-map. Inline **Ask AI** on a selection and
+  **continue-writing** ghost text.
+- **Collections (databases)** — workspace-level collections whose rows are full
+  documents with typed properties (text, number, select, multi-select, date,
+  checkbox, url); **Table, Board, Gallery, and Calendar** views with per-view
+  **filters and sorts**.
+- **AI agent** — per-document agent (summarize/draft/rewrite, file ingestion,
+  web search, Python, image generation, meeting transcripts), grounded via RAG,
+  with personas, persistent memory, saved skills, run history, and scheduled
+  autonomous runs. **Meeting notes → document** turns a transcript into a
+  structured page.
+- **Knowledge & search** — a per-workspace RAG knowledge base, full-text
+  **search** (⌘K), and **workspace chat** (Q&A grounded in the workspace).
+- **Collaboration** — realtime CRDT editing, live cursors/presence, comments,
+  **version history** with diff/restore, sharing & permissions (Owner/Editor/
+  Commenter/Viewer + shareable links), teamspaces, folders, and favorites.
+- **Notifications** — an in-app inbox with per-user preferences, delivery
+  channels (webhook, **web-push** via VAPID), and a scheduled **email digest**
+  of unread notifications.
+- **Platform** — the FastMCP server + external MCP connectors, the Google
+  Workspace connector, file uploads and document **export** (PDF/Markdown/CSV),
+  and an installable **PWA** with an offline app shell.
 
 ## Stack
 
