@@ -7,6 +7,7 @@
 	import { graphView } from '$lib/viewmodels/graph-view.svelte';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import type { TeamspaceNode, FolderNode, TeamspacesVM } from '$lib/viewmodels/teamspaces.svelte';
+	import { commandPalette } from '$lib/viewmodels/commandPalette.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
@@ -357,6 +358,15 @@
 			onclick={() => (templatePickerOpen = true)}>▤</button
 		>
 	</div>
+
+	<button
+		class="chat-btn search-btn"
+		data-testid="open-search"
+		onclick={() => commandPalette.open()}
+	>
+		<span aria-hidden="true">🔍</span> Search
+		<kbd class="kbd">⌘K</kbd>
+	</button>
 
 	<button
 		class="chat-btn"
@@ -720,6 +730,18 @@
 	.chat-btn:hover {
 		background: var(--bg2);
 		color: var(--tx);
+	}
+	.search-btn {
+		align-items: center;
+	}
+	.kbd {
+		margin-left: auto;
+		font-size: 11px;
+		font-family: inherit;
+		color: var(--tx3);
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		padding: 1px 5px;
 	}
 	.plus {
 		font-size: 12px;
