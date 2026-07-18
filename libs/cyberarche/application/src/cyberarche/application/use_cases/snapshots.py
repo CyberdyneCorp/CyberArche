@@ -15,7 +15,7 @@ from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import DocumentId, SnapshotId
 from cyberarche.domain.memberships import Role
-from cyberarche.domain.snapshots import Snapshot
+from cyberarche.domain.snapshots import BlockDiff, Snapshot, diff_blocks
 
 if TYPE_CHECKING:  # composition only; avoids a use-case import cycle
     from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -48,6 +48,7 @@ class SnapshotUseCases:
         content: dict[str, Any],
         state_vector: bytes,
         restored_from: SnapshotId | None = None,
+        label: str | None = None,
     ) -> Snapshot:
         document = await self._require(caller, document_id, Role.EDITOR)
         latest = await self._snapshots.latest(document.id)
@@ -60,9 +61,47 @@ class SnapshotUseCases:
             created_at=self._clock.now(),
             restored_from=restored_from,
             created_by=caller.user_id,
+            label=label,
         )
         await self._snapshots.add(snapshot)
         return snapshot
+
+    async def rename(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        snapshot_id: SnapshotId,
+        label: str | None,
+    ) -> Snapshot:
+        """Name (or clear the name of) a version; requires EDITOR."""
+        document = await self._require(caller, document_id, Role.EDITOR)
+        snapshot = await self._snapshots.get(document.id, snapshot_id)
+        if snapshot is None:
+            raise NotFound("snapshot not found")
+        return await self._snapshots.set_label(document.id, snapshot_id, label)
+
+    async def diff(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        from_id: SnapshotId,
+        to_id: SnapshotId | None = None,
+    ) -> BlockDiff:
+        """Block-level diff of snapshot `from_id` against snapshot `to_id`, or
+        against the document's current content when `to_id` is omitted. Requires
+        VIEWER (read-only)."""
+        document = await self._require(caller, document_id, Role.VIEWER)
+        source = await self._snapshots.get(document.id, from_id)
+        if source is None:
+            raise NotFound("snapshot not found")
+        if to_id is not None:
+            target = await self._snapshots.get(document.id, to_id)
+            if target is None:
+                raise NotFound("snapshot not found")
+            new_blocks = target.content.get("blocks", [])
+        else:
+            new_blocks = await self._realtime.read_blocks(caller, document.id)
+        return diff_blocks(source.content.get("blocks", []), new_blocks)
 
     async def list(
         self, caller: CallerContext, document_id: DocumentId

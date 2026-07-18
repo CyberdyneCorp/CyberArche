@@ -106,6 +106,10 @@ class SnapshotRepository(Protocol):
 
     async def latest(self, document_id: DocumentId) -> Snapshot | None: ...
 
+    async def set_label(
+        self, document_id: DocumentId, snapshot_id: SnapshotId, label: str | None
+    ) -> Snapshot: ...
+
 
 class MembershipRepository(Protocol):
     async def add_workspace_member(self, membership: WorkspaceMembership) -> None: ...

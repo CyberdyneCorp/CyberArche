@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from cyberarche.adapters.outbound.postgres.repositories import (
     PostgresDocumentRepository,
     PostgresMembershipRepository,
@@ -19,6 +21,7 @@ from cyberarche.adapters.outbound.postgres.repositories import (
     PostgresWorkspaceRepository,
 )
 from cyberarche.domain.documents import Document
+from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import (
     DocumentId,
     FolderId,
@@ -142,6 +145,7 @@ def snapshot_row(**overrides: object) -> dict:
         "created_at": NOW,
         "restored_from": None,
         "created_by": None,
+        "label": None,
     }
     row.update(overrides)
     return row
@@ -461,6 +465,7 @@ async def test_snapshot_add_serializes_content_to_json():
         created_at=NOW,
         restored_from=SnapshotId("s-0"),
         created_by=UserId("alice"),
+        label="Milestone",
     )
     await PostgresSnapshotRepository(pool).add(snapshot)
 
@@ -468,8 +473,28 @@ async def test_snapshot_add_serializes_content_to_json():
     assert query.startswith("INSERT INTO snapshots")
     assert args == (
         "s-1", "d-1", 1, json.dumps({"blocks": [{"id": "b1"}]}),
-        b"\x01\x02", NOW, "s-0", "alice",
+        b"\x01\x02", NOW, "s-0", "alice", "Milestone",
     )
+
+
+async def test_snapshot_set_label_updates_and_maps_the_row():
+    pool = FakePool(row=snapshot_row(label="Reviewed"))
+    updated = await PostgresSnapshotRepository(pool).set_label(
+        DocumentId("d-1"), SnapshotId("s-1"), "Reviewed"
+    )
+
+    assert updated.label == "Reviewed"
+    query, args = pool.calls[0]
+    assert query.startswith("UPDATE snapshots SET label")
+    assert args == ("s-1", "d-1", "Reviewed")
+
+
+async def test_snapshot_set_label_raises_when_missing():
+    pool = FakePool(row=None)
+    with pytest.raises(NotFound):
+        await PostgresSnapshotRepository(pool).set_label(
+            DocumentId("d-1"), SnapshotId("nope"), "x"
+        )
 
 
 async def test_snapshot_get_maps_row_with_optional_columns_set():

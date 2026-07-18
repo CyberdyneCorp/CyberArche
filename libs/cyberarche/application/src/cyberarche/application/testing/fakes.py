@@ -224,6 +224,19 @@ class InMemorySnapshotRepository:
         snapshots = self._items.get(document_id, [])
         return max(snapshots, key=lambda s: s.seq) if snapshots else None
 
+    async def set_label(
+        self, document_id: DocumentId, snapshot_id: SnapshotId, label: str | None
+    ) -> Snapshot:
+        from dataclasses import replace
+
+        items = self._items.get(document_id, [])
+        for index, snapshot in enumerate(items):
+            if snapshot.id == snapshot_id:
+                updated = replace(snapshot, label=label)
+                items[index] = updated
+                return updated
+        raise NotFound("snapshot not found")
+
 
 class InMemoryMembershipRepository:
     def __init__(self) -> None:

@@ -148,6 +148,57 @@ def test_vertical_flow_workspace_document_snapshot_trash_restore(api):
     )
 
 
+def test_snapshot_label_diff_and_rename_over_http(api):
+    """version-history: a snapshot can be named on record, renamed, and diffed
+    against the current document over the HTTP surface."""
+    headers = auth("alice-token")
+    workspace = api.post(
+        "/api/v1/workspaces", json={"name": "History"}, headers=headers
+    ).json()
+    doc = api.post(
+        "/api/v1/documents",
+        json={"workspace_id": workspace["id"], "title": "Notes"},
+        headers=headers,
+    ).json()
+
+    v1_blocks = [{"id": "b1", "type": "paragraph", "data": {"text": "hello"}}]
+    api.post(
+        f"/api/v1/documents/{doc['id']}/agent/blocks",
+        json={"blocks": v1_blocks},
+        headers=headers,
+    )
+    snapshot = api.post(
+        f"/api/v1/documents/{doc['id']}/snapshots",
+        json={"content": {"blocks": v1_blocks}, "label": "Draft"},
+        headers=headers,
+    ).json()
+    assert snapshot["label"] == "Draft"
+
+    # Rename it.
+    renamed = api.patch(
+        f"/api/v1/documents/{doc['id']}/snapshots/{snapshot['id']}",
+        json={"label": "Reviewed"},
+        headers=headers,
+    ).json()
+    assert renamed["label"] == "Reviewed"
+    listed = api.get(f"/api/v1/documents/{doc['id']}/snapshots", headers=headers).json()
+    assert listed[0]["label"] == "Reviewed"
+
+    # Move the live document on, then diff the snapshot against current state.
+    api.post(
+        f"/api/v1/documents/{doc['id']}/agent/blocks",
+        json={"blocks": [{"id": "b2", "type": "paragraph", "data": {"text": "world"}}]},
+        headers=headers,
+    )
+    diff = api.get(
+        f"/api/v1/documents/{doc['id']}/snapshots/diff",
+        params={"from": snapshot["id"]},
+        headers=headers,
+    ).json()
+    assert [b["id"] for b in diff["added"]] == ["b2"]
+    assert diff["removed"] == []
+
+
 def test_purge_removes_a_trashed_document_and_its_children_over_http(api):
     headers = auth("alice-token")
     workspace = api.post("/api/v1/workspaces", json={"name": "Purge"}, headers=headers).json()
