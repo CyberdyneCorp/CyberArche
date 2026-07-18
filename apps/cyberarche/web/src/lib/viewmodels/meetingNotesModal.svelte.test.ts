@@ -42,14 +42,23 @@ describe('meeting-notes ViewModel', () => {
 		expect(calls[0].url).toContain('/api/v1/meetings');
 	});
 
-	it('generate posts the recording and returns the new document id', async () => {
-		const { fn, calls } = capturingFetch({ id: 'doc-9', title: 'Standup' });
+	it('generate posts the recording and returns the new (private) document', async () => {
+		const document = {
+			id: 'doc-9',
+			title: 'Standup',
+			workspace_id: 'ws-1',
+			teamspace_id: null,
+			parent_id: null
+		};
+		const { fn, calls } = capturingFetch(document);
 		vi.stubGlobal('fetch', fn);
 
 		const vm = createMeetingNotes_VM('ws-1');
-		const docId = await vm.generate('rec-1');
+		const result = await vm.generate('rec-1');
 
-		expect(docId).toBe('doc-9');
+		// Returns the whole document (created private: no teamspace) so the caller
+		// can surface it under the sidebar's Private section without a reload.
+		expect(result).toMatchObject({ id: 'doc-9', teamspace_id: null });
 		expect(vm.pendingId).toBeNull();
 		expect(vm.error).toBeNull();
 		expect(calls[0].url).toContain('/api/v1/workspaces/ws-1/meeting-notes');
@@ -60,9 +69,9 @@ describe('meeting-notes ViewModel', () => {
 		vi.stubGlobal('fetch', failingFetch(422, 'meeting transcripts are not configured'));
 		const vm = createMeetingNotes_VM('ws-1');
 
-		const docId = await vm.generate('rec-1');
+		const result = await vm.generate('rec-1');
 
-		expect(docId).toBeNull();
+		expect(result).toBeNull();
 		expect(vm.error).toBe('Meeting transcripts are not configured.');
 		expect(vm.pendingId).toBeNull();
 	});
