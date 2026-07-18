@@ -15,6 +15,10 @@
 		type ScheduledAgentsVM
 	} from '$lib/viewmodels/scheduledAgents.svelte';
 	import { createGoogle, GOOGLE_GROUPS, type GoogleVM } from '$lib/viewmodels/google.svelte';
+	import {
+		createNotificationPrefs,
+		type NotificationPrefsVM
+	} from '$lib/viewmodels/notificationPrefs.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 
 	let { workspaceId }: { workspaceId: string } = $props();
@@ -43,13 +47,22 @@
 	let endpoint = $state('');
 	let credentials = $state('');
 
+	let notificationPrefs = $state<NotificationPrefsVM | null>(null);
+
 	let apiKeys = $state<ApiKeysVM | null>(null);
 	let keyName = $state('');
 	let copiedSecret = $state(false);
 
+	const NOTIFICATION_TOGGLES: { key: 'email_enabled' | 'push_enabled' | 'mentions_enabled' | 'agent_results_enabled'; label: string; hint: string }[] = [
+		{ key: 'email_enabled', label: 'Email notifications', hint: 'Deliver notifications to your email (when configured on this deployment).' },
+		{ key: 'push_enabled', label: 'Push notifications', hint: 'Deliver notifications as push (when configured on this deployment).' },
+		{ key: 'mentions_enabled', label: 'Mentions & comments', hint: 'When someone @mentions you in a comment.' },
+		{ key: 'agent_results_enabled', label: 'Agent task results', hint: 'When a scheduled agent task finishes.' }
+	];
+
 	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
 
-	type TabId = 'connectors' | 'integrations' | 'agent' | 'keys';
+	type TabId = 'connectors' | 'integrations' | 'agent' | 'notifications' | 'keys';
 	const TABS: { id: TabId; label: string; icon: string; title: string; sub: string }[] = [
 		{
 			id: 'connectors',
@@ -71,6 +84,13 @@
 			icon: '🤖',
 			title: 'Agent',
 			sub: "Shape this workspace's agent — instructions, durable memory, reusable skills, and scheduled background runs."
+		},
+		{
+			id: 'notifications',
+			label: 'Notifications',
+			icon: '🔔',
+			title: 'Notifications',
+			sub: 'Choose how you get notified. In-app notifications are always on; email/push deliver only when configured on this deployment.'
 		},
 		{
 			id: 'keys',
@@ -102,6 +122,9 @@
 		const googleVm = createGoogle(workspaceId);
 		google = googleVm;
 		googleVm.load();
+		const notificationsVm = createNotificationPrefs();
+		notificationPrefs = notificationsVm;
+		notificationsVm.load();
 	});
 
 	function toggleGroup(id: string) {
@@ -438,6 +461,38 @@
 			{/each}
 			{#if tasks.error}
 				<p class="error" role="alert">{tasks.error}</p>
+			{/if}
+		</section>
+	{/if}
+	{/if}
+
+	{#if activeTab === 'notifications'}
+	{#if notificationPrefs}
+		<section class="card" data-testid="settings-tab-notifications">
+			<h2>Delivery preferences</h2>
+			<p class="hint">
+				In-app notifications (the bell) are always on. These toggles control
+				extra delivery and which kinds you receive.
+			</p>
+			{#each NOTIFICATION_TOGGLES as row (row.key)}
+				<div class="notif-row">
+					<div class="notif-info">
+						<strong>{row.label}</strong>
+						<span class="notif-hint">{row.hint}</span>
+					</div>
+					<label class="toggle" title={row.label}>
+						<input
+							type="checkbox"
+							checked={notificationPrefs.prefs[row.key]}
+							disabled={notificationPrefs.busy}
+							data-testid="notif-toggle-{row.key}"
+							onchange={() => notificationPrefs?.toggle(row.key)}
+						/>
+					</label>
+				</div>
+			{/each}
+			{#if notificationPrefs.error}
+				<p class="error" role="alert">{notificationPrefs.error}</p>
 			{/if}
 		</section>
 	{/if}
@@ -855,6 +910,27 @@
 	.task-instr {
 		font-size: 12px;
 		color: var(--tx2);
+	}
+	.notif-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 0;
+		border-top: 1px solid var(--line);
+	}
+	.notif-row:first-of-type {
+		border-top: none;
+	}
+	.notif-info {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.notif-hint {
+		font-size: 12px;
+		color: var(--tx3);
 	}
 	.google-groups {
 		display: flex;

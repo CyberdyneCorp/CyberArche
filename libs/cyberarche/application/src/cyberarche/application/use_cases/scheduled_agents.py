@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
-from cyberarche.application.ports.notifications import NotificationRepository
+from cyberarche.application.use_cases.notifications import NotificationDispatcher
 from cyberarche.application.ports.scheduled_agents import ScheduledAgentRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.application.use_cases.agent import AgentUseCases
@@ -46,7 +46,7 @@ class ScheduledAgentUseCases:
         tasks: ScheduledAgentRepository,
         agent: AgentUseCases,
         documents: DocumentUseCases,
-        notifications: NotificationRepository,
+        notifications: NotificationDispatcher | None,
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
@@ -247,7 +247,9 @@ class ScheduledAgentUseCases:
         document_id: DocumentId | None,
         outcome: str,
     ) -> None:
-        await self._notifications.add(
+        if self._notifications is None:
+            return
+        await self._notifications.notify(
             Notification(
                 id=NotificationId(self._ids.new_id()),
                 tenant_id=task.tenant_id,

@@ -13,7 +13,10 @@ from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
-from cyberarche.application.use_cases.notifications import NotificationUseCases
+from cyberarche.application.use_cases.notifications import (
+    NotificationPreferencesUseCases,
+    NotificationUseCases,
+)
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -52,6 +55,7 @@ class UseCases:
     search: SearchUseCases
     workspace_chat: WorkspaceChatUseCases
     notifications: NotificationUseCases
+    notification_prefs: NotificationPreferencesUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases
     scheduled_agents: ScheduledAgentUseCases

@@ -55,6 +55,9 @@ services:
       CYBERARCHE_LLM_API_KEY: ${CYBERARCHE_LLM_API_KEY}
       CYBERARCHE_LLM_BASE_URL: ${CYBERARCHE_LLM_BASE_URL:-}
       CYBERARCHE_MEETINGS_URL: ${CYBERARCHE_MEETINGS_URL:-https://cyberflies.backend.coolify.cyberdynecorp.ai}
+      # Outbound notification webhook (Slack-style / HTTP receiver) — empty =
+      # in-app only (today's behaviour). Set it to fan notifications out.
+      CYBERARCHE_NOTIFICATION_WEBHOOK_URL: ${CYBERARCHE_NOTIFICATION_WEBHOOK_URL:-}
       CYBERARCHE_CONNECTOR_SECRET_KEY: ${CYBERARCHE_CONNECTOR_SECRET_KEY}
       # Google Workspace connector — empty = disabled (the Integrations tab shows
       # "not enabled"). Set all three to turn it on.

@@ -11,7 +11,7 @@ from datetime import datetime
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
-from cyberarche.application.ports.notifications import NotificationRepository
+from cyberarche.application.use_cases.notifications import NotificationDispatcher
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
     MembershipRepository,
@@ -50,7 +50,7 @@ class SharingUseCases:
         access: AccessControl,
         clock: ClockPort,
         ids: IdPort,
-        notifications: NotificationRepository | None = None,
+        notifications: NotificationDispatcher | None = None,
     ) -> None:
         self._documents = documents
         self._memberships = memberships
@@ -210,7 +210,7 @@ class SharingUseCases:
             if await self._memberships.workspace_role(document.workspace_id, user_id) is None:
                 continue
             notified.add(str(user_id))
-            await self._notifications.add(
+            await self._notifications.notify(
                 Notification(
                     id=NotificationId(self._ids.new_id()),
                     tenant_id=caller.tenant_id,

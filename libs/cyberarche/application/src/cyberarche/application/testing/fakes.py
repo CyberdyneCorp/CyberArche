@@ -702,6 +702,19 @@ class InMemoryNotificationRepository:
         ]
 
 
+class InMemoryNotificationPreferencesRepository:
+    """NotificationPreferencesRepository fake: in-process per-user settings."""
+
+    def __init__(self) -> None:
+        self._prefs: dict[tuple[str, str], object] = {}
+
+    async def get(self, tenant_id, user_id):
+        return self._prefs.get((str(tenant_id), str(user_id)))
+
+    async def upsert(self, prefs) -> None:
+        self._prefs[(str(prefs.tenant_id), str(prefs.user_id))] = prefs
+
+
 class InMemoryInferredLinkRepository:
     """InferredLinkRepository fake: an in-process cache of inferred relations."""
 

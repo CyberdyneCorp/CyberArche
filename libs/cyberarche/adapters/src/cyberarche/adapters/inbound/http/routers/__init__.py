@@ -24,6 +24,9 @@ from cyberarche.adapters.inbound.http.routers.knowledge import (
     router as knowledge_router,
     webhook_router,
 )
+from cyberarche.adapters.inbound.http.routers.notification_prefs import (
+    router as notification_prefs_router,
+)
 from cyberarche.adapters.inbound.http.routers.notifications import (
     router as notifications_router,
 )
@@ -55,5 +58,6 @@ all_routers = [
     folders_router,
     files_router,
     notifications_router,
+    notification_prefs_router,
     templates_router,
 ]
