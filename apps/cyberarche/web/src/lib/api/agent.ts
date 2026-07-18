@@ -77,3 +77,15 @@ export const replaceBlockText = (documentId: string, blockId: string, text: stri
 	patch<{ block_id: string }>(`/api/v1/documents/${documentId}/agent/blocks/${blockId}`, {
 		text
 	});
+
+/**
+ * Transform a selected snippet in place via a single tool-free LLM call
+ * (inline "Ask AI"). Returns only the transformed text; the caller applies it
+ * back through the editor's normal (undoable, CRDT-synced) text-update path.
+ */
+export const transformText = (documentId: string, action: string, text: string, target?: string) =>
+	post<{ text: string }>(`/api/v1/documents/${documentId}/agent/transform`, {
+		action,
+		text,
+		target: target ?? null
+	});

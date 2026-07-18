@@ -23,7 +23,12 @@ import * as Y from 'yjs';
 
 import { registerBuiltinBlocks } from '$lib/editor/blocks';
 import { allBlockDefinitions, newBlock, registerBlock } from '$lib/editor/registry';
-import { colorFor, createEditor } from './editor.svelte';
+import { colorFor, createEditor, spliceText } from './editor.svelte';
+import { transformText } from '$lib/api/agent';
+
+// The inline "Ask AI" transform calls the agent API; stub it so the VM test
+// exercises only the local apply-over-selection path.
+vi.mock('$lib/api/agent', () => ({ transformText: vi.fn() }));
 
 beforeAll(() => {
 	vi.stubGlobal('WebSocket', FakeSocket as unknown as typeof WebSocket);
@@ -593,5 +598,57 @@ describe('editor ViewModel — edge cases', () => {
 
 		vm.insertAfter(null, 'paragraph'); // no longer mirrored into state
 		expect(vm.blocks).toHaveLength(1);
+	});
+});
+
+describe('inline "Ask AI" transform (inline-ai-selection)', () => {
+	it('spliceText replaces only the selected range (before + result + after)', () => {
+		expect(spliceText('hello world', 6, 11, 'planet')).toBe('hello planet');
+		expect(spliceText('abc', 0, 3, 'XYZ')).toBe('XYZ');
+		expect(spliceText('keep me', 0, 0, 'ins ')).toBe('ins keep me');
+	});
+
+	it('transformSelection applies the LLM result over the selection, undoably', async () => {
+		vi.mocked(transformText).mockResolvedValue({ text: 'planet' });
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'hello world' });
+
+		const ok = await vm.transformSelection(
+			{ blockId: id, start: 6, end: 11 },
+			'rewrite'
+		);
+
+		expect(ok).toBe(true);
+		// The selected text ("world") went to the API; the doc id and action too.
+		expect(transformText).toHaveBeenCalledWith('doc-1', 'rewrite', 'world', undefined);
+		expect(vm.blocks[0].data.text).toBe('hello planet');
+		// The edit went through the tracked (undoable) local update path.
+		expect(vm.canUndo).toBe(true);
+	});
+
+	it('transformSelection forwards the translation target language', async () => {
+		vi.mocked(transformText).mockResolvedValue({ text: 'mundo' });
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'world' });
+
+		await vm.transformSelection({ blockId: id, start: 0, end: 5 }, 'translate', 'Español');
+
+		expect(transformText).toHaveBeenCalledWith('doc-1', 'translate', 'world', 'Español');
+		expect(vm.blocks[0].data.text).toBe('mundo');
+	});
+
+	it('transformSelection ignores a whitespace-only selection', async () => {
+		vi.mocked(transformText).mockClear();
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'a   b' });
+
+		const ok = await vm.transformSelection({ blockId: id, start: 1, end: 4 }, 'rewrite');
+
+		expect(ok).toBe(false);
+		expect(transformText).not.toHaveBeenCalled();
+		expect(vm.blocks[0].data.text).toBe('a   b');
 	});
 });

@@ -7,7 +7,8 @@ import {
 	insertBlocks,
 	listAgentRuns,
 	replaceBlockText,
-	summarizeDocument
+	summarizeDocument,
+	transformText
 } from './agent';
 import { ApiError } from './http';
 
@@ -169,6 +170,31 @@ describe('agent API client', () => {
 			}
 		]);
 		expect(result).toEqual({ block_id: 'b-1' });
+	});
+
+	it('transformText POSTs the action, selection, and null target', async () => {
+		const { fn, calls } = capturingFetch({ text: 'polished text' });
+		vi.stubGlobal('fetch', fn);
+
+		const result = await transformText('doc-1', 'rewrite', 'raw text');
+
+		expect(calls).toEqual([
+			{
+				url: '/api/v1/documents/doc-1/agent/transform',
+				method: 'POST',
+				body: { action: 'rewrite', text: 'raw text', target: null }
+			}
+		]);
+		expect(result).toEqual({ text: 'polished text' });
+	});
+
+	it('transformText forwards the translation target language', async () => {
+		const { fn, calls } = capturingFetch({ text: 'texto' });
+		vi.stubGlobal('fetch', fn);
+
+		await transformText('doc-1', 'translate', 'text', 'Español');
+
+		expect(calls[0].body).toEqual({ action: 'translate', text: 'text', target: 'Español' });
 	});
 
 	it('surfaces an ApiError on rejection', async () => {

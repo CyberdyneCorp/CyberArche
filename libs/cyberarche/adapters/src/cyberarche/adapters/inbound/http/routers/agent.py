@@ -179,6 +179,32 @@ async def replace_block_text(
     return {"block_id": block_id}
 
 
+class TransformRequest(BaseModel):
+    text: str
+    action: str
+    target: str | None = None
+
+
+class TransformResponse(BaseModel):
+    text: str
+
+
+@router.post("/transform")
+async def transform(
+    document_id: str, body: TransformRequest, cases: Cases, caller: Caller
+) -> TransformResponse:
+    """Transform a selected snippet in place (inline-ai-selection): a single,
+    tool-free LLM call; the client applies the result through the CRDT."""
+    result = await cases.agent.transform_text(
+        caller,
+        DocumentId(document_id),
+        text=body.text,
+        action=body.action,
+        target=body.target,
+    )
+    return TransformResponse(text=result)
+
+
 @router.delete("/blocks/{block_id}", status_code=204)
 async def delete_block(
     document_id: str, block_id: str, cases: Cases, caller: Caller

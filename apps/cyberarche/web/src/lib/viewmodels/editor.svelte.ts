@@ -18,6 +18,7 @@ import {
 	type BlockDefinition
 } from '$lib/editor/registry';
 import { linkIndex } from '$lib/viewmodels/link-index.svelte';
+import { transformText } from '$lib/api/agent';
 
 const LOCAL_ORIGIN = 'local';
 const PEER_COLORS = ['var(--rose)', 'var(--teal)', 'var(--blue)', 'var(--ok)'];
@@ -26,6 +27,25 @@ export function colorFor(userId: string): string {
 	let hash = 0;
 	for (const char of userId) hash = (hash * 31 + char.charCodeAt(0)) | 0;
 	return PEER_COLORS[Math.abs(hash) % PEER_COLORS.length];
+}
+
+/** Replace the `[start, end)` slice of `text` with `replacement`. The inline
+ * "Ask AI" transform applies its result over the selection this way, so the
+ * edit goes through the normal (undoable, CRDT-synced) text-update path. */
+export function spliceText(
+	text: string,
+	start: number,
+	end: number,
+	replacement: string
+): string {
+	return text.slice(0, start) + replacement + text.slice(end);
+}
+
+/** A single-block text selection eligible for the inline "Ask AI" transform. */
+export interface SelectionTarget {
+	blockId: string;
+	start: number;
+	end: number;
 }
 
 export function createEditor(documentId: string, tokens: TokenSource, userId: string) {
@@ -50,6 +70,8 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 	let slashQuery = $state('');
 	let linkFor = $state<string | null>(null); // block id with an open [[ menu
 	let linkQuery = $state('');
+	// Inline "Ask AI" transform: pending while the LLM call is in flight.
+	let selectionPending = $state(false);
 
 	function mirror(): void {
 		blocks = yblocks.toArray().map((item) => item.toJSON() as BlockData);
@@ -121,6 +143,7 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			return provider.doc;
 		},
 		userId,
+		documentId,
 
 		/** Insert a new block after `afterId` (or append); returns its id. */
 		insertAfter(afterId: string | null, type: string): string {
@@ -393,6 +416,46 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 				}
 			}
 			vm.updateData(id, { text });
+		},
+
+		// ---- inline "Ask AI" on selection (inline-ai-selection spec) --------
+
+		/** True while a selection transform's LLM call is in flight. */
+		get selectionPending() {
+			return selectionPending;
+		},
+
+		/** Transform the selected `[start, end)` slice of a block via the LLM
+		 * (rewrite/shorten/expand/fix/translate) and apply the result in place
+		 * over the selection, through the same text-update path typing uses — so
+		 * it is one undo step and syncs via the CRDT. Returns true on success. */
+		async transformSelection(
+			target: SelectionTarget,
+			action: string,
+			langTarget?: string
+		): Promise<boolean> {
+			if (readOnly || selectionPending) return false;
+			const block = blocks.find((b) => b.id === target.blockId);
+			const text = String((block?.data as { text?: string })?.text ?? '');
+			const selected = text.slice(target.start, target.end);
+			if (!selected.trim()) return false;
+			selectionPending = true;
+			try {
+				const { text: result } = await transformText(
+					documentId,
+					action,
+					selected,
+					langTarget
+				);
+				vm.updateData(target.blockId, {
+					text: spliceText(text, target.start, target.end, result)
+				});
+				focusedId = target.blockId;
+				historyRevision++; // force the focused field to re-sync from the model
+				return true;
+			} finally {
+				selectionPending = false;
+			}
 		},
 
 		undo(): void {

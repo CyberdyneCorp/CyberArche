@@ -1,0 +1,122 @@
+# CyberArche — defensive security testing authorization
+# Owner: Cyberdyne Corp (self-owned assets). Engagement approved by the
+# repository owner for this pentest. All assets below are owned by us.
+
+version: "1.0"
+authorized_by: "Leonardo Araujo dos Santos (CyberArche/Cyberdyne, repo owner)"
+authorization_date: "2026-07-13"
+review_date: "2026-10-13"  # quarterly re-validation
+
+environments:
+  - name: local
+    default_testing: active
+    rate_limit_rps: 50
+  - name: production
+    default_testing: active      # explicit per-asset opt-in below
+    rate_limit_rps: 5            # gentle: non-destructive, rate-limited
+
+assets:
+  # ---- Local instance (docker-compose) — full active + Shannon ----
+  # Host ports shifted to avoid the locally-running CyberdyneAuth (:8000).
+  - name: "http://localhost:15173"
+    environment: local
+    asset_type: web_application
+    engagement_type: white_box
+    tech_stack: [svelte, sveltekit, typescript, vite]
+    testing_level: active
+    destructive_testing: approved   # local throwaway data
+    service_affecting: approved
+    notes: "Local CyberArche SPA (host :15173 -> container :80). Shannon target."
+
+  - name: "http://localhost:18000"
+    environment: local
+    asset_type: rest_api
+    engagement_type: white_box
+    tech_stack: [python, fastapi, postgresql, redis]
+    testing_level: active
+    destructive_testing: approved
+    service_affecting: approved
+    owasp_api_top10_applicable: true
+    notes: "Local CyberArche API (host :18000). Full active exploitation + Shannon."
+
+  - name: "http://localhost:18100"
+    environment: local
+    asset_type: rest_api
+    engagement_type: white_box
+    tech_stack: [python, fastmcp]
+    testing_level: active
+    destructive_testing: approved
+    service_affecting: approved
+    notes: "Local CyberArche FastMCP server (host :18100)."
+
+  # ---- Production — active, rate-limited, NON-destructive ----
+  - name: "https://cyberarche.backend.coolify.cyberdynecorp.ai"
+    environment: production
+    asset_type: rest_api
+    engagement_type: white_box
+    tech_stack: [python, fastapi, postgresql, redis]
+    testing_level: active
+    destructive_testing: denied      # no data destruction on prod
+    service_affecting: denied        # no DoS / heavy fuzzing
+    owasp_api_top10_applicable: true
+    notes: >
+      Production API. Active auth/IDOR/BOLA/injection probes permitted at
+      <=5 rps. Any write is self-owned and must be cleaned up (trash+purge).
+      Stop at proof — never mass-mutate or exfiltrate other tenants' data.
+
+  - name: "https://cyberarche.coolify.cyberdynecorp.ai"
+    environment: production
+    asset_type: web_application
+    engagement_type: white_box
+    tech_stack: [svelte, sveltekit]
+    testing_level: active
+    destructive_testing: denied
+    service_affecting: denied
+    notes: "Production SPA. Client-side + auth flow testing."
+
+  - name: "https://cyberarche.mcp.coolify.cyberdynecorp.ai"
+    environment: production
+    asset_type: rest_api
+    engagement_type: white_box
+    tech_stack: [python, fastmcp]
+    testing_level: active
+    destructive_testing: denied
+    service_affecting: denied
+    notes: "Production FastMCP. Tool-access-control + auth testing."
+
+  # ---- CyberdyneAuth — in scope for INTEGRATION analysis only ----
+  # White-box source read to understand token issuance/validation/JWKS.
+  # Do NOT send attack traffic to the auth service itself; findings focus
+  # on how CyberArche consumes it (verification, claim trust, scoping).
+  - name: "https://auth.backend.coolify.cyberdynecorp.ai"
+    environment: production
+    asset_type: rest_api
+    engagement_type: white_box
+    tech_stack: [python, fastapi, jwt-rs256, oidc]
+    testing_level: passive           # observe only (JWKS, discovery doc)
+    destructive_testing: denied
+    service_affecting: denied
+    notes: >
+      Identity provider (source at /Users/leonardoaraujo/work/CyberdyneAuth).
+      Passive only: read OpenAPI/JWKS/discovery. Focus is CyberArche's
+      consumption of it, not attacking the IdP endpoints.
+
+out_of_scope:
+  # Google Workspace connector and all third-party SaaS explicitly excluded.
+  - "*.googleapis.com"
+  - "accounts.google.com"
+  - "oauth2.googleapis.com"
+  - "cyberrag.coolify.cyberdynecorp.ai"   # CyberdyneRAG (separate service)
+  - "dao.backend.coolify.cyberdynecorp.ai"
+  - "cyberflies.backend.coolify.cyberdynecorp.ai"
+  - "interpreter.backend.coolify.cyberdynecorp.ai"
+
+technique_restrictions:
+  never_run:
+    - "credential_stuffing"
+    - "social_engineering"
+    - "physical_access_tests"
+    - "dos_flooding"
+  require_approval:
+    - "fuzzing_with_high_volume"       # >1000 requests
+    - "authentication_brute_force"

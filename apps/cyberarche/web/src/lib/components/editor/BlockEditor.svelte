@@ -9,6 +9,7 @@
 	import type { SharingVM } from '$lib/viewmodels/sharing.svelte';
 	import LinkMenu from './LinkMenu.svelte';
 	import SlashMenu from './SlashMenu.svelte';
+	import SelectionMenu from './SelectionMenu.svelte';
 
 	let { editor, sharing = null }: { editor: EditorVM; sharing?: SharingVM | null } =
 		$props();
@@ -291,6 +292,11 @@
 
 {#if menu}
 	<ContextMenu x={menu.x} y={menu.y} items={menuItems()} onclose={() => (menu = null)} />
+{/if}
+
+<!-- Inline "Ask AI" bubble over the current text selection (document-scoped). -->
+{#if !editor.readOnly}
+	<SelectionMenu {editor} />
 {/if}
 
 <style>
