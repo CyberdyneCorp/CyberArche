@@ -15,6 +15,7 @@ from cyberarche.application.use_cases import UseCases
 from cyberarche.domain.errors import NotAuthorized, NotFound
 from cyberarche.domain.ids import SnapshotId
 from cyberarche.domain.memberships import Role
+from cyberarche.domain.snapshots import diff_blocks
 from tests.conftest import caller
 
 BOB = caller("bob", "acme")
@@ -157,3 +158,127 @@ async def test_restoring_an_unknown_snapshot_fails(use_cases: UseCases, alice):
 
     with pytest.raises(NotFound):
         await use_cases.snapshots.restore(alice, document.id, SnapshotId("nope"))
+
+
+# ---- Block diff (pure domain fn) ------------------------------------------
+
+
+def test_diff_blocks_classifies_added_removed_modified_and_ignores_unchanged():
+    old = [block("b1", "keep"), block("b2", "old text"), block("b3", "gone")]
+    new = [block("b1", "keep"), block("b2", "new text"), block("b4", "fresh")]
+
+    diff = diff_blocks(old, new)
+
+    assert [b["id"] for b in diff.added] == ["b4"]
+    assert [b["id"] for b in diff.removed] == ["b3"]
+    assert diff.modified == [{"id": "b2", "before": "old text", "after": "new text"}]
+
+
+def test_diff_blocks_of_identical_trees_is_empty():
+    same = [block("b1", "one"), block("b2", "two")]
+
+    diff = diff_blocks(same, list(same))
+
+    assert diff.added == []
+    assert diff.removed == []
+    assert diff.modified == []
+
+
+# ---- Diff use case --------------------------------------------------------
+
+
+async def test_diff_between_two_snapshots(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+    v1 = await snapshot_of_now(use_cases, alice, document.id, b"sv1")
+    await use_cases.agent.update_block(alice, document.id, "b1", {"text": "edited"})
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b2", "second")])
+    v2 = await snapshot_of_now(use_cases, alice, document.id, b"sv2")
+
+    diff = await use_cases.snapshots.diff(alice, document.id, v1.id, v2.id)
+
+    assert [b["id"] for b in diff.added] == ["b2"]
+    assert diff.removed == []
+    assert diff.modified == [{"id": "b1", "before": "first", "after": "edited"}]
+
+
+async def test_diff_snapshot_against_current_document(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+    v1 = await snapshot_of_now(use_cases, alice, document.id, b"sv1")
+    # Move the live document on, without taking a second snapshot.
+    await use_cases.agent.delete_block(alice, document.id, "b1")
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b2", "second")])
+
+    diff = await use_cases.snapshots.diff(alice, document.id, v1.id)
+
+    assert [b["id"] for b in diff.added] == ["b2"]
+    assert [b["id"] for b in diff.removed] == ["b1"]
+
+
+async def test_diff_of_an_unknown_snapshot_fails(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+
+    with pytest.raises(NotFound):
+        await use_cases.snapshots.diff(alice, document.id, SnapshotId("nope"))
+
+
+async def test_diff_requires_view_access(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+    v1 = await snapshot_of_now(use_cases, alice, document.id, b"sv1")
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.snapshots.diff(BOB, document.id, v1.id)
+
+
+# ---- Labels (named versions) ----------------------------------------------
+
+
+async def test_label_persists_through_record(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+
+    recorded = await use_cases.snapshots.record(
+        alice,
+        document.id,
+        content={"blocks": await blocks_of(use_cases, alice, document.id)},
+        state_vector=b"sv1",
+        label="Draft 1",
+    )
+
+    assert recorded.label == "Draft 1"
+    listed = await use_cases.snapshots.list(alice, document.id)
+    assert [s.label for s in listed] == ["Draft 1"]
+
+
+async def test_rename_sets_the_label(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+    v1 = await snapshot_of_now(use_cases, alice, document.id, b"sv1")
+    assert v1.label is None
+
+    renamed = await use_cases.snapshots.rename(alice, document.id, v1.id, "Final")
+
+    assert renamed.label == "Final"
+    listed = await use_cases.snapshots.list(alice, document.id)
+    assert listed[0].label == "Final"
+
+
+async def test_rename_requires_edit_access(use_cases: UseCases, alice):
+    workspace, document = await setup(use_cases, alice)
+    await use_cases.agent.apply_blocks(alice, document.id, [block("b1", "first")])
+    v1 = await snapshot_of_now(use_cases, alice, document.id, b"sv1")
+    await use_cases.sharing.invite_to_workspace(
+        alice, workspace.id, user_id=BOB.user_id, role=Role.COMMENTER
+    )
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.snapshots.rename(BOB, document.id, v1.id, "Nope")
+
+
+async def test_rename_of_an_unknown_snapshot_fails(use_cases: UseCases, alice):
+    _, document = await setup(use_cases, alice)
+
+    with pytest.raises(NotFound):
+        await use_cases.snapshots.rename(alice, document.id, SnapshotId("nope"), "x")

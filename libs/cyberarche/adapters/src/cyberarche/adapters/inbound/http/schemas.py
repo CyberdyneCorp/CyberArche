@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from cyberarche.domain.documents import Document
-from cyberarche.domain.snapshots import Snapshot
+from cyberarche.domain.snapshots import BlockDiff, Snapshot
 from cyberarche.domain.workspaces import Workspace
 
 # ---- Requests -------------------------------------------------------------
@@ -37,6 +37,11 @@ class MoveDocumentRequest(BaseModel):
 class RecordSnapshotRequest(BaseModel):
     content: dict[str, Any]
     state_vector_b64: str = ""
+    label: str | None = None
+
+
+class RenameSnapshotRequest(BaseModel):
+    label: str | None = None
 
 
 # ---- Responses ------------------------------------------------------------
@@ -103,6 +108,7 @@ class SnapshotResponse(BaseModel):
     created_at: datetime
     restored_from: str | None
     created_by: str | None
+    label: str | None = None
 
     @staticmethod
     def from_domain(snapshot: Snapshot) -> "SnapshotResponse":
@@ -113,6 +119,7 @@ class SnapshotResponse(BaseModel):
             created_at=snapshot.created_at,
             restored_from=snapshot.restored_from,
             created_by=snapshot.created_by,
+            label=snapshot.label,
         )
 
 
@@ -123,3 +130,17 @@ class SnapshotDetailResponse(SnapshotResponse):
     def from_domain(snapshot: Snapshot) -> "SnapshotDetailResponse":
         base = SnapshotResponse.from_domain(snapshot)
         return SnapshotDetailResponse(**base.model_dump(), content=snapshot.content)
+
+
+class BlockDiffResponse(BaseModel):
+    """Block-level changes between two versions (version-history spec)."""
+
+    added: list[dict[str, Any]]
+    removed: list[dict[str, Any]]
+    modified: list[dict[str, Any]]
+
+    @staticmethod
+    def from_domain(diff: BlockDiff) -> "BlockDiffResponse":
+        return BlockDiffResponse(
+            added=diff.added, removed=diff.removed, modified=diff.modified
+        )

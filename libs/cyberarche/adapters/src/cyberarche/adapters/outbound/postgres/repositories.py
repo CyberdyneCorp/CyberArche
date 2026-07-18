@@ -12,6 +12,7 @@ from typing import Any
 import asyncpg
 
 from cyberarche.domain.documents import Document
+from cyberarche.domain.errors import NotFound
 from cyberarche.domain.ids import (
     DocumentId,
     FolderId,
@@ -71,6 +72,7 @@ def _snapshot_from_row(row: asyncpg.Record) -> Snapshot:
         created_at=row["created_at"],
         restored_from=SnapshotId(row["restored_from"]) if row["restored_from"] else None,
         created_by=UserId(row["created_by"]) if row["created_by"] else None,
+        label=row["label"],
     )
 
 
@@ -347,8 +349,8 @@ class PostgresSnapshotRepository:
             """
             INSERT INTO snapshots
                 (id, document_id, seq, content, state_vector, created_at,
-                 restored_from, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 restored_from, created_by, label)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             snapshot.id,
             snapshot.document_id,
@@ -358,6 +360,7 @@ class PostgresSnapshotRepository:
             snapshot.created_at,
             snapshot.restored_from,
             snapshot.created_by,
+            snapshot.label,
         )
 
     async def get(self, document_id: DocumentId, snapshot_id: SnapshotId) -> Snapshot | None:
@@ -381,6 +384,23 @@ class PostgresSnapshotRepository:
             document_id,
         )
         return _snapshot_from_row(row) if row else None
+
+    async def set_label(
+        self, document_id: DocumentId, snapshot_id: SnapshotId, label: str | None
+    ) -> Snapshot:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE snapshots SET label = $3
+            WHERE id = $1 AND document_id = $2
+            RETURNING *
+            """,
+            snapshot_id,
+            document_id,
+            label,
+        )
+        if row is None:
+            raise NotFound("snapshot not found")
+        return _snapshot_from_row(row)
 
 
 class PostgresMembershipRepository:

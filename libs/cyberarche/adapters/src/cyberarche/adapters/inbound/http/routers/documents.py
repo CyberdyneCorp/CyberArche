@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import base64
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from cyberarche.adapters.inbound.http.dependencies import Caller, Cases
 from cyberarche.adapters.inbound.http.schemas import (
+    BlockDiffResponse,
     CreateDocumentRequest,
     DocumentResponse,
     MoveDocumentRequest,
     PurgeResponse,
     RecordSnapshotRequest,
+    RenameSnapshotRequest,
     RetitleDocumentRequest,
     SnapshotDetailResponse,
     SnapshotResponse,
@@ -131,6 +133,7 @@ async def record_snapshot(
         DocumentId(document_id),
         content=body.content,
         state_vector=base64.b64decode(body.state_vector_b64 or b""),
+        label=body.label,
     )
     return SnapshotResponse.from_domain(snapshot)
 
@@ -141,6 +144,37 @@ async def list_snapshots(
 ) -> list[SnapshotResponse]:
     snapshots = await cases.snapshots.list(caller, DocumentId(document_id))
     return [SnapshotResponse.from_domain(s) for s in snapshots]
+
+
+@router.get("/{document_id}/snapshots/diff")
+async def diff_snapshots(
+    document_id: str,
+    cases: Cases,
+    caller: Caller,
+    from_id: str = Query(alias="from"),
+    to: str | None = None,
+) -> BlockDiffResponse:
+    diff = await cases.snapshots.diff(
+        caller,
+        DocumentId(document_id),
+        SnapshotId(from_id),
+        SnapshotId(to) if to else None,
+    )
+    return BlockDiffResponse.from_domain(diff)
+
+
+@router.patch("/{document_id}/snapshots/{snapshot_id}")
+async def rename_snapshot(
+    document_id: str,
+    snapshot_id: str,
+    body: RenameSnapshotRequest,
+    cases: Cases,
+    caller: Caller,
+) -> SnapshotResponse:
+    snapshot = await cases.snapshots.rename(
+        caller, DocumentId(document_id), SnapshotId(snapshot_id), body.label
+    )
+    return SnapshotResponse.from_domain(snapshot)
 
 
 @router.post("/{document_id}/snapshots/{snapshot_id}/restore")

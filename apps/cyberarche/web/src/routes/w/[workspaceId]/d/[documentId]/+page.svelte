@@ -6,7 +6,9 @@
 	import BlockEditor from '$lib/components/editor/BlockEditor.svelte';
 	import { registerBuiltinBlocks } from '$lib/editor/blocks';
 	import ExportDialog from '$lib/components/ExportDialog.svelte';
+	import HistoryModal from '$lib/components/HistoryModal.svelte';
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
+	import { historyModal } from '$lib/viewmodels/historyModal.svelte';
 	import { createAgentPanel, type AgentPanelVM } from '$lib/viewmodels/agent.svelte';
 	import { createConnectors, type ConnectorsVM } from '$lib/viewmodels/connectors.svelte';
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
@@ -139,6 +141,12 @@
 				>
 				<button
 					class="btn btn-secondary export"
+					data-testid="open-history"
+					title="Version history"
+					onclick={() => historyModal.open()}>History</button
+				>
+				<button
+					class="btn btn-secondary export"
 					data-testid="export-open"
 					title="Export document"
 					onclick={() => (exportOpen = true)}>Export</button
@@ -191,6 +199,9 @@
 			blocks={editor?.blocks ?? []}
 			onclose={() => (exportOpen = false)}
 		/>
+	{/if}
+	{#if historyModal.isOpen}
+		<HistoryModal documentId={doc.id} />
 	{/if}
 	</div>
 {:else}
