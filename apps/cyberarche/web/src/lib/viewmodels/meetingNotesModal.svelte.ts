@@ -6,6 +6,54 @@ import type { Document } from '$lib/api/documents';
 import { ApiError } from '$lib/api/http';
 import { createMeetingNotes, listRecordings, type Recording } from '$lib/api/meetings';
 
+/** Recordings grouped under one month/year. `key` is a sortable 'YYYY-MM' (or
+ * 'undated'); `year`/`month0` (0-based) let the view format a localized label. */
+export interface MonthGroup {
+	key: string;
+	year: number;
+	month0: number;
+	recordings: Recording[];
+}
+
+function capturedMs(recording: Recording): number {
+	const t = recording.captured_at ? Date.parse(recording.captured_at) : NaN;
+	return Number.isNaN(t) ? -Infinity : t;
+}
+
+/** Group recordings by capture month, newest month first and newest recording
+ * first within each; undated recordings fall into a trailing 'undated' group.
+ * Pure and deterministic (month keyed in UTC) so it is safe to unit-test. */
+export function groupRecordingsByMonth(recordings: Recording[]): MonthGroup[] {
+	const groups = new Map<string, MonthGroup>();
+	for (const recording of recordings) {
+		const ms = capturedMs(recording);
+		const dated = ms !== -Infinity;
+		const date = dated ? new Date(ms) : null;
+		const key = date
+			? `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+			: 'undated';
+		let group = groups.get(key);
+		if (!group) {
+			group = {
+				key,
+				year: date ? date.getUTCFullYear() : 0,
+				month0: date ? date.getUTCMonth() : 0,
+				recordings: []
+			};
+			groups.set(key, group);
+		}
+		group.recordings.push(recording);
+	}
+	for (const group of groups.values()) {
+		group.recordings.sort((a, b) => capturedMs(b) - capturedMs(a));
+	}
+	return [...groups.values()].sort((a, b) => {
+		if (a.key === 'undated') return 1;
+		if (b.key === 'undated') return -1;
+		return a.key < b.key ? 1 : -1;
+	});
+}
+
 /** Friendly message for the common failures (not signed in / not configured),
  * falling back to the server detail for anything else. */
 function friendlyError(err: unknown): string {

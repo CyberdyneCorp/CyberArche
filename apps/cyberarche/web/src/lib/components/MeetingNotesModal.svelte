@@ -3,8 +3,10 @@
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import {
 		createMeetingNotes_VM,
+		groupRecordingsByMonth,
 		meetingNotesModal,
-		type MeetingNotesVM
+		type MeetingNotesVM,
+		type MonthGroup
 	} from '$lib/viewmodels/meetingNotesModal.svelte';
 
 	let { workspaceId }: { workspaceId: string } = $props();
@@ -17,8 +19,19 @@
 		model.load();
 	});
 
+	const groups = $derived(vm ? groupRecordingsByMonth(vm.recordings) : []);
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') meetingNotesModal.close();
+	}
+
+	function monthLabel(group: MonthGroup): string {
+		if (group.key === 'undated') return 'Undated';
+		return new Date(Date.UTC(group.year, group.month0, 1)).toLocaleDateString(undefined, {
+			month: 'long',
+			year: 'numeric',
+			timeZone: 'UTC'
+		});
 	}
 
 	function formatCaptured(iso: string | null): string {
@@ -84,25 +97,33 @@
 					No meeting recordings yet.
 				</p>
 			{:else}
-				{#each vm.recordings as recording (recording.id)}
-					<div class="rec" data-testid="meeting-recording">
-						<div class="rec-info">
-							<span class="rec-title">{recording.headline || 'Untitled recording'}</span>
-							<span class="rec-meta">
-								{formatCaptured(recording.captured_at)}
-								{#if recording.captured_at}·{/if}
-								{recording.status}
-							</span>
-						</div>
-						<button
-							class="btn btn-primary"
-							data-testid="meeting-generate"
-							disabled={vm.pendingId !== null}
-							onclick={() => generate(recording.id)}
-						>
-							{vm.pendingId === recording.id ? 'Generating…' : 'Generate document'}
-						</button>
-					</div>
+				{#each groups as group (group.key)}
+					<section class="group" data-testid="meeting-month-group">
+						<h2 class="month" data-testid="meeting-month-label">
+							<span>{monthLabel(group)}</span>
+							<span class="count">{group.recordings.length}</span>
+						</h2>
+						{#each group.recordings as recording (recording.id)}
+							<div class="rec" data-testid="meeting-recording">
+								<div class="rec-info">
+									<span class="rec-title">{recording.headline || 'Untitled recording'}</span>
+									<span class="rec-meta">
+										{formatCaptured(recording.captured_at)}
+										{#if recording.captured_at}·{/if}
+										{recording.status}
+									</span>
+								</div>
+								<button
+									class="btn btn-primary"
+									data-testid="meeting-generate"
+									disabled={vm.pendingId !== null}
+									onclick={() => generate(recording.id)}
+								>
+									{vm.pendingId === recording.id ? 'Generating…' : 'Generate document'}
+								</button>
+							</div>
+						{/each}
+					</section>
 				{/each}
 			{/if}
 		{/if}
@@ -182,20 +203,56 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
-		padding: 12px 20px 18px;
+		overscroll-behavior: contain;
+		padding: 0 20px 18px;
+	}
+	.group {
 		display: flex;
 		flex-direction: column;
+		gap: 6px;
+	}
+	.group + .group {
+		margin-top: 6px;
+	}
+	.month {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		gap: 8px;
+		margin: 0;
+		padding: 14px 0 6px;
+		background: var(--bg1);
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--tx3);
+	}
+	.count {
+		font-weight: 600;
+		font-size: 11px;
+		color: var(--tx3);
+		background: var(--bg2);
+		border-radius: 999px;
+		padding: 1px 8px;
+		letter-spacing: 0;
 	}
 	.rec {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		padding: 10px 12px;
+		padding: 9px 12px;
 		border: 1px solid var(--line);
 		border-radius: var(--r-control);
 		background: var(--bg0);
+		transition: border-color 0.12s ease;
+	}
+	.rec:hover {
+		border-color: var(--tx3);
 	}
 	.rec-info {
 		display: flex;
