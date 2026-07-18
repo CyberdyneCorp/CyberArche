@@ -87,6 +87,26 @@ The connector requests only least-privilege scopes: `gmail.readonly`,
 `spreadsheets.readonly`, `presentations.readonly` (read-only everywhere except
 creating Calendar events).
 
+## Enabling Web Push notifications (optional)
+
+Disabled by default (the "Push notifications" toggle stays inert, and
+`GET /api/v1/push/vapid-public-key` returns `""`, which the web app reads as
+"push not available"). To turn it on, set all three env vars in Coolify:
+
+- `CYBERARCHE_PUSH_VAPID_PUBLIC_KEY`, `CYBERARCHE_PUSH_VAPID_PRIVATE_KEY` — a
+  VAPID (RFC 8292) keypair. Generate one with `web-push generate-vapid-keys`
+  (npm's `web-push`), or `vapid --gen` / `py-vapid` from the `py-vapid` package.
+  The public key is handed to the browser to subscribe; the private key signs the
+  encrypted pushes and must stay secret.
+- `CYBERARCHE_PUSH_VAPID_SUBJECT` — a contact `mailto:` (e.g.
+  `mailto:admin@cyberdynecorp.ai`) required by push services in the VAPID claim.
+
+With the keys set, the app builds a `push` notification channel: when a user
+enables the toggle the browser registers a service worker (`/sw.js`) and stores
+its subscription server-side, and enabled notifications (mentions, agent results,
+and the digest) are delivered as encrypted Web Push. Subscriptions the push
+service reports as expired (404/410) are pruned automatically.
+
 ## Deploy
 
 ```bash

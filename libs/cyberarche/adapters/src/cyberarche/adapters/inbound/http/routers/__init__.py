@@ -31,6 +31,7 @@ from cyberarche.adapters.inbound.http.routers.notification_prefs import (
 from cyberarche.adapters.inbound.http.routers.notifications import (
     router as notifications_router,
 )
+from cyberarche.adapters.inbound.http.routers.push import router as push_router
 from cyberarche.adapters.inbound.http.routers.scheduled_agents import (
     router as scheduled_agents_router,
 )
@@ -61,5 +62,6 @@ all_routers = [
     files_router,
     notifications_router,
     notification_prefs_router,
+    push_router,
     templates_router,
 ]

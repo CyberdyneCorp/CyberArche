@@ -58,6 +58,11 @@ services:
       # Outbound notification webhook (Slack-style / HTTP receiver) — empty =
       # in-app only (today's behaviour). Set it to fan notifications out.
       CYBERARCHE_NOTIFICATION_WEBHOOK_URL: ${CYBERARCHE_NOTIFICATION_WEBHOOK_URL:-}
+      # Web Push (VAPID / RFC 8291) — all three empty = the push toggle stays
+      # inert. Set a VAPID keypair + mailto: subject to enable browser push.
+      CYBERARCHE_PUSH_VAPID_PUBLIC_KEY: ${CYBERARCHE_PUSH_VAPID_PUBLIC_KEY:-}
+      CYBERARCHE_PUSH_VAPID_PRIVATE_KEY: ${CYBERARCHE_PUSH_VAPID_PRIVATE_KEY:-}
+      CYBERARCHE_PUSH_VAPID_SUBJECT: ${CYBERARCHE_PUSH_VAPID_SUBJECT:-}
       CYBERARCHE_CONNECTOR_SECRET_KEY: ${CYBERARCHE_CONNECTOR_SECRET_KEY}
       # Google Workspace connector — empty = disabled (the Integrations tab shows
       # "not enabled"). Set all three to turn it on.
