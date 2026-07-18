@@ -1,5 +1,7 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 	import { updated } from '$app/state';
 	import { session } from '$lib/viewmodels/session.svelte';
 	import Toasts from '$lib/components/Toasts.svelte';
@@ -9,6 +11,15 @@
 
 	// Restore a session from the HttpOnly refresh cookie (async silent refresh).
 	void session.init();
+
+	// Register the service worker for the offline app shell. Idempotent with
+	// push.ts's registration (same '/sw.js' URL + default scope → the browser
+	// dedupes). Guarded for SSR and unsupported browsers; failures are ignored.
+	onMount(() => {
+		if (browser && 'serviceWorker' in navigator) {
+			navigator.serviceWorker.register('/sw.js').catch(() => {});
+		}
+	});
 
 	// A new build was deployed while this tab was open: its in-memory JS is now
 	// stale (this is what left tabs on old realtime/reconnect logic). Offer a
