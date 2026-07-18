@@ -3,7 +3,6 @@
 	import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 	import {
 		createMeetingNotes_VM,
-		groupRecordingsByMonth,
 		meetingNotesModal,
 		type MeetingNotesVM,
 		type MonthGroup
@@ -19,8 +18,6 @@
 		model.load();
 	});
 
-	const groups = $derived(vm ? groupRecordingsByMonth(vm.recordings) : []);
-
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') meetingNotesModal.close();
 	}
@@ -34,10 +31,23 @@
 		});
 	}
 
-	function formatCaptured(iso: string | null): string {
+	/** Day + time only — the month/year already lives in the group header. */
+	function shortWhen(iso: string | null): string {
 		if (!iso) return '';
 		const date = new Date(iso);
-		return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+		if (Number.isNaN(date.getTime())) return iso;
+		return date.toLocaleString(undefined, {
+			weekday: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+
+	/** Recordings ready to turn into a doc read as a positive state; anything
+	 * still processing reads as pending. */
+	function isReady(status: string): boolean {
+		return status === 'completed' || status === 'ready';
 	}
 
 	async function generate(recordingId: string) {
@@ -97,32 +107,59 @@
 					No meeting recordings yet.
 				</p>
 			{:else}
-				{#each groups as group (group.key)}
+				{#each vm.groups as group (group.key)}
+					{@const open = !vm.isCollapsed(group.key)}
 					<section class="group" data-testid="meeting-month-group">
-						<h2 class="month" data-testid="meeting-month-label">
-							<span>{monthLabel(group)}</span>
+						<button
+							type="button"
+							class="month"
+							class:open
+							data-testid="meeting-month-toggle"
+							aria-expanded={open}
+							onclick={() => vm?.toggleMonth(group.key)}
+						>
+							<svg class="chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+								<path
+									d="M6 4l4 4-4 4"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.75"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
+							</svg>
+							<span class="month-label" data-testid="meeting-month-label">{monthLabel(group)}</span>
 							<span class="count">{group.recordings.length}</span>
-						</h2>
-						{#each group.recordings as recording (recording.id)}
-							<div class="rec" data-testid="meeting-recording">
-								<div class="rec-info">
-									<span class="rec-title">{recording.headline || 'Untitled recording'}</span>
-									<span class="rec-meta">
-										{formatCaptured(recording.captured_at)}
-										{#if recording.captured_at}·{/if}
-										{recording.status}
-									</span>
-								</div>
-								<button
-									class="btn btn-primary"
-									data-testid="meeting-generate"
-									disabled={vm.pendingId !== null}
-									onclick={() => generate(recording.id)}
-								>
-									{vm.pendingId === recording.id ? 'Generating…' : 'Generate document'}
-								</button>
+						</button>
+						{#if open}
+							<div class="recs">
+								{#each group.recordings as recording (recording.id)}
+									<div class="rec" data-testid="meeting-recording">
+										<div class="rec-info">
+											<span class="rec-title">{recording.headline || 'Untitled recording'}</span>
+											<span class="rec-meta">
+												{#if recording.captured_at}
+													<span class="when">{shortWhen(recording.captured_at)}</span>
+												{/if}
+												<span
+													class="status"
+													class:ready={isReady(recording.status)}
+													data-testid="meeting-status">{recording.status}</span
+												>
+											</span>
+										</div>
+										<button
+											class="btn btn-primary"
+											data-testid="meeting-generate"
+											disabled={vm.pendingId !== null}
+											onclick={() => generate(recording.id)}
+										>
+											{vm.pendingId === recording.id ? 'Generating…' : 'Generate document'}
+										</button>
+									</div>
+								{/each}
 							</div>
-						{/each}
+						{/if}
 					</section>
 				{/each}
 			{/if}
@@ -209,10 +246,12 @@
 	.group {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
 	}
-	.group + .group {
-		margin-top: 6px;
+	.recs {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding-top: 2px;
 	}
 	.month {
 		position: sticky;
@@ -220,16 +259,38 @@
 		z-index: 1;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 8px;
+		width: 100%;
 		margin: 0;
-		padding: 14px 0 6px;
+		padding: 13px 0 7px;
+		border: none;
 		background: var(--bg1);
 		font-size: 11px;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--tx3);
+		cursor: pointer;
+		text-align: left;
+	}
+	.month:hover {
+		color: var(--tx);
+	}
+	.month:focus-visible {
+		outline: 2px solid var(--acc, #a9741f);
+		outline-offset: 2px;
+		border-radius: 4px;
+	}
+	.chev {
+		flex: none;
+		color: var(--tx3);
+		transition: transform 0.15s ease;
+	}
+	.month.open .chev {
+		transform: rotate(90deg);
+	}
+	.month-label {
+		flex: 1;
 	}
 	.count {
 		font-weight: 600;
@@ -239,6 +300,7 @@
 		border-radius: 999px;
 		padding: 1px 8px;
 		letter-spacing: 0;
+		font-variant-numeric: tabular-nums;
 	}
 	.rec {
 		display: flex;
@@ -257,7 +319,7 @@
 	.rec-info {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 4px;
 		min-width: 0;
 	}
 	.rec-title {
@@ -267,8 +329,45 @@
 		white-space: nowrap;
 	}
 	.rec-meta {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		font-size: 12px;
 		color: var(--tx3);
+	}
+	.when {
+		font-variant-numeric: tabular-nums;
+	}
+	.status {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 500;
+		text-transform: capitalize;
+		color: var(--tx3);
+		background: var(--bg2);
+	}
+	.status::before {
+		content: '';
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--tx3);
+	}
+	.status.ready {
+		color: color-mix(in oklab, var(--ok, #3f8f5f) 82%, var(--tx));
+		background: color-mix(in oklab, var(--ok, #3f8f5f) 16%, transparent);
+	}
+	.status.ready::before {
+		background: var(--ok, #3f8f5f);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.chev {
+			transition: none;
+		}
 	}
 	.btn.btn-primary:disabled {
 		opacity: 0.5;

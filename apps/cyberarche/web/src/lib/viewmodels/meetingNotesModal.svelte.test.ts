@@ -40,6 +40,37 @@ describe('groupRecordingsByMonth', () => {
 	});
 });
 
+describe('meeting-notes month collapse', () => {
+	beforeEach(() => vi.unstubAllGlobals());
+
+	it('exposes grouped recordings and toggles a month collapsed/expanded', async () => {
+		const recordings = [
+			REC('jun', '2026-06-15T12:00:00Z'),
+			REC('may', '2026-05-15T12:00:00Z')
+		];
+		const fn = vi.fn(async () => ({
+			ok: true,
+			status: 200,
+			json: async () => recordings
+		})) as unknown as typeof fetch;
+		vi.stubGlobal('fetch', fn);
+
+		const vm = createMeetingNotes_VM('ws-1');
+		await vm.load();
+
+		expect(vm.groups.map((g) => g.key)).toEqual(['2026-06', '2026-05']);
+		// All expanded by default.
+		expect(vm.isCollapsed('2026-06')).toBe(false);
+
+		vm.toggleMonth('2026-06');
+		expect(vm.isCollapsed('2026-06')).toBe(true);
+		expect(vm.isCollapsed('2026-05')).toBe(false); // independent
+
+		vm.toggleMonth('2026-06');
+		expect(vm.isCollapsed('2026-06')).toBe(false);
+	});
+});
+
 /** Replies with `body` while capturing request shapes for assertions. */
 function capturingFetch(body: unknown) {
 	const calls: Array<{ url: string; body: unknown }> = [];

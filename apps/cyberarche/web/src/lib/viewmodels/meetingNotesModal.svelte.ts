@@ -71,10 +71,16 @@ export function createMeetingNotes_VM(workspaceId: string) {
 	let error = $state<string | null>(null);
 	/** id of the recording currently being turned into a document, if any. */
 	let pendingId = $state<string | null>(null);
+	/** Month keys the user has collapsed in the picker (view state). */
+	let collapsed = $state<Set<string>>(new Set());
 
 	return {
 		get recordings() {
 			return recordings;
+		},
+		/** Recordings grouped by month, newest first (for the picker). */
+		get groups(): MonthGroup[] {
+			return groupRecordingsByMonth(recordings);
 		},
 		get loading() {
 			return loading;
@@ -84,6 +90,19 @@ export function createMeetingNotes_VM(workspaceId: string) {
 		},
 		get pendingId() {
 			return pendingId;
+		},
+
+		/** Whether a month group is collapsed (all expanded by default). */
+		isCollapsed(key: string): boolean {
+			return collapsed.has(key);
+		},
+
+		/** Collapse or expand a month group. */
+		toggleMonth(key: string): void {
+			const next = new Set(collapsed);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			collapsed = next;
 		},
 
 		/** Load the caller's recordings for the picker. */
