@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The editor VM opens a WebSocket via ArcheProvider — stub it out; these
 // tests exercise the Y.Doc binding and commands locally. Instances are
@@ -24,11 +24,11 @@ import * as Y from 'yjs';
 import { registerBuiltinBlocks } from '$lib/editor/blocks';
 import { allBlockDefinitions, newBlock, registerBlock } from '$lib/editor/registry';
 import { colorFor, createEditor, spliceText } from './editor.svelte';
-import { transformText } from '$lib/api/agent';
+import { continueWriting, transformText } from '$lib/api/agent';
 
-// The inline "Ask AI" transform calls the agent API; stub it so the VM test
-// exercises only the local apply-over-selection path.
-vi.mock('$lib/api/agent', () => ({ transformText: vi.fn() }));
+// The inline "Ask AI" transform and "continue writing" call the agent API; stub
+// them so the VM test exercises only the local apply paths.
+vi.mock('$lib/api/agent', () => ({ transformText: vi.fn(), continueWriting: vi.fn() }));
 
 beforeAll(() => {
 	vi.stubGlobal('WebSocket', FakeSocket as unknown as typeof WebSocket);
@@ -650,5 +650,85 @@ describe('inline "Ask AI" transform (inline-ai-selection)', () => {
 		expect(ok).toBe(false);
 		expect(transformText).not.toHaveBeenCalled();
 		expect(vm.blocks[0].data.text).toBe('a   b');
+	});
+});
+
+describe('"continue writing" ghost text (continue-writing)', () => {
+	beforeEach(() => {
+		vi.mocked(continueWriting).mockReset();
+		vi.useFakeTimers();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	/** Build an editor with one paragraph and a resolved ghost suggestion. */
+	async function withGhost(preceding: string, suggestion: string) {
+		vi.mocked(continueWriting).mockResolvedValue({ text: suggestion });
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: preceding });
+		vm.requestContinuation(id, preceding);
+		await vi.advanceTimersByTimeAsync(600);
+		return { vm, id };
+	}
+
+	it('requestContinuation stores the debounced suggestion for the block', async () => {
+		const { vm, id } = await withGhost('The night was dark.', ' It was raining.');
+
+		expect(continueWriting).toHaveBeenCalledWith('doc-1', 'The night was dark.');
+		expect(vm.ghostFor).toBe(id);
+		expect(vm.ghostSuggestion).toBe(' It was raining.');
+	});
+
+	it('skips the request (and shows no ghost) for blank preceding text', async () => {
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+
+		vm.requestContinuation(id, '   ');
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(continueWriting).not.toHaveBeenCalled();
+		expect(vm.ghostFor).toBeNull();
+	});
+
+	it('drops a stale suggestion when the block changed before the response', async () => {
+		vi.mocked(continueWriting).mockResolvedValue({ text: ' It was raining.' });
+		const vm = editor();
+		const id = vm.insertAfter(null, 'paragraph');
+		vm.updateData(id, { text: 'The night was dark.' });
+
+		vm.requestContinuation(id, 'The night was dark.');
+		// The user keeps typing before the (debounced) response lands.
+		vm.updateData(id, { text: 'The night was dark. And' });
+		await vi.advanceTimersByTimeAsync(600);
+
+		expect(vm.ghostFor).toBeNull(); // never inserted onto the changed block
+	});
+
+	it('acceptContinuation appends the ghost text via updateData and clears it', async () => {
+		const { vm } = await withGhost('The night was dark.', ' It was raining.');
+
+		vm.acceptContinuation();
+
+		expect(vm.blocks[0].data.text).toBe('The night was dark. It was raining.');
+		expect(vm.ghostFor).toBeNull();
+		expect(vm.canUndo).toBe(true); // went through the tracked, undoable path
+	});
+
+	it('acceptContinuation is a no-op when the block no longer matches', async () => {
+		const { vm, id } = await withGhost('The night was dark.', ' It was raining.');
+		vm.updateData(id, { text: 'Changed entirely' });
+
+		vm.acceptContinuation();
+
+		expect(vm.blocks[0].data.text).toBe('Changed entirely'); // not appended
+	});
+
+	it('dismissContinuation clears the ghost', async () => {
+		const { vm } = await withGhost('The night was dark.', ' It was raining.');
+
+		vm.dismissContinuation();
+
+		expect(vm.ghostFor).toBeNull();
+		expect(vm.ghostSuggestion).toBe('');
 	});
 });

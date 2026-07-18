@@ -18,9 +18,11 @@ import {
 	type BlockDefinition
 } from '$lib/editor/registry';
 import { linkIndex } from '$lib/viewmodels/link-index.svelte';
-import { transformText } from '$lib/api/agent';
+import { continueWriting, transformText } from '$lib/api/agent';
 
 const LOCAL_ORIGIN = 'local';
+// How long typing must pause before we ask the model to continue the block.
+const CONTINUE_DEBOUNCE_MS = 600;
 const PEER_COLORS = ['var(--rose)', 'var(--teal)', 'var(--blue)', 'var(--ok)'];
 
 export function colorFor(userId: string): string {
@@ -72,9 +74,29 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 	let linkQuery = $state('');
 	// Inline "Ask AI" transform: pending while the LLM call is in flight.
 	let selectionPending = $state(false);
+	// "Continue writing" ghost text: the dimmed suggestion shown at a block's end.
+	// `basedOn` is the block text the suggestion was computed for — accept re-checks
+	// it so a stale suggestion is never inserted after the block has changed.
+	let ghost = $state<{ blockId: string; basedOn: string; text: string } | null>(null);
+	let continueTimer: ReturnType<typeof setTimeout> | null = null;
+	let continueToken = 0; // bumped per request so late responses can be discarded
 
 	function mirror(): void {
 		blocks = yblocks.toArray().map((item) => item.toJSON() as BlockData);
+	}
+	function textOf(id: string): string {
+		const block = blocks.find((b) => b.id === id);
+		return String((block?.data as { text?: string })?.text ?? '');
+	}
+	async function fetchContinuation(
+		blockId: string,
+		precedingText: string,
+		token: number
+	): Promise<void> {
+		const { text } = await continueWriting(documentId, precedingText);
+		// Discard if superseded by a newer request, empty, or the block changed.
+		if (token !== continueToken || !text || textOf(blockId) !== precedingText) return;
+		ghost = { blockId, basedOn: precedingText, text };
 	}
 	function refreshHistory(): void {
 		canUndo = undoManager.undoStack.length > 0;
@@ -326,6 +348,7 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			focusedId = id;
 			if (id !== slashFor) vm.closeSlash();
 			if (id !== linkFor) vm.closeLink();
+			if (id !== ghost?.blockId) vm.dismissContinuation();
 			provider.broadcastPresence(id, userId, colorFor(userId));
 		},
 
@@ -458,6 +481,56 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 			}
 		},
 
+		// ---- "continue writing" ghost text (continue-writing spec) ----------
+
+		/** The block currently showing a ghost suggestion, or null. */
+		get ghostFor(): string | null {
+			return ghost?.blockId ?? null;
+		},
+		/** The dimmed continuation text to render after the caret (empty if none). */
+		get ghostSuggestion(): string {
+			return ghost?.text ?? '';
+		},
+
+		/** After typing pauses at the end of a non-empty block, ask the model to
+		 * continue it and show the result as ghost text. Debounced; any new call
+		 * (i.e. any further edit) drops the current suggestion and pending request,
+		 * so a stale suggestion never lingers. */
+		requestContinuation(blockId: string, precedingText: string): void {
+			if (readOnly) return;
+			vm.dismissContinuation();
+			if (!precedingText.trim()) return;
+			const token = ++continueToken;
+			continueTimer = setTimeout(() => {
+				continueTimer = null;
+				void fetchContinuation(blockId, precedingText, token);
+			}, CONTINUE_DEBOUNCE_MS);
+		},
+
+		/** Accept the ghost: append it to the block through the normal (undoable,
+		 * CRDT-synced) text path. Re-checks the block still matches what the
+		 * suggestion was computed for, so a changed block is never corrupted. */
+		acceptContinuation(): void {
+			if (!ghost) return;
+			const { blockId, basedOn, text } = ghost;
+			vm.dismissContinuation();
+			const current = textOf(blockId);
+			if (current !== basedOn) return; // stale — the block changed; drop it
+			vm.updateData(blockId, { text: current + text });
+			focusedId = blockId;
+			historyRevision++; // force the focused field to re-sync from the model
+		},
+
+		/** Clear the ghost suggestion and cancel any pending request. */
+		dismissContinuation(): void {
+			if (continueTimer) {
+				clearTimeout(continueTimer);
+				continueTimer = null;
+			}
+			continueToken++; // invalidate any in-flight response
+			ghost = null;
+		},
+
 		undo(): void {
 			undoManager.undo();
 			refreshHistory();
@@ -475,6 +548,7 @@ export function createEditor(documentId: string, tokens: TokenSource, userId: st
 		},
 
 		destroy(): void {
+			vm.dismissContinuation();
 			yblocks.unobserveDeep(mirror);
 			provider.destroy();
 		}

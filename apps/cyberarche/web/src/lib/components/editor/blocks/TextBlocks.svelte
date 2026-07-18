@@ -51,11 +51,19 @@
 		onmergeback,
 		onfocus: () => vm.focus(block.id)
 	});
+	// "Continue writing" ghost text, wired only into block-flow containers
+	// (paragraph/heading/quote) where the dimmed suggestion can flow inline.
+	const ghostProps = $derived({
+		ghost: vm.ghostFor === block.id ? vm.ghostSuggestion : '',
+		oncontinue: (next: string) => vm.requestContinuation(block.id, next),
+		onaccept: () => vm.acceptContinuation(),
+		ondismiss: () => vm.dismissContinuation()
+	});
 </script>
 
 {#if block.type === 'heading'}
 	<div class="heading" data-level={Math.min(Math.round(level) || 1, 4)}>
-		<EditableText {...shared} placeholder="Heading" />
+		<EditableText {...shared} {...ghostProps} placeholder="Heading" />
 	</div>
 {:else if block.type === 'bulleted_list' || block.type === 'numbered_list'}
 	<div class="list-item">
@@ -81,11 +89,11 @@
 	</div>
 {:else if block.type === 'quote'}
 	<blockquote class="quote">
-		<EditableText {...shared} placeholder="Quote" />
+		<EditableText {...shared} {...ghostProps} placeholder="Quote" />
 	</blockquote>
 {:else}
 	<div class="paragraph">
-		<EditableText {...shared} placeholder="Type '/' for blocks" />
+		<EditableText {...shared} {...ghostProps} placeholder="Type '/' for blocks" />
 	</div>
 {/if}
 

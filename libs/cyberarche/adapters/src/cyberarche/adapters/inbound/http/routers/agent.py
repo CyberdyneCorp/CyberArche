@@ -205,6 +205,27 @@ async def transform(
     return TransformResponse(text=result)
 
 
+class ContinueRequest(BaseModel):
+    preceding_text: str
+
+
+class ContinueResponse(BaseModel):
+    text: str
+
+
+@router.post("/continue")
+async def continue_writing(
+    document_id: str, body: ContinueRequest, cases: Cases, caller: Caller
+) -> ContinueResponse:
+    """Suggest a natural continuation of the preceding text (continue-writing):
+    a single tool-free LLM call; the client renders it as dimmed ghost text and
+    applies it through the CRDT only if accepted."""
+    result = await cases.agent.continue_writing(
+        caller, DocumentId(document_id), preceding_text=body.preceding_text
+    )
+    return ContinueResponse(text=result)
+
+
 @router.delete("/blocks/{block_id}", status_code=204)
 async def delete_block(
     document_id: str, block_id: str, cases: Cases, caller: Caller

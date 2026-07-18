@@ -12,11 +12,15 @@
 		menuOpen = false,
 		rich = false,
 		syncSignal = 0,
+		ghost = '',
 		onchange,
 		onenter,
 		onbackspaceempty,
 		onmergeback,
 		onfocus,
+		oncontinue,
+		onaccept,
+		ondismiss,
 		tag = 'div'
 	}: {
 		value?: string;
@@ -29,14 +33,27 @@
 		/** Changes on undo/redo: forces a DOM re-sync from `value` even while the
 		 * field is focused (normal remote edits stay caret-safe and don't set it). */
 		syncSignal?: number;
+		/** Dimmed "continue writing" suggestion shown inline after the caret when
+		 * the caret is at the end of the block (empty = none). */
+		ghost?: string;
 		onchange: (text: string) => void;
 		onenter?: (before: string, after: string) => void;
 		onbackspaceempty?: () => void;
 		/** Backspace at the very start of non-empty text: merge into previous. */
 		onmergeback?: () => void;
 		onfocus?: () => void;
+		/** Typing paused with the caret at the block end: request a continuation. */
+		oncontinue?: (text: string) => void;
+		/** Tab pressed while a ghost suggestion is shown: accept it. */
+		onaccept?: () => void;
+		/** Drop the current ghost suggestion (Escape, edit, navigation, blur). */
+		ondismiss?: () => void;
 		tag?: string;
 	} = $props();
+
+	// Modifier keys that must not dismiss the ghost (e.g. Shift to start a
+	// selection, Cmd/Ctrl for shortcuts). Any other key edits or moves the caret.
+	const GHOST_HOLD_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
 
 	let element = $state<HTMLElement | null>(null);
 
@@ -113,7 +130,39 @@
 		return selection.anchorOffset;
 	}
 
+	function caretAtEnd(): boolean {
+		const selection = window.getSelection();
+		return (
+			(selection?.isCollapsed ?? true) &&
+			caretOffset() === (element?.textContent ?? '').length
+		);
+	}
+
+	// "Continue writing": Tab accepts a shown ghost, Escape/any edit/navigation
+	// key drops it. Returns true when the key was fully handled here.
+	function handleGhostKey(event: KeyboardEvent): boolean {
+		if (!ghost) return false;
+		if (event.key === 'Tab') {
+			event.preventDefault();
+			onaccept?.();
+			return true;
+		}
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			ondismiss?.();
+			return true;
+		}
+		if (!GHOST_HOLD_KEYS.has(event.key)) ondismiss?.();
+		return false;
+	}
+
+	// After typing, if the caret rests at the block end, ask for a continuation.
+	function maybeContinue(text: string): void {
+		if (oncontinue && !menuOpen && caretAtEnd()) oncontinue(text);
+	}
+
 	function handleKeydown(event: KeyboardEvent) {
+		if (handleGhostKey(event)) return;
 		if (menuOpen && ['Enter', 'ArrowUp', 'ArrowDown', 'Escape'].includes(event.key)) {
 			event.preventDefault(); // the menu's window listener handles these
 			return;
@@ -145,11 +194,16 @@
 	this={tag}
 	bind:this={element}
 	class="editable"
+	class:has-ghost={!!ghost}
 	contenteditable="true"
 	role="textbox"
 	tabindex="0"
 	data-placeholder={placeholder}
-	oninput={() => onchange(element?.textContent ?? '')}
+	oninput={() => {
+		const text = element?.textContent ?? '';
+		onchange(text);
+		maybeContinue(text);
+	}}
 	onkeydown={handleKeydown}
 	onfocus={() => {
 		editing = true;
@@ -161,8 +215,16 @@
 		}
 		onfocus?.();
 	}}
-	onblur={() => (editing = false)}
-></svelte:element>
+	onblur={() => {
+		editing = false;
+		ondismiss?.(); // leaving the field drops any pending ghost suggestion
+	}}
+></svelte:element>{#if ghost}<span
+		class="ghost-suggestion"
+		contenteditable="false"
+		aria-hidden="true"
+		data-testid="ghost-suggestion">{ghost}</span
+	>{/if}
 
 <style>
 	.editable {
@@ -175,5 +237,17 @@
 		content: attr(data-placeholder);
 		color: var(--tx3);
 		pointer-events: none;
+	}
+	/* While a ghost suggestion is shown, the field flows inline so the dimmed
+	 * continuation reads as the next words right after the caret. */
+	.editable.has-ghost {
+		display: inline;
+	}
+	.ghost-suggestion {
+		color: var(--tx3);
+		opacity: 0.7;
+		pointer-events: none;
+		user-select: none;
+		white-space: pre-wrap;
 	}
 </style>

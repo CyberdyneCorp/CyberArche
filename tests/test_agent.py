@@ -1136,6 +1136,52 @@ async def test_transform_text_rejects_unknown_action(use_cases, llm, alice):
         )
 
 
+# ---- continue writing (ghost-text autocomplete) ----------------------------
+
+
+async def test_continue_writing_returns_the_completion_from_the_llm(
+    use_cases, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text=' It was raining.  ', model="m")]
+
+    result = await use_cases.agent.continue_writing(
+        alice, document.id, preceding_text="The night was dark."
+    )
+
+    # Trailing whitespace dropped, a natural leading space kept for the join.
+    assert result == " It was raining."
+    system, user = llm.requests[0]
+    assert system.role == "system" and user.role == "user"
+    assert user.content == "The night was dark."  # the preceding text reached it
+    assert llm.tools_seen[0] == []  # a tool-free call
+
+
+async def test_continue_writing_skips_the_llm_for_blank_text(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="should not be used", model="m")]
+
+    result = await use_cases.agent.continue_writing(
+        alice, document.id, preceding_text="   \n  "
+    )
+
+    assert result == ""
+    assert llm.requests == []  # no LLM call was made
+
+
+async def test_continue_writing_requires_view_access(use_cases, llm, alice):
+    from tests.conftest import caller
+
+    outsider = caller("carol", "acme")  # same tenant, but not a member
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="nope", model="m")]
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.continue_writing(
+            outsider, document.id, preceding_text="secret"
+        )
+
+
 # ---- answer -> typed blocks (agent-renderable-blocks) -----------------------
 
 from cyberarche.application.use_cases.agent import _answer_blocks  # noqa: E402
