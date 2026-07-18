@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "shannon": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "/Users/leonardoaraujo/work/CyberArche/.claude/skills/pentest/shannon/shannon-mcp-wrapper.sh"
+      ],
+      "env": {
+        "SHANNON_DIR": "/Users/leonardoaraujo/work/CyberArche/shannon",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000"
+      }
+    }
+  }
+}

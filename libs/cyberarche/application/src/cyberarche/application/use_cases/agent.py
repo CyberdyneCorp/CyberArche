@@ -371,6 +371,34 @@ class AgentUseCases:
         )
         return answer.blocks
 
+    async def transform_text(
+        self,
+        caller: CallerContext,
+        document_id: DocumentId,
+        *,
+        text: str,
+        action: str,
+        target: str | None = None,
+    ) -> str:
+        """Transform a selected snippet in place (inline-ai-selection spec).
+
+        A single, TOOL-FREE LLM call — unlike `ask`, it does not load document
+        context or tools. It requires VIEW access: the transformed text is
+        applied by the caller through the normal CRDT edit path, so this use
+        case never writes to the document. Access is enforced through the same
+        access-checked read path `ask`/`summarize` use, so a caller without
+        access is refused before any LLM call.
+        """
+        # Access check only (raises NotAuthorized/NotFound); result unused.
+        await self._document_context(caller, document_id)
+        instruction = _transform_instruction(action, target)
+        messages = [
+            LLMMessage(role="system", content=_transform_system_prompt(instruction)),
+            LLMMessage(role="user", content=text),
+        ]
+        response = await self._llm.complete(messages)
+        return response.text.strip()
+
     # ---- document editing (agent as a CRDT peer) ---------------------------
 
     async def update_block(
@@ -1226,6 +1254,36 @@ class AgentUseCases:
         document_id = DocumentId(str(arguments["document_id"]))
         document, rendered = await self._document_context(caller, document_id)
         return f"# {document.title}\n{rendered}"
+
+
+# Per-action instructions for the inline "Ask AI" selection transform.
+_TRANSFORM_INSTRUCTIONS = {
+    "rewrite": "Rewrite the text to be clearer and more polished, preserving meaning.",
+    "shorten": "Make the text more concise while preserving meaning.",
+    "expand": "Expand the text with more detail and explanation.",
+    "fix": "Fix spelling, grammar, and punctuation. Change nothing else.",
+}
+
+
+def _transform_instruction(action: str, target: str | None) -> str:
+    """The per-action instruction, validating the action (inline-ai-selection)."""
+    if action == "translate":
+        return (
+            f"Translate the text into {target or 'English'}. "
+            "Output only the translation."
+        )
+    instruction = _TRANSFORM_INSTRUCTIONS.get(action)
+    if instruction is None:
+        raise ValidationFailed(f"unknown transform action: {action}")
+    return instruction
+
+
+def _transform_system_prompt(instruction: str) -> str:
+    return (
+        "You transform a snippet of the user's text. Return ONLY the "
+        "transformed text: no preamble, no explanation, no surrounding quotes, "
+        f"and no markdown code fences. {instruction}"
+    )
 
 
 # Destructive tools refused in background (no human to confirm) — ai-agent spec.

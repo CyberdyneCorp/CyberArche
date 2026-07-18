@@ -1062,6 +1062,80 @@ async def test_summarize_without_selection_covers_the_whole_document(use_cases, 
     assert "only these blocks" not in prompt.lower()
 
 
+# ---- inline "Ask AI" on selection (inline-ai-selection) ---------------------
+
+
+@pytest.mark.parametrize(
+    "action,target,marker",
+    [
+        ("rewrite", None, "clearer"),
+        ("shorten", None, "concise"),
+        ("expand", None, "more detail"),
+        ("fix", None, "spelling"),
+        ("translate", "Español", "Español"),
+    ],
+)
+async def test_transform_text_prompts_the_llm_with_the_selection(
+    use_cases, llm, alice, action, target, marker
+):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="  transformed  ", model="m")]
+
+    result = await use_cases.agent.transform_text(
+        alice, document.id, text="the selected text", action=action, target=target
+    )
+
+    assert result == "transformed"  # returned stripped
+    system, user = llm.requests[0]
+    assert system.role == "system" and user.role == "user"
+    assert user.content == "the selected text"  # the selection went to the model
+    assert marker in system.content  # the per-action instruction was applied
+    # A tool-free call: the model was offered no tools.
+    assert llm.tools_seen[0] == []
+
+
+async def test_transform_text_does_not_modify_the_document(
+    use_cases, update_log, llm, alice
+):
+    _, document = await make_document(use_cases, alice)
+    await seed_blocks(use_cases, alice, document.id, ["original"])
+    before = await update_log.list_for_document(document.id)
+    llm._responses = [LLMResponse(text="rewritten", model="m")]
+
+    await use_cases.agent.transform_text(
+        alice, document.id, text="original", action="rewrite"
+    )
+
+    # No CRDT apply happened — the block is untouched (the client applies edits).
+    after = await update_log.list_for_document(document.id)
+    assert len(after) == len(before)
+    state = await use_cases.realtime.current_state(alice, document.id)
+    assert use_cases.agent._engine.read_blocks(state)[0]["data"]["text"] == "original"
+
+
+async def test_transform_text_requires_view_access(use_cases, llm, alice):
+    from tests.conftest import caller
+
+    outsider = caller("carol", "acme")  # same tenant, but not a member
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="nope", model="m")]
+
+    with pytest.raises(NotAuthorized):
+        await use_cases.agent.transform_text(
+            outsider, document.id, text="secret", action="rewrite"
+        )
+
+
+async def test_transform_text_rejects_unknown_action(use_cases, llm, alice):
+    _, document = await make_document(use_cases, alice)
+    llm._responses = [LLMResponse(text="x", model="m")]
+
+    with pytest.raises(ValidationFailed):
+        await use_cases.agent.transform_text(
+            alice, document.id, text="hello", action="translorate"
+        )
+
+
 # ---- answer -> typed blocks (agent-renderable-blocks) -----------------------
 
 from cyberarche.application.use_cases.agent import _answer_blocks  # noqa: E402
