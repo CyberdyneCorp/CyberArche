@@ -7,6 +7,7 @@ from typing import Protocol
 
 from cyberarche.domain.ids import NotificationId, TenantId, UserId
 from cyberarche.domain.notifications import Notification, NotificationPreferences
+from cyberarche.domain.push import PushSubscription
 
 
 class NotificationRepository(Protocol):
@@ -56,6 +57,32 @@ class NotificationPreferencesRepository(Protocol):
         self, tenant_id: TenantId, user_id: UserId, at: datetime
     ) -> None:
         """Record when the scheduled digest last ran for this user."""
+        ...
+
+
+class PushSubscriptionRepository(Protocol):
+    """A user's browser Web Push subscriptions (one row per device/endpoint).
+    `endpoint` is the natural unique key across the whole table."""
+
+    async def add(self, sub: PushSubscription) -> None:
+        """Insert or replace the subscription (upsert on endpoint)."""
+        ...
+
+    async def list_for_user(
+        self, tenant_id: TenantId, user_id: UserId
+    ) -> list[PushSubscription]:
+        """Every subscription the given user has registered."""
+        ...
+
+    async def remove(
+        self, tenant_id: TenantId, user_id: UserId, endpoint: str
+    ) -> None:
+        """Remove one of the user's subscriptions (no-op if not theirs)."""
+        ...
+
+    async def remove_by_endpoint(self, endpoint: str) -> None:
+        """Remove a subscription by endpoint regardless of owner (used by the
+        channel to prune an endpoint the push service has expired)."""
         ...
 
 

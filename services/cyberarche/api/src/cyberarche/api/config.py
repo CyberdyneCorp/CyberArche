@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Outbound notification webhook (Slack-style / HTTP receiver). Empty = no
     # channel, so notifications stay in-app only (today's behaviour).
     notification_webhook_url: str = ""
+    # Web Push (VAPID / RFC 8291). All three empty disables the push channel so
+    # the "Push notifications" toggle stays inert. Generate a keypair with e.g.
+    # `web-push generate-vapid-keys` (or `vapid --gen`); subject is a mailto:.
+    push_vapid_public_key: str = ""
+    push_vapid_private_key: str = ""
+    push_vapid_subject: str = ""
     # DAO backend for agent web search + YouTube tools. Called with the caller's
     # own forwarded access token; empty disables the tools.
     dao_url: str = "https://dao.backend.coolify.cyberdynecorp.ai"
@@ -81,6 +87,9 @@ class Settings(BaseSettings):
             interpreter_base_url=self.interpreter_url,
             meetings_base_url=self.meetings_url,
             notification_webhook_url=self.notification_webhook_url,
+            push_vapid_public_key=self.push_vapid_public_key,
+            push_vapid_private_key=self.push_vapid_private_key,
+            push_vapid_subject=self.push_vapid_subject,
             dao_base_url=self.dao_url,
             google_client_id=self.google_client_id,
             google_client_secret=self.google_client_secret,

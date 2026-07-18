@@ -12,9 +12,11 @@ from cyberarche.application.ports.notifications import (
     NotificationChannelPort,
     NotificationPreferencesRepository,
     NotificationRepository,
+    PushSubscriptionRepository,
 )
 from cyberarche.domain.ids import NotificationId
 from cyberarche.domain.notifications import Notification, NotificationPreferences
+from cyberarche.domain.push import PushSubscription
 
 
 class NotificationUseCases:
@@ -81,6 +83,35 @@ class NotificationPreferencesUseCases:
         )
         await self._prefs.upsert(prefs)
         return prefs
+
+
+class PushSubscriptionUseCases:
+    """Register and remove the caller's own browser Web Push subscriptions. Every
+    operation is scoped to the caller's tenant/user — one user never touches
+    another's subscriptions."""
+
+    def __init__(self, subscriptions: PushSubscriptionRepository, clock) -> None:
+        self._subscriptions = subscriptions
+        self._clock = clock
+
+    async def subscribe(
+        self, caller: CallerContext, *, endpoint: str, p256dh: str, auth: str
+    ) -> None:
+        await self._subscriptions.add(
+            PushSubscription(
+                tenant_id=caller.tenant_id,
+                user_id=caller.user_id,
+                endpoint=endpoint,
+                p256dh=p256dh,
+                auth=auth,
+                created_at=self._clock.now(),
+            )
+        )
+
+    async def unsubscribe(self, caller: CallerContext, *, endpoint: str) -> None:
+        await self._subscriptions.remove(
+            caller.tenant_id, caller.user_id, endpoint
+        )
 
 
 class NotificationDispatcher:

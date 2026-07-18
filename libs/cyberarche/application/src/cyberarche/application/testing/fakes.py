@@ -742,6 +742,37 @@ class InMemoryNotificationPreferencesRepository:
             self._prefs[key] = replace(prefs, last_digest_at=at)
 
 
+class InMemoryPushSubscriptionRepository:
+    """PushSubscriptionRepository fake: in-process browser push subscriptions
+    keyed by endpoint (the natural unique key across all users)."""
+
+    def __init__(self) -> None:
+        self._subs: dict[str, object] = {}
+
+    async def add(self, sub) -> None:
+        self._subs[sub.endpoint] = sub
+
+    async def list_for_user(self, tenant_id, user_id):
+        return [
+            sub
+            for sub in self._subs.values()
+            if str(sub.tenant_id) == str(tenant_id)
+            and str(sub.user_id) == str(user_id)
+        ]
+
+    async def remove(self, tenant_id, user_id, endpoint) -> None:
+        sub = self._subs.get(endpoint)
+        if (
+            sub is not None
+            and str(sub.tenant_id) == str(tenant_id)
+            and str(sub.user_id) == str(user_id)
+        ):
+            del self._subs[endpoint]
+
+    async def remove_by_endpoint(self, endpoint) -> None:
+        self._subs.pop(endpoint, None)
+
+
 class InMemoryInferredLinkRepository:
     """InferredLinkRepository fake: an in-process cache of inferred relations."""
 

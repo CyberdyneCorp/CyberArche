@@ -18,6 +18,7 @@ from cyberarche.application.use_cases.notifications import (
     NotificationDigestUseCases,
     NotificationPreferencesUseCases,
     NotificationUseCases,
+    PushSubscriptionUseCases,
 )
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
@@ -58,6 +59,7 @@ class UseCases:
     workspace_chat: WorkspaceChatUseCases
     notifications: NotificationUseCases
     notification_prefs: NotificationPreferencesUseCases
+    push_subscriptions: PushSubscriptionUseCases
     notification_digest: NotificationDigestUseCases
     templates: TemplateUseCases
     skills: AgentSkillUseCases

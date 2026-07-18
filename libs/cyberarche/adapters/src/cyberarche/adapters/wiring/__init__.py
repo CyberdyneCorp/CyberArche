@@ -40,6 +40,7 @@ from cyberarche.application.ports.notifications import (
     NotificationChannelPort,
     NotificationPreferencesRepository,
     NotificationRepository,
+    PushSubscriptionRepository,
 )
 from cyberarche.application.ports.agent_memory import (
     AgentMemoryRepository,
@@ -88,6 +89,7 @@ from cyberarche.application.use_cases.notifications import (
     NotificationDispatcher,
     NotificationPreferencesUseCases,
     NotificationUseCases,
+    PushSubscriptionUseCases,
 )
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
@@ -167,6 +169,12 @@ class WiringConfig:
     # Empty = no channel is built, so notifications stay in-app only (today's
     # behaviour). Set it to fan enabled notifications out to the URL.
     notification_webhook_url: str = ""
+    # Web Push (VAPID / RFC 8291). All three empty = no push channel is built,
+    # so the "Push notifications" toggle stays inert. Set the keypair (and a
+    # `mailto:` subject) to deliver encrypted browser push notifications.
+    push_vapid_public_key: str = ""
+    push_vapid_private_key: str = ""
+    push_vapid_subject: str = ""
     # Per-user minimum interval between scheduled email digests (seconds).
     digest_interval_seconds: int = 86400
 
@@ -238,6 +246,7 @@ def _build_use_cases(
     inferred_links: InferredLinkRepository,
     notifications: NotificationRepository,
     notification_prefs: NotificationPreferencesRepository,
+    push_subscriptions: PushSubscriptionRepository,
     dispatcher: NotificationDispatcher,
     notification_digest: NotificationDigestUseCases,
     templates: TemplateRepository,
@@ -351,6 +360,7 @@ def _build_use_cases(
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notifications),
         notification_prefs=NotificationPreferencesUseCases(notification_prefs),
+        push_subscriptions=PushSubscriptionUseCases(push_subscriptions, clock),
         notification_digest=notification_digest,
         skills=AgentSkillUseCases(agent_skills, access, clock, ids),
         templates=TemplateUseCases(
@@ -454,17 +464,34 @@ def _build_google_port(config: WiringConfig, shared_http):
 
 
 def _build_notification_channels(
-    config: WiringConfig, shared_http
+    config: WiringConfig,
+    shared_http,
+    push_subscriptions: PushSubscriptionRepository,
 ) -> tuple[NotificationChannelPort, ...]:
     """The configured outbound notification channels. Empty when nothing is
     configured, so notifications stay in-app only (today's behaviour)."""
-    if not config.notification_webhook_url:
-        return ()
-    from cyberarche.adapters.outbound.notifications.webhook import (
-        WebhookNotificationChannel,
-    )
+    channels: list[NotificationChannelPort] = []
+    if config.notification_webhook_url:
+        from cyberarche.adapters.outbound.notifications.webhook import (
+            WebhookNotificationChannel,
+        )
 
-    return (WebhookNotificationChannel(config.notification_webhook_url, shared_http()),)
+        channels.append(
+            WebhookNotificationChannel(config.notification_webhook_url, shared_http())
+        )
+    if config.push_vapid_private_key:
+        from cyberarche.adapters.outbound.notifications.webpush import (
+            WebPushNotificationChannel,
+        )
+
+        channels.append(
+            WebPushNotificationChannel(
+                push_subscriptions,
+                private_key=config.push_vapid_private_key,
+                subject=config.push_vapid_subject or "mailto:push@cyberarche",
+            )
+        )
+    return tuple(channels)
 
 
 @dataclass(slots=True)
@@ -486,6 +513,7 @@ class _Repositories:
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
     notification_prefs: NotificationPreferencesRepository
+    push_subscriptions: PushSubscriptionRepository
     templates: TemplateRepository
     custom_instructions: CustomInstructionsRepository
     agent_memories: AgentMemoryRepository
@@ -533,6 +561,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     from cyberarche.adapters.outbound.postgres.notification_prefs import (
         PostgresNotificationPreferencesRepository,
     )
+    from cyberarche.adapters.outbound.postgres.push_subscriptions import (
+        PostgresPushSubscriptionRepository,
+    )
     from cyberarche.adapters.outbound.postgres.templates import (
         PostgresTemplateRepository,
     )
@@ -571,6 +602,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
         notification_prefs=PostgresNotificationPreferencesRepository(pool),
+        push_subscriptions=PostgresPushSubscriptionRepository(pool),
         templates=PostgresTemplateRepository(pool),
         custom_instructions=PostgresCustomInstructionsRepository(pool),
         agent_memories=PostgresAgentMemoryRepository(pool),
@@ -601,6 +633,7 @@ def _memory_repositories() -> _Repositories:
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
         notification_prefs=fakes.InMemoryNotificationPreferencesRepository(),
+        push_subscriptions=fakes.InMemoryPushSubscriptionRepository(),
         templates=fakes.InMemoryTemplateRepository(),
         custom_instructions=fakes.InMemoryCustomInstructionsRepository(),
         agent_memories=fakes.InMemoryAgentMemoryRepository(),
@@ -869,7 +902,9 @@ async def build_container(
         repos.comments,
     )
     crdt_engine = PycrdtEngine()
-    channels = _build_notification_channels(config, shared_http)
+    channels = _build_notification_channels(
+        config, shared_http, repos.push_subscriptions
+    )
     dispatcher = NotificationDispatcher(
         repos.notifications, repos.notification_prefs, channels
     )
@@ -937,6 +972,7 @@ async def build_container(
             repos.inferred_links,
             repos.notifications,
             repos.notification_prefs,
+            repos.push_subscriptions,
             dispatcher,
             notification_digest,
             repos.templates,

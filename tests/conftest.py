@@ -45,6 +45,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryInferredLinkRepository,
     InMemoryNotificationRepository,
     InMemoryNotificationPreferencesRepository,
+    InMemoryPushSubscriptionRepository,
     InMemoryTemplateRepository,
     ScriptedMeetings,
     ScriptedWebMedia,
@@ -69,6 +70,7 @@ from cyberarche.application.use_cases.notifications import (
     NotificationDispatcher,
     NotificationPreferencesUseCases,
     NotificationUseCases,
+    PushSubscriptionUseCases,
 )
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCases
@@ -245,6 +247,7 @@ def use_cases(
     )
     notification_repo = InMemoryNotificationRepository()
     notification_prefs_repo = InMemoryNotificationPreferencesRepository()
+    push_subscriptions_repo = InMemoryPushSubscriptionRepository()
     dispatcher = NotificationDispatcher(notification_repo, notification_prefs_repo)
     sharing = SharingUseCases(
         documents,
@@ -340,6 +343,7 @@ def use_cases(
         workspace_chat=workspace_chat,
         notifications=NotificationUseCases(notification_repo),
         notification_prefs=NotificationPreferencesUseCases(notification_prefs_repo),
+        push_subscriptions=PushSubscriptionUseCases(push_subscriptions_repo, clock),
         notification_digest=NotificationDigestUseCases(
             notification_repo,
             notification_prefs_repo,
