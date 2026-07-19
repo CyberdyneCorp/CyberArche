@@ -66,6 +66,7 @@ from cyberarche.application.use_cases.collection_reminders import (
 )
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
+from cyberarche.application.use_cases.document_import import ImportUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
@@ -283,13 +284,14 @@ def use_cases(
     google = GoogleWorkspaceUseCases(
         google_repo, google_port, secret_box, access, clock, ids
     )
+    file_extractor = FileExtractor()
     agent_use_cases = AgentUseCases(
         llm,
         documents,
         realtime,
         knowledge,
         agent_runs,
-        FileExtractor(),
+        file_extractor,
         engine,
         access,
         clock,
@@ -325,6 +327,9 @@ def use_cases(
         ),
         meeting_notes=MeetingNotesUseCases(
             meetings, llm, document_use_cases, agent_use_cases, ids
+        ),
+        document_import=ImportUseCases(
+            document_use_cases, agent_use_cases, file_extractor, ids
         ),
         persona=persona,
         google=google,

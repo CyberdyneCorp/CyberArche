@@ -83,6 +83,7 @@ from cyberarche.application.use_cases.collection_reminders import (
 )
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
+from cyberarche.application.use_cases.document_import import ImportUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
@@ -297,13 +298,14 @@ def _build_use_cases(
     workspace_chat = WorkspaceChatUseCases(
         llm, rag, workspaces, search, access, persona=persona
     )
+    file_extractor = FileExtractor()
     agent_use_cases = AgentUseCases(
         llm,
         documents,
         realtime,
         knowledge,
         agent_runs,
-        FileExtractor(),
+        file_extractor,
         crdt_engine,
         access,
         clock,
@@ -339,6 +341,9 @@ def _build_use_cases(
         ),
         meeting_notes=MeetingNotesUseCases(
             meetings, llm, document_use_cases, agent_use_cases, ids
+        ),
+        document_import=ImportUseCases(
+            document_use_cases, agent_use_cases, file_extractor, ids
         ),
         google=google,
         persona=persona,
