@@ -311,6 +311,46 @@ class CollectionUseCases:
         The document survives in the trash and drops out of collection queries."""
         await self._document_use_cases.trash(caller, document_id)
 
+    async def delete_rows(
+        self,
+        caller: CallerContext,
+        collection_id: CollectionId,
+        document_ids: list[str],
+    ) -> int:
+        """Delete every id that is a non-trashed row of this collection, reusing
+        the single-row trash path (which enforces EDITOR per document). Ids that
+        are missing, trashed, or belong to another collection are skipped; a real
+        per-row access failure (NotAuthorized) on an in-collection row propagates.
+        Returns the number of rows deleted."""
+        collection = await self._require(caller, collection_id, Role.VIEWER)
+        rows = await self._rows_in_collection(caller, collection, document_ids)
+        for row in rows:
+            await self._document_use_cases.trash(caller, row.id)
+        return len(rows)
+
+    async def set_rows_value(
+        self,
+        caller: CallerContext,
+        collection_id: CollectionId,
+        document_ids: list[str],
+        *,
+        property_id: str,
+        value: object,
+    ) -> int:
+        """Set one property's value on every id that is a row of this collection,
+        reusing the single-row coercion/set path (which enforces EDITOR). The
+        property and value are validated once up front, so a bad or read-only
+        (formula/rollup) property fails fast for all. Ids not in the collection
+        are skipped; a per-row access failure propagates. Returns the count set."""
+        collection = await self._require(caller, collection_id, Role.VIEWER)
+        prop = self._settable_property(collection, property_id)
+        if prop.type != PropertyType.RELATION:
+            _coerce_value(prop, value)  # fail fast on a bad value for all rows
+        rows = await self._rows_in_collection(caller, collection, document_ids)
+        for row in rows:
+            await self.set_row_value(caller, row.id, property_id, value)
+        return len(rows)
+
     async def query_view(
         self, caller: CallerContext, collection_id: CollectionId, view_id: str
     ) -> list[Document]:
@@ -444,6 +484,38 @@ class CollectionUseCases:
             raise NotFound("collection not found")
         await self._access.require_workspace(caller, collection.workspace_id, role)
         return collection
+
+    async def _rows_in_collection(
+        self, caller: CallerContext, collection: Collection, document_ids: list[str]
+    ) -> list[Document]:
+        """Load the given ids and keep only the non-trashed rows of ``collection``
+        (tenant-scoped; no per-row access check here — callers do that when they
+        mutate). Ids that are missing, trashed, or in another collection drop out."""
+        rows: list[Document] = []
+        for doc_id in document_ids:
+            document = await self._documents_repo.get(
+                caller.tenant_id, DocumentId(doc_id)
+            )
+            if document is None or document.trashed:
+                continue
+            if document.collection_id != collection.id:
+                continue
+            rows.append(document)
+        return rows
+
+    def _settable_property(
+        self, collection: Collection, property_id: str
+    ) -> PropertyDef:
+        """The property to bulk-set, or ``ValidationFailed`` if it is unknown or
+        read-only (formula/rollup) — mirrors the single-row write rules."""
+        prop = collection.property(property_id)
+        if prop is None:
+            raise ValidationFailed(f"unknown property {property_id}")
+        if prop.type == PropertyType.FORMULA:
+            raise ValidationFailed("formula properties are read-only")
+        if prop.type == PropertyType.ROLLUP:
+            raise ValidationFailed("rollup properties are read-only")
+        return prop
 
     async def _require_row(
         self, caller: CallerContext, document_id: DocumentId

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
 	addProperty,
 	addRow,
+	bulkDeleteRows,
+	bulkSetRows,
 	createCollection,
 	createView,
 	deleteCollection,
@@ -227,5 +229,33 @@ describe('collections api client', () => {
 		await deleteRow('c1', 'r1');
 
 		expect((fetchMock as unknown as Mock).mock.calls.length).toBe(9);
+	});
+
+	it('bulk-deletes rows (POST) and returns the deleted count', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/rows/bulk-delete': { deleted: 2 }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const result = await bulkDeleteRows('c1', ['r1', 'r2']);
+		expect(result).toEqual({ deleted: 2 });
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ ids: ['r1', 'r2'] });
+	});
+
+	it('bulk-sets one property across rows (POST) and returns the updated count', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/rows/bulk-set': { updated: 3 }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const result = await bulkSetRows('c1', ['r1', 'r2', 'r3'], 'p1', 'done');
+		expect(result).toEqual({ updated: 3 });
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({
+			ids: ['r1', 'r2', 'r3'],
+			property_id: 'p1',
+			value: 'done'
+		});
 	});
 });

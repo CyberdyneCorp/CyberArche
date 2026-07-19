@@ -326,6 +326,129 @@ async def test_set_value_on_non_row_document_is_rejected(use_cases: UseCases, al
         await use_cases.collections.set_row_value(alice, doc.id, "p", "v")
 
 
+# ---- bulk row actions -------------------------------------------------------
+
+
+async def _bulk_setup(use_cases: UseCases, alice):
+    """A collection with a single-select Status property + a Score number."""
+    ws = await _workspace(use_cases, alice)
+    col = await use_cases.collections.create_collection(alice, workspace_id=ws.id, name="C")
+    col = await use_cases.collections.add_property(
+        alice, col.id, name="Status", type=PropertyType.SELECT, options=("todo", "done")
+    )
+    status = col.properties[0].id
+    col = await use_cases.collections.add_property(
+        alice, col.id, name="Score", type=PropertyType.NUMBER
+    )
+    number = col.properties[1].id
+    return ws, col, status, number
+
+
+async def test_delete_rows_deletes_and_returns_count(use_cases: UseCases, alice):
+    ws, col, _status, _number = await _bulk_setup(use_cases, alice)
+    a = await use_cases.collections.add_row(alice, col.id, title="A")
+    b = await use_cases.collections.add_row(alice, col.id, title="B")
+    c = await use_cases.collections.add_row(alice, col.id, title="C")
+
+    count = await use_cases.collections.delete_rows(alice, col.id, [a.id, b.id])
+    assert count == 2
+    remaining = await use_cases.collections.query_view(alice, col.id, col.views[0].id)
+    assert [r.id for r in remaining] == [c.id]
+
+
+async def test_delete_rows_skips_foreign_missing_and_trashed(use_cases: UseCases, alice):
+    ws, col, _status, _number = await _bulk_setup(use_cases, alice)
+    col2 = await use_cases.collections.create_collection(
+        alice, workspace_id=ws.id, name="Other"
+    )
+    keep = await use_cases.collections.add_row(alice, col.id, title="Keep")
+    foreign = await use_cases.collections.add_row(alice, col2.id, title="Foreign")
+    trashed = await use_cases.collections.add_row(alice, col.id, title="Trashed")
+    await use_cases.collections.remove_row(alice, trashed.id)
+
+    count = await use_cases.collections.delete_rows(
+        alice, col.id, [keep.id, foreign.id, trashed.id, "ghost"]
+    )
+    # Only the one live, in-collection row is deleted.
+    assert count == 1
+    remaining = await use_cases.collections.query_view(alice, col.id, col.views[0].id)
+    assert remaining == []
+    # The foreign collection's row is untouched.
+    other = await use_cases.collections.query_view(alice, col2.id, col2.views[0].id)
+    assert [r.id for r in other] == [foreign.id]
+
+
+async def test_delete_rows_propagates_not_authorized_for_in_collection_row(
+    use_cases: UseCases, memberships, clock, alice
+):
+    ws, col = await _viewer_setup(use_cases, memberships, clock, alice)
+    row = await use_cases.collections.add_row(alice, col.id, title="Alice's row")
+    # BOB is a workspace VIEWER: the row IS in the collection, so the per-row
+    # EDITOR check is a real authz boundary and must propagate (not be skipped).
+    with pytest.raises(NotAuthorized):
+        await use_cases.collections.delete_rows(BOB, col.id, [row.id])
+
+
+async def test_set_rows_value_sets_all_selected_and_returns_count(
+    use_cases: UseCases, alice
+):
+    ws, col, status, _number = await _bulk_setup(use_cases, alice)
+    a = await use_cases.collections.add_row(alice, col.id, title="A")
+    b = await use_cases.collections.add_row(alice, col.id, title="B")
+
+    count = await use_cases.collections.set_rows_value(
+        alice, col.id, [a.id, b.id], property_id=status, value="done"
+    )
+    assert count == 2
+    rows = await use_cases.collections.query_view(alice, col.id, col.views[0].id)
+    assert all(r.properties[status] == "done" for r in rows)
+
+
+async def test_set_rows_value_skips_foreign_ids(use_cases: UseCases, alice):
+    ws, col, status, _number = await _bulk_setup(use_cases, alice)
+    col2 = await use_cases.collections.create_collection(
+        alice, workspace_id=ws.id, name="Other"
+    )
+    a = await use_cases.collections.add_row(alice, col.id, title="A")
+    foreign = await use_cases.collections.add_row(alice, col2.id, title="Foreign")
+
+    count = await use_cases.collections.set_rows_value(
+        alice, col.id, [a.id, foreign.id, "ghost"], property_id=status, value="todo"
+    )
+    assert count == 1
+    rows = await use_cases.collections.query_view(alice, col.id, col.views[0].id)
+    assert rows[0].properties[status] == "todo"
+
+
+async def test_set_rows_value_rejects_formula_property(use_cases: UseCases, alice):
+    ws, col, _status, _number = await _bulk_setup(use_cases, alice)
+    col = await use_cases.collections.add_property(
+        alice, col.id, name="Fx", type=PropertyType.FORMULA, formula='prop("Title")'
+    )
+    fx = next(p.id for p in col.properties if p.type == PropertyType.FORMULA)
+    a = await use_cases.collections.add_row(alice, col.id)
+    with pytest.raises(ValidationFailed):
+        await use_cases.collections.set_rows_value(
+            alice, col.id, [a.id], property_id=fx, value="x"
+        )
+
+
+async def test_set_rows_value_rejects_unknown_property_and_bad_value(
+    use_cases: UseCases, alice
+):
+    ws, col, _status, number = await _bulk_setup(use_cases, alice)
+    # Unknown property fails up front, even with no matching ids.
+    with pytest.raises(ValidationFailed):
+        await use_cases.collections.set_rows_value(
+            alice, col.id, [], property_id="ghost", value="x"
+        )
+    # A bad value for the property fails fast, before touching any row.
+    with pytest.raises(ValidationFailed):
+        await use_cases.collections.set_rows_value(
+            alice, col.id, [], property_id=number, value="not-a-number"
+        )
+
+
 # ---- HTTP surface ----------------------------------------------------------
 
 

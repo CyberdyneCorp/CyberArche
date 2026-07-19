@@ -196,3 +196,20 @@ export const setRowValues = (
 
 export const deleteRow = (collectionId: string, documentId: string) =>
 	del<void>(`/api/v1/collections/${collectionId}/rows/${documentId}`);
+
+/** Delete several rows at once; returns how many were actually removed. */
+export const bulkDeleteRows = (collectionId: string, ids: string[]) =>
+	post<{ deleted: number }>(`/api/v1/collections/${collectionId}/rows/bulk-delete`, { ids });
+
+/** Set one property's value across several rows; returns how many were changed. */
+export const bulkSetRows = (
+	collectionId: string,
+	ids: string[],
+	propertyId: string,
+	value: unknown
+) =>
+	post<{ updated: number }>(`/api/v1/collections/${collectionId}/rows/bulk-set`, {
+		ids,
+		property_id: propertyId,
+		value
+	});

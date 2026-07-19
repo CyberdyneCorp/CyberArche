@@ -359,3 +359,61 @@ def test_update_view_persists_group_by_over_http(api):
     )
     after_clear = api.get(f"/api/v1/collections/{collection['id']}", headers=headers).json()
     assert next(v for v in after_clear["views"] if v["id"] == view_id)["group_by"] is None
+
+
+def test_bulk_row_actions_over_http(api):
+    """The bulk-set and bulk-delete endpoints set a property across selected rows
+    and delete selected rows, reporting the affected count (collections-bulk-rows)."""
+    headers = auth("alice-token")
+    ws = api.post("/api/v1/workspaces", json={"name": "WS"}, headers=headers).json()
+    collection = api.post(
+        f"/api/v1/workspaces/{ws['id']}/collections",
+        json={"name": "Tasks"},
+        headers=headers,
+    ).json()
+    prop = api.post(
+        f"/api/v1/collections/{collection['id']}/properties",
+        json={"name": "Status", "type": "select", "options": ["Todo", "Done"]},
+        headers=headers,
+    ).json()
+    property_id = next(p["id"] for p in prop["properties"] if p["name"] == "Status")
+    view_id = collection["views"][0]["id"]
+
+    rows = [
+        api.post(
+            f"/api/v1/collections/{collection['id']}/rows",
+            json={"title": title},
+            headers=headers,
+        ).json()
+        for title in ("A", "B", "C")
+    ]
+
+    # Bulk-set Status=Done on the first two rows.
+    set_resp = api.post(
+        f"/api/v1/collections/{collection['id']}/rows/bulk-set",
+        json={"ids": [rows[0]["id"], rows[1]["id"]], "property_id": property_id, "value": "Done"},
+        headers=headers,
+    )
+    assert set_resp.status_code == 200
+    assert set_resp.json() == {"updated": 2}
+
+    queried = api.get(
+        f"/api/v1/collections/{collection['id']}/views/{view_id}/rows", headers=headers
+    ).json()
+    by_id = {r["id"]: r for r in queried["rows"]}
+    assert by_id[rows[0]["id"]]["properties"][property_id] == "Done"
+    assert by_id[rows[2]["id"]]["properties"].get(property_id) in (None, "")
+
+    # Bulk-delete the first two rows; the count and remaining rows reflect it.
+    del_resp = api.post(
+        f"/api/v1/collections/{collection['id']}/rows/bulk-delete",
+        json={"ids": [rows[0]["id"], rows[1]["id"]]},
+        headers=headers,
+    )
+    assert del_resp.status_code == 200
+    assert del_resp.json() == {"deleted": 2}
+
+    remaining = api.get(
+        f"/api/v1/collections/{collection['id']}/views/{view_id}/rows", headers=headers
+    ).json()
+    assert [r["id"] for r in remaining["rows"]] == [rows[2]["id"]]

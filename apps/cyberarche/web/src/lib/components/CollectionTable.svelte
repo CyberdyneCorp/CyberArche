@@ -3,6 +3,7 @@
 	import type { CollectionVM } from '$lib/viewmodels/collection.svelte';
 	import { TITLE_PROPERTY } from '$lib/viewmodels/collection.svelte';
 	import CollectionBoard from './CollectionBoard.svelte';
+	import CollectionBulkBar from './CollectionBulkBar.svelte';
 	import CollectionCalendar from './CollectionCalendar.svelte';
 	import CollectionCell from './CollectionCell.svelte';
 	import CollectionFilterMenu from './CollectionFilterMenu.svelte';
@@ -97,6 +98,11 @@
 	function hasOptions(type: PropertyType): boolean {
 		return type === 'select' || type === 'multi_select';
 	}
+
+	// --- bulk row selection (Table view only) ---
+	const rowIds = $derived(vm.rows.map((r) => r.id));
+	const allSelected = $derived(rowIds.length > 0 && rowIds.every((id) => vm.isSelected(id)));
+	const someSelected = $derived(rowIds.some((id) => vm.isSelected(id)));
 
 	/** Load the collections a relation may target (once the picker is shown). */
 	async function loadTargets() {
@@ -229,10 +235,22 @@
 	{:else if vm.currentView?.kind === 'calendar'}
 		<CollectionCalendar {vm} {onOpenRow} />
 	{:else}
+		{#if vm.selectedCount > 0}
+			<CollectionBulkBar {vm} />
+		{/if}
 		<div class="table-wrap">
 			<table class="table" data-testid="collection-table">
 				<thead>
 					<tr>
+						<th class="sel-col">
+							<input
+								type="checkbox"
+								data-testid="select-all"
+								checked={allSelected}
+								indeterminate={someSelected && !allSelected}
+								onchange={() => vm.toggleAll(rowIds)}
+							/>
+						</th>
 						<th class="title-col">Name</th>
 						{#each vm.properties as property (property.id)}
 							<th data-testid="column-header"
@@ -257,7 +275,15 @@
 				</thead>
 				<tbody>
 					{#each vm.rows as row (row.id)}
-						<tr data-testid="collection-row">
+						<tr data-testid="collection-row" class:selected={vm.isSelected(row.id)}>
+							<td class="sel-col">
+								<input
+									type="checkbox"
+									data-testid="row-select"
+									checked={vm.isSelected(row.id)}
+									onchange={() => vm.toggleRow(row.id)}
+								/>
+							</td>
 							<td class="title-col">
 								<div class="title-cell">
 									<button
@@ -461,6 +487,14 @@
 		font-weight: 600;
 		color: var(--tx2);
 		background: var(--bg0);
+	}
+	.sel-col {
+		min-width: 36px;
+		width: 36px;
+		text-align: center;
+	}
+	.table tbody tr.selected {
+		background: var(--accbg);
 	}
 	.title-col {
 		min-width: 220px;

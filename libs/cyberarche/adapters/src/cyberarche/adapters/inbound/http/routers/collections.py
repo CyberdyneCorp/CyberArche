@@ -215,6 +215,24 @@ class SetRowValuesRequest(BaseModel):
     values: dict[str, Any] | None = None
 
 
+class BulkDeleteRowsRequest(BaseModel):
+    ids: list[str] = []
+
+
+class BulkSetRowsRequest(BaseModel):
+    ids: list[str] = []
+    property_id: str
+    value: Any | None = None
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int
+
+
+class BulkSetResponse(BaseModel):
+    updated: int
+
+
 # ---- collection CRUD -------------------------------------------------------
 
 
@@ -440,3 +458,27 @@ async def delete_row(
     collection_id: str, document_id: str, cases: Cases, caller: Caller
 ) -> None:
     await cases.collections.remove_row(caller, DocumentId(document_id))
+
+
+@router.post("/api/v1/collections/{collection_id}/rows/bulk-delete")
+async def bulk_delete_rows(
+    collection_id: str, body: BulkDeleteRowsRequest, cases: Cases, caller: Caller
+) -> BulkDeleteResponse:
+    deleted = await cases.collections.delete_rows(
+        caller, CollectionId(collection_id), body.ids
+    )
+    return BulkDeleteResponse(deleted=deleted)
+
+
+@router.post("/api/v1/collections/{collection_id}/rows/bulk-set")
+async def bulk_set_rows(
+    collection_id: str, body: BulkSetRowsRequest, cases: Cases, caller: Caller
+) -> BulkSetResponse:
+    updated = await cases.collections.set_rows_value(
+        caller,
+        CollectionId(collection_id),
+        body.ids,
+        property_id=body.property_id,
+        value=body.value,
+    )
+    return BulkSetResponse(updated=updated)
