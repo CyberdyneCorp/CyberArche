@@ -35,6 +35,7 @@ from cyberarche.adapters.inbound.http.routers.notification_prefs import (
 from cyberarche.adapters.inbound.http.routers.notifications import (
     router as notifications_router,
 )
+from cyberarche.adapters.inbound.http.routers.org import router as org_router
 from cyberarche.adapters.inbound.http.routers.push import router as push_router
 from cyberarche.adapters.inbound.http.routers.scheduled_agents import (
     router as scheduled_agents_router,
@@ -49,6 +50,7 @@ all_routers = [
     auth_router,
     api_keys_router,
     workspaces_router,
+    org_router,
     documents_router,
     knowledge_router,
     webhook_router,

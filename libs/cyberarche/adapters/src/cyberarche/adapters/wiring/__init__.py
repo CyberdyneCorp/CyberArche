@@ -18,6 +18,7 @@ from cyberarche.application.authz import AccessControl
 from cyberarche.application.ports.identity import (
     AuthGatewayPort,
     AuthorizationPort,
+    DirectoryPort,
     ServiceTokenPort,
     TokenPort,
 )
@@ -88,6 +89,8 @@ from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.meeting_notes import MeetingNotesUseCases
+from cyberarche.application.use_cases.members import WorkspaceMemberUseCases
+from cyberarche.application.use_cases.org_directory import OrgDirectoryUseCases
 from cyberarche.application.use_cases.folders import FolderUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
@@ -118,6 +121,7 @@ from cyberarche.adapters.outbound.auth.cyberdyne import (
     ClientCredentialsTokenSource,
     CyberdyneAuthConfig,
     CyberdyneAuthGateway,
+    CyberdyneDirectory,
     IamAuthorization,
     JwksTokenVerifier,
 )
@@ -195,6 +199,7 @@ class Container:
     service_tokens: ServiceTokenPort | None
     authorization: AuthorizationPort | None
     auth_gateway: AuthGatewayPort | None
+    directory: DirectoryPort | None
     workspaces: WorkspaceRepository
     documents: DocumentRepository
     snapshots: SnapshotRepository
@@ -267,6 +272,7 @@ def _build_use_cases(
     scheduled_agents: ScheduledAgentRepository,
     google_connections: GoogleConnectionRepository,
     google_port: GoogleWorkspacePort | None,
+    directory: DirectoryPort | None,
     model_name: str,
     clock,
     ids,
@@ -325,6 +331,8 @@ def _build_use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
+        members=WorkspaceMemberUseCases(memberships, access, clock, directory),
+        org_directory=OrgDirectoryUseCases(directory),
         documents=document_use_cases,
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, crdt_engine, realtime
@@ -746,14 +754,16 @@ def _auth_config(config: WiringConfig) -> CyberdyneAuthConfig:
 
 
 def _build_auth_stack(config: WiringConfig, shared_http):
-    """(token_port, service_tokens, authorization) from CyberdyneAuth config."""
+    """(token_port, service_tokens, authorization, directory) from
+    CyberdyneAuth config."""
     if not config.auth_base_url:
         raise ValueError("auth_base_url is required unless a token_port is injected")
     auth_config = _auth_config(config)
     credentials = ClientCredentialsTokenSource(auth_config, shared_http())
     token_port = JwksTokenVerifier(auth_config, shared_http(), credentials)
     authorization = IamAuthorization(auth_config, shared_http(), credentials)
-    return token_port, credentials, authorization
+    directory = CyberdyneDirectory(auth_config, shared_http(), credentials)
+    return token_port, credentials, authorization, directory
 
 
 def _build_rag(config: WiringConfig, service_tokens, shared_http) -> RagPort:
@@ -838,10 +848,11 @@ async def build_container(
     mcp_client: McpClientPort | None = None,
     peer_bus: PeerBusPort | None = None,
     queue: TaskQueuePort | None = None,
+    directory: DirectoryPort | None = None,
 ) -> Container:
     """Build the container. `token_port`, `rag`, `llm`, `mcp_client`,
-    `peer_bus`, and `queue` are injectable for tests and the dockerless
-    sample runtime."""
+    `peer_bus`, `queue`, and `directory` are injectable for tests and the
+    dockerless sample runtime."""
     clock = SystemClock()
     ids = UuidIds()
     closers = []
@@ -863,9 +874,14 @@ async def build_container(
     service_tokens: ServiceTokenPort | None = None
     authorization: AuthorizationPort | None = None
     if token_port is None:
-        token_port, service_tokens, authorization = _build_auth_stack(
-            config, shared_http
+        token_port, service_tokens, authorization, built_directory = (
+            _build_auth_stack(config, shared_http)
         )
+        directory = directory or built_directory
+    if directory is None and config.backend != "postgres":
+        from cyberarche.application.testing.fakes import InMemoryDirectory
+
+        directory = InMemoryDirectory()  # tests/sample runtime
     auth_gateway: AuthGatewayPort | None = None
     if config.auth_base_url:
         auth_gateway = CyberdyneAuthGateway(_auth_config(config), shared_http())
@@ -954,6 +970,7 @@ async def build_container(
         service_tokens=service_tokens,
         authorization=authorization,
         auth_gateway=auth_gateway,
+        directory=directory,
         workspaces=workspaces,
         documents=documents,
         snapshots=snapshots,
@@ -1018,6 +1035,7 @@ async def build_container(
             repos.scheduled_agents,
             repos.google_connections,
             google_port,
+            directory,
             config.llm_model,
             clock,
             ids,

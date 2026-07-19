@@ -474,6 +474,36 @@ class PostgresMembershipRepository:
             granted_at=row["granted_at"],
         )
 
+    async def list_workspace_members(
+        self, workspace_id: WorkspaceId
+    ) -> list[WorkspaceMembership]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM workspace_memberships
+            WHERE workspace_id = $1
+            ORDER BY granted_at, user_id
+            """,
+            workspace_id,
+        )
+        return [
+            WorkspaceMembership(
+                workspace_id=WorkspaceId(row["workspace_id"]),
+                user_id=UserId(row["user_id"]),
+                role=Role(row["role"]),
+                granted_at=row["granted_at"],
+            )
+            for row in rows
+        ]
+
+    async def remove_workspace_member(
+        self, workspace_id: WorkspaceId, user_id: UserId
+    ) -> None:
+        await self._pool.execute(
+            "DELETE FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2",
+            workspace_id,
+            user_id,
+        )
+
     async def add_document_grant(self, grant: DocumentGrant) -> None:
         await self._pool.execute(
             """

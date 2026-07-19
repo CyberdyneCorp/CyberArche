@@ -1,13 +1,27 @@
 <script lang="ts">
 	import type { SharePermission, ShareRole } from '$lib/api/sharing';
 	import type { SharingVM } from '$lib/viewmodels/sharing.svelte';
+	import { createOrgUsers } from '$lib/viewmodels/orgUsers.svelte';
+	import OrgUserPicker from './OrgUserPicker.svelte';
 
 	let { sharing, onclose }: { sharing: SharingVM; onclose: () => void } = $props();
 
-	let inviteId = $state('');
+	const orgUsers = createOrgUsers();
+	$effect(() => {
+		void orgUsers.load();
+	});
+
+	let picker = $state<OrgUserPicker | null>(null);
+	let inviteTarget = $state<string | null>(null);
 	let inviteRole = $state<ShareRole>('editor');
 	let linkPermission = $state<SharePermission>('view');
 	let copied = $state<string | null>(null);
+
+	async function invite() {
+		if (!inviteTarget) return;
+		await sharing.invite(inviteTarget, inviteRole);
+		if (sharing.invited) picker?.clear();
+	}
 
 	async function copy(url: string, id: string) {
 		await navigator.clipboard.writeText(url);
@@ -36,14 +50,14 @@
 				class="row"
 				onsubmit={async (event) => {
 					event.preventDefault();
-					if (inviteId.trim()) await sharing.invite(inviteId.trim(), inviteRole);
+					await invite();
 				}}
 			>
-				<input
-					class="input grow"
-					placeholder="User id (Cyberdyne identity)"
-					bind:value={inviteId}
-					data-testid="invite-user"
+				<OrgUserPicker
+					bind:this={picker}
+					{orgUsers}
+					testid="invite-user"
+					onselect={(userId) => (inviteTarget = userId)}
 				/>
 				<select class="input" bind:value={inviteRole} data-testid="invite-role">
 					<option value="editor">Editor</option>
@@ -51,7 +65,7 @@
 					<option value="viewer">Viewer</option>
 					<option value="owner">Owner</option>
 				</select>
-				<button class="btn btn-primary" type="submit">Invite</button>
+				<button class="btn btn-primary" type="submit" disabled={!inviteTarget}>Invite</button>
 			</form>
 			{#if sharing.invited}
 				<p class="ok" data-testid="invite-ok">Invited {sharing.invited}</p>
@@ -138,10 +152,8 @@
 	}
 	.row {
 		display: flex;
+		align-items: flex-start;
 		gap: 6px;
-	}
-	.grow {
-		flex: 1;
 	}
 	.ok {
 		color: var(--ok);

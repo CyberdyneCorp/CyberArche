@@ -434,6 +434,19 @@ async def test_membership_repository_contract(adapters):
     newest_first = await repo.document_grants_for_user(UserId("carol"))
     assert [g.document_id for g in newest_first] == ["doc-2", "doc-1"]
 
+    # Members list is oldest grant first; removal deletes the membership.
+    await repo.add_workspace_member(WorkspaceMembership(
+        workspace_id=WorkspaceId("ws-1"), user_id=UserId("dora"),
+        role=Role.OWNER, granted_at=NOW + timedelta(minutes=2)))
+    members = await repo.list_workspace_members(WorkspaceId("ws-1"))
+    assert [(m.user_id, m.role) for m in members] == [
+        (UserId("bob"), Role.EDITOR), (UserId("dora"), Role.OWNER)]
+
+    await repo.remove_workspace_member(WorkspaceId("ws-1"), UserId("bob"))
+    assert await repo.workspace_role(WorkspaceId("ws-1"), UserId("bob")) is None
+    remaining = await repo.list_workspace_members(WorkspaceId("ws-1"))
+    assert [m.user_id for m in remaining] == [UserId("dora")]
+
 
 async def test_document_purge_contract(adapters):
     """purge removes the document and its subtree, and returns the purged ids.

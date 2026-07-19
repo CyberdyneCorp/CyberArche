@@ -19,12 +19,14 @@ from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUse
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.links import LinksUseCases
 from cyberarche.application.use_cases.meeting_notes import MeetingNotesUseCases
+from cyberarche.application.use_cases.members import WorkspaceMemberUseCases
 from cyberarche.application.use_cases.notifications import (
     NotificationDigestUseCases,
     NotificationPreferencesUseCases,
     NotificationUseCases,
     PushSubscriptionUseCases,
 )
+from cyberarche.application.use_cases.org_directory import OrgDirectoryUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
 from cyberarche.application.use_cases.search import SearchUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
@@ -46,6 +48,8 @@ class UseCases:
     """Aggregate handed to every inbound adapter (HTTP, MCP, workers)."""
 
     workspaces: WorkspaceUseCases
+    members: WorkspaceMemberUseCases
+    org_directory: OrgDirectoryUseCases
     documents: DocumentUseCases
     snapshots: SnapshotUseCases
     realtime: RealtimeUseCases

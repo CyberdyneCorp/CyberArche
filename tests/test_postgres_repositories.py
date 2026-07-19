@@ -609,6 +609,40 @@ async def test_workspace_role_returns_none_for_non_members():
     assert await repo.workspace_role(WorkspaceId("ws-1"), UserId("carol")) is None
 
 
+async def test_list_workspace_members_maps_rows_oldest_grant_first():
+    pool = FakePool(
+        rows=[
+            {"workspace_id": "ws-1", "user_id": "alice", "role": "owner",
+             "granted_at": NOW},
+            {"workspace_id": "ws-1", "user_id": "bob", "role": "editor",
+             "granted_at": NOW},
+        ]
+    )
+    members = await PostgresMembershipRepository(pool).list_workspace_members(
+        WorkspaceId("ws-1")
+    )
+
+    query, args = pool.calls[0]
+    assert "FROM workspace_memberships WHERE workspace_id = $1" in query
+    assert "ORDER BY granted_at, user_id" in query
+    assert args == ("ws-1",)
+    assert [(m.user_id, m.role) for m in members] == [
+        ("alice", Role.OWNER),
+        ("bob", Role.EDITOR),
+    ]
+
+
+async def test_remove_workspace_member_deletes_the_row():
+    pool = FakePool()
+    await PostgresMembershipRepository(pool).remove_workspace_member(
+        WorkspaceId("ws-1"), UserId("bob")
+    )
+
+    query, args = pool.calls[0]
+    assert query.startswith("DELETE FROM workspace_memberships")
+    assert args == ("ws-1", "bob")
+
+
 async def test_add_document_grant_upserts_with_role_value():
     pool = FakePool()
     grant = DocumentGrant(

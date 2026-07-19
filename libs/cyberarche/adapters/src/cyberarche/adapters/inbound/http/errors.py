@@ -11,6 +11,7 @@ from cyberarche.domain.errors import (
     NotAuthenticated,
     NotAuthorized,
     NotFound,
+    UpstreamUnavailable,
     ValidationFailed,
 )
 
@@ -20,6 +21,7 @@ _STATUS_BY_ERROR: list[tuple[type[DomainError], int]] = [
     (NotFound, 404),
     (Conflict, 409),
     (ValidationFailed, 422),
+    (UpstreamUnavailable, 503),
 ]
 
 
