@@ -328,6 +328,8 @@ async def test_collection_repository_contract(adapters):
     assert await repo.get(TenantId("globex"), CollectionId("col-1")) is None
     listed = await repo.list_in_workspace(TenantId("acme"), WorkspaceId("ws-1"))
     assert [c.id for c in listed] == ["col-1"]
+    # list_all enumerates every collection (used by the reminder sweep).
+    assert [c.id for c in await repo.list_all()] == ["col-1"]
 
     # update() persists the schema and views round-trip (incl. select options).
     prop = PropertyDef(

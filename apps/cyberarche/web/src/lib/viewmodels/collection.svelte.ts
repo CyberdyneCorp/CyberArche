@@ -400,10 +400,19 @@ export function createCollection(collectionId: string) {
 			type: PropertyType,
 			options: string[] = [],
 			formula = '',
-			config: RelationRollupConfig = {}
+			config: RelationRollupConfig = {},
+			reminderMinutes = -1
 		) {
 			try {
-				collection = await addProperty(collectionId, name, type, options, formula, config);
+				collection = await addProperty(
+					collectionId,
+					name,
+					type,
+					options,
+					formula,
+					config,
+					reminderMinutes
+				);
 			} catch (e) {
 				error = e instanceof Error ? e.message : 'failed to add property';
 			}

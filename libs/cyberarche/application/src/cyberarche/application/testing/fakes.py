@@ -1401,6 +1401,9 @@ class InMemoryCollectionRepository:
         ]
         return sorted(matches, key=lambda c: c.created_at)
 
+    async def list_all(self) -> list[Collection]:
+        return sorted(self._items.values(), key=lambda c: c.created_at)
+
     async def update(self, collection: Collection) -> None:
         self._items[collection.id] = collection
 
@@ -1410,6 +1413,24 @@ class InMemoryCollectionRepository:
         collection = self._items.get(collection_id)
         if collection is not None and collection.tenant_id == tenant_id:
             del self._items[collection_id]
+
+
+class InMemoryReminderStateRepository:
+    """ReminderStateRepository fake: the last date value a reminder fired for,
+    keyed by (document_id, property_id)."""
+
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str], str] = {}
+
+    async def was_reminded(
+        self, document_id: str, property_id: str, value: str
+    ) -> bool:
+        return self._items.get((str(document_id), str(property_id))) == value
+
+    async def mark_reminded(
+        self, document_id: str, property_id: str, value: str
+    ) -> None:
+        self._items[(str(document_id), str(property_id))] = value
 
 
 class StaticTokenPort:

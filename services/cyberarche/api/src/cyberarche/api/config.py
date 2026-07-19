@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # per-user minimum between digests (default daily).
     enable_digest: bool = True
     digest_interval_seconds: int = 86400
+    # Date-property reminder sweep (postgres deployments only). Disable to run
+    # the API without firing collection reminders; the interval is how often the
+    # sweep runs (default every 5 minutes).
+    enable_reminders: bool = True
+    reminder_interval_seconds: int = 300
 
     def wiring(self) -> WiringConfig:
         return WiringConfig(

@@ -53,6 +53,17 @@ async def _run_digest_scheduler(container: Container, interval: int) -> None:
             logger.exception("notification-digest tick failed")
 
 
+async def _run_reminder_scheduler(container: Container, interval: int) -> None:
+    """Tick the date-reminder sweep forever; a failing tick is logged and does
+    not stop the loop."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await container.use_cases.collection_reminders.run_due(datetime.now(UTC))
+        except Exception:  # a bad tick must never kill the scheduler
+            logger.exception("collection-reminder tick failed")
+
+
 def _start_schedulers(active: Container, settings: Settings) -> list[asyncio.Task]:
     """The in-process background schedulers for the real (postgres) deployment.
     The memory backend (tests/local) has no persistent state and none run."""
@@ -69,6 +80,12 @@ def _start_schedulers(active: Container, settings: Settings) -> list[asyncio.Tas
         tasks.append(
             asyncio.create_task(
                 _run_digest_scheduler(active, settings.digest_interval_seconds)
+            )
+        )
+    if settings.enable_reminders:
+        tasks.append(
+            asyncio.create_task(
+                _run_reminder_scheduler(active, settings.reminder_interval_seconds)
             )
         )
     return tasks

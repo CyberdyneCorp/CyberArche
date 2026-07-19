@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.agent_persona import AgentPersonaUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
+from cyberarche.application.use_cases.collection_reminders import (
+    CollectionReminderUseCases,
+)
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
@@ -54,6 +57,7 @@ class UseCases:
     teamspaces: TeamspaceUseCases
     favorites: FavoriteUseCases
     collections: CollectionUseCases
+    collection_reminders: CollectionReminderUseCases
     folders: FolderUseCases
     files: FileUseCases
     links: LinksUseCases

@@ -25,6 +25,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryCustomInstructionsRepository,
     InMemoryBlobStorage,
     InMemoryCollectionRepository,
+    InMemoryReminderStateRepository,
     InMemoryCommentRepository,
     InMemoryConnectorRepository,
     InMemoryDocumentRepository,
@@ -60,6 +61,9 @@ from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUse
 from cyberarche.application.use_cases.scheduled_agents import ScheduledAgentUseCases
 from cyberarche.application.use_cases.skills import AgentSkillUseCases
 from cyberarche.application.use_cases.api_keys import ApiKeyUseCases
+from cyberarche.application.use_cases.collection_reminders import (
+    CollectionReminderUseCases,
+)
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
@@ -226,6 +230,7 @@ def use_cases(
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
+    collections_repo = InMemoryCollectionRepository()
     snapshots = snapshots_repo
     ingestions = InMemoryIngestionRepository()
     ids = SequentialIds()
@@ -331,11 +336,18 @@ def use_cases(
         ),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
         collections=CollectionUseCases(
-            InMemoryCollectionRepository(),
+            collections_repo,
             documents,
             document_use_cases,
             access,
             clock,
+            ids,
+        ),
+        collection_reminders=CollectionReminderUseCases(
+            collections_repo,
+            documents,
+            InMemoryReminderStateRepository(),
+            dispatcher,
             ids,
         ),
         folders=FolderUseCases(folder_repo, documents, access, clock, ids),

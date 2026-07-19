@@ -62,6 +62,8 @@ defaults and **cannot be overridden from Coolify** until a mapping is added:
   scheduled agents (default on, 60 s).
 - `CYBERARCHE_ENABLE_DIGEST` / `_DIGEST_INTERVAL_SECONDS` — scheduled email
   digest of unread notifications (default on, daily).
+- `CYBERARCHE_ENABLE_REMINDERS` / `_REMINDER_INTERVAL_SECONDS` — scheduled sweep
+  that fires collection date-property reminders (default on, every 5 min).
 - `CYBERARCHE_AUTH_AUDIENCE` / `_AUTH_TENANT_CLAIM` — token validation tuning
   (defaults: none / `org_id`).
 

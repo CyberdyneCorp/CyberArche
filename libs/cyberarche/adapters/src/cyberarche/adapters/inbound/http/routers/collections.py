@@ -41,6 +41,7 @@ class PropertyResponse(BaseModel):
     rollup_relation_property_id: str = ""
     rollup_target_property_id: str = ""
     rollup_function: str = ""
+    reminder_minutes: int = -1
 
     @staticmethod
     def from_domain(prop: PropertyDef) -> "PropertyResponse":
@@ -54,6 +55,7 @@ class PropertyResponse(BaseModel):
             rollup_relation_property_id=prop.rollup_relation_property_id,
             rollup_target_property_id=prop.rollup_target_property_id,
             rollup_function=prop.rollup_function,
+            reminder_minutes=prop.reminder_minutes,
         )
 
 
@@ -173,6 +175,7 @@ class AddPropertyRequest(BaseModel):
     rollup_relation_property_id: str = ""
     rollup_target_property_id: str = ""
     rollup_function: str = ""
+    reminder_minutes: int = -1
 
 
 class UpdatePropertyRequest(BaseModel):
@@ -183,6 +186,7 @@ class UpdatePropertyRequest(BaseModel):
     rollup_relation_property_id: str | None = None
     rollup_target_property_id: str | None = None
     rollup_function: str | None = None
+    reminder_minutes: int | None = None
 
 
 class CreateViewRequest(BaseModel):
@@ -279,6 +283,7 @@ async def add_property(
         rollup_relation_property_id=body.rollup_relation_property_id,
         rollup_target_property_id=body.rollup_target_property_id,
         rollup_function=body.rollup_function,
+        reminder_minutes=body.reminder_minutes,
     )
     return CollectionResponse.from_domain(collection)
 
@@ -302,6 +307,7 @@ async def update_property(
         rollup_relation_property_id=body.rollup_relation_property_id,
         rollup_target_property_id=body.rollup_target_property_id,
         rollup_function=body.rollup_function,
+        reminder_minutes=body.reminder_minutes,
     )
     return CollectionResponse.from_domain(collection)
 
