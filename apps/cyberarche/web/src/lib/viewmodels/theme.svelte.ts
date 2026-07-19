@@ -24,6 +24,12 @@ export function createTheme() {
 			mode = mode === 'dark' ? 'light' : 'dark';
 			localStorage.setItem(STORAGE_KEY, mode);
 			apply();
+		},
+		set(next: 'light' | 'dark') {
+			if (next === mode) return;
+			mode = next;
+			localStorage.setItem(STORAGE_KEY, mode);
+			apply();
 		}
 	};
 }

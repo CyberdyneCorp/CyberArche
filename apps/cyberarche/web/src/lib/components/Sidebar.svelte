@@ -16,7 +16,6 @@
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
 	import { meetingNotesModal } from '$lib/viewmodels/meetingNotesModal.svelte';
 	import { importDocuments, IMPORT_ACCEPT } from '$lib/viewmodels/import-documents';
-	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import NotificationsBell from './NotificationsBell.svelte';
@@ -444,6 +443,8 @@
 		<span aria-hidden="true">🎙️</span> Meeting notes
 	</button>
 
+	<NotificationsBell {workspaceId} variant="nav" />
+
 	{#if teamspaces && teamspaces.favorites.length > 0}
 		<nav class="section">
 			<h2>Favorites</h2>
@@ -488,54 +489,58 @@
 			{/if}
 
 			{#each teamspaces.nodes as node (node.teamspace.id)}
-				<div
-					class="row group"
-					class:drop-target={dropTarget === `ts:${node.teamspace.id}`}
-					data-testid="teamspace-row"
-					role="group"
-					ondragover={(e) => allowDrop(e, `ts:${node.teamspace.id}`)}
-					ondragleave={() => (dropTarget = null)}
-					ondrop={(e) => onDrop(e, { teamspaceId: node.teamspace.id })}
-					oncontextmenu={(e) => onContext(e, teamspaceMenu(node))}
-				>
-					<button
-						class="disclosure"
-						aria-label={node.expanded ? 'Collapse' : 'Expand'}
-						onclick={() => teamspaces!.toggle(node.teamspace.id)}
-						>{node.expanded ? '▾' : '▸'}</button
+				<div class="branch">
+					<div
+						class="row group"
+						class:drop-target={dropTarget === `ts:${node.teamspace.id}`}
+						data-testid="teamspace-row"
+						role="group"
+						ondragover={(e) => allowDrop(e, `ts:${node.teamspace.id}`)}
+						ondragleave={() => (dropTarget = null)}
+						ondrop={(e) => onDrop(e, { teamspaceId: node.teamspace.id })}
+						oncontextmenu={(e) => onContext(e, teamspaceMenu(node))}
 					>
-					<span class="ts-icon">{node.teamspace.icon}</span>
-					<span class="title" data-testid="teamspace-name-label">{node.teamspace.name}</span>
-					<button
-						class="row-add"
-						title="New folder"
-						aria-label="New folder"
-						data-testid="teamspace-add-folder"
-						onclick={() => newFolder(node.teamspace.id)}>📁</button
-					>
-					<button
-						class="row-add"
-						title="Add a page"
-						aria-label="Add a page"
-						data-testid="teamspace-add-page"
-						onclick={() => newDocument(node.teamspace.id)}>＋</button
-					>
-					<button
-						class="row-add"
-						title="Teamspace actions"
-						aria-label="Teamspace actions"
-						data-testid="teamspace-menu"
-						onclick={(e) => onKebab(e, teamspaceMenu(node))}>⋯</button
-					>
+						<button
+							class="disclosure"
+							aria-label={node.expanded ? 'Collapse' : 'Expand'}
+							onclick={() => teamspaces!.toggle(node.teamspace.id)}
+							>{node.expanded ? '▾' : '▸'}</button
+						>
+						<span class="ts-icon">{node.teamspace.icon}</span>
+						<span class="title" data-testid="teamspace-name-label">{node.teamspace.name}</span>
+						<button
+							class="row-add"
+							title="New folder"
+							aria-label="New folder"
+							data-testid="teamspace-add-folder"
+							onclick={() => newFolder(node.teamspace.id)}>📁</button
+						>
+						<button
+							class="row-add"
+							title="Add a page"
+							aria-label="Add a page"
+							data-testid="teamspace-add-page"
+							onclick={() => newDocument(node.teamspace.id)}>＋</button
+						>
+						<button
+							class="row-add"
+							title="Teamspace actions"
+							aria-label="Teamspace actions"
+							data-testid="teamspace-menu"
+							onclick={(e) => onKebab(e, teamspaceMenu(node))}>⋯</button
+						>
+					</div>
+					{#if node.expanded}
+						<div class="children">
+							{@render folderList(node.teamspace.id)}
+							{#each node.documents.filter((d) => !d.folder_id) as doc (doc.id)}
+								{@render docRow(doc, 'teamspace-doc')}
+							{:else}
+								<p class="empty branch-empty">No pages yet</p>
+							{/each}
+						</div>
+					{/if}
 				</div>
-				{#if node.expanded}
-					{@render folderList(node.teamspace.id)}
-					{#each node.documents.filter((d) => !d.folder_id) as doc (doc.id)}
-						{@render docRow(doc, 'teamspace-doc')}
-					{:else}
-						<p class="empty nested">No pages yet</p>
-					{/each}
-				{/if}
 			{:else}
 				{#if !creatingTeamspace}
 					<p class="empty" data-testid="no-teamspaces">No teamspaces yet</p>
@@ -608,57 +613,62 @@
 
 {#snippet folderList(scope: string | null)}
 	{#each teamspaces?.foldersFor(scope) ?? [] as fn (fn.folder.id)}
-		<div
-			class="row group"
-			class:drop-target={dropTarget === `folder:${fn.folder.id}`}
-			data-testid="folder-row"
-			role="group"
-			ondragover={(e) => allowDrop(e, `folder:${fn.folder.id}`)}
-			ondragleave={() => (dropTarget = null)}
-			ondrop={(e) => onDrop(e, { folderId: fn.folder.id })}
-			oncontextmenu={(e) => onContext(e, folderMenu(fn))}
-		>
-			<button
-				class="disclosure"
-				aria-label={fn.expanded ? 'Collapse' : 'Expand'}
-				onclick={() => teamspaces!.toggleFolder(fn.folder.id)}
-				>{fn.expanded ? '▾' : '▸'}</button
+		<div class="branch">
+			<div
+				class="row group"
+				class:drop-target={dropTarget === `folder:${fn.folder.id}`}
+				data-testid="folder-row"
+				role="group"
+				ondragover={(e) => allowDrop(e, `folder:${fn.folder.id}`)}
+				ondragleave={() => (dropTarget = null)}
+				ondrop={(e) => onDrop(e, { folderId: fn.folder.id })}
+				oncontextmenu={(e) => onContext(e, folderMenu(fn))}
 			>
-			<span class="ts-icon">📁</span>
-			<span class="title" data-testid="folder-name">{fn.folder.name}</span>
-			<button
-				class="row-add"
-				title="Add a page"
-				aria-label="Add a page to folder"
-				data-testid="folder-add-page"
-				onclick={() => newDocumentInFolder(fn.folder)}>＋</button
-			>
-			<button
-				class="row-add"
-				title="Folder actions"
-				aria-label="Folder actions"
-				data-testid="folder-menu"
-				onclick={(e) => onKebab(e, folderMenu(fn))}>⋯</button
-			>
+				<button
+					class="disclosure"
+					aria-label={fn.expanded ? 'Collapse' : 'Expand'}
+					onclick={() => teamspaces!.toggleFolder(fn.folder.id)}
+					>{fn.expanded ? '▾' : '▸'}</button
+				>
+				<span class="ts-icon folder-icon">📁</span>
+				<span class="title" data-testid="folder-name">{fn.folder.name}</span>
+				<button
+					class="row-add"
+					title="Add a page"
+					aria-label="Add a page to folder"
+					data-testid="folder-add-page"
+					onclick={() => newDocumentInFolder(fn.folder)}>＋</button
+				>
+				<button
+					class="row-add"
+					title="Folder actions"
+					aria-label="Folder actions"
+					data-testid="folder-menu"
+					onclick={(e) => onKebab(e, folderMenu(fn))}>⋯</button
+				>
+			</div>
+			{#if fn.expanded}
+				<div class="children">
+					{#each fn.documents as doc (doc.id)}
+						{@render docRow(doc, 'folder-doc')}
+					{:else}
+						<p class="empty branch-empty">No pages yet</p>
+					{/each}
+				</div>
+			{/if}
 		</div>
-		{#if fn.expanded}
-			{#each fn.documents as doc (doc.id)}
-				{@render docRow(doc, 'folder-doc')}
-			{:else}
-				<p class="empty nested">No pages yet</p>
-			{/each}
-		{/if}
 	{/each}
 {/snippet}
 
 {#snippet docRow(doc: import('$lib/api/documents').Document, testid: string)}
 	<div
-		class="row nested doc"
+		class="row doc"
 		class:active={page.url.pathname === docHref(doc.id)}
 		role="listitem"
 		draggable="true"
 		ondragstart={(e) => onDragStart(e, doc.id)}
 	>
+		<span class="caret-spacer" aria-hidden="true"></span>
 		<a class="doc-link" href={docHref(doc.id)} data-testid={testid}>
 			<span class="icon">▤</span>
 			<span class="title">{docTitles.titleOf(doc)}</span>
@@ -746,12 +756,8 @@
 	{/if}
 
 	<footer class="footer">
-		<NotificationsBell {workspaceId} />
 		<button class="foot-btn" onclick={() => settingsModal.open()} data-testid="open-settings">
 			⚙ Settings &amp; connectors
-		</button>
-		<button class="foot-btn" onclick={() => theme.toggle()} data-testid="theme-toggle">
-			◐ {theme.mode === 'dark' ? 'Light' : 'Dark'} theme
 		</button>
 		<button class="foot-btn" onclick={signOut} data-testid="sign-out">↩ Sign out</button>
 	</footer>
@@ -878,6 +884,7 @@
 		color: var(--tx);
 	}
 	.row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 6px;
@@ -895,16 +902,37 @@
 		color: var(--acc-strong);
 		font-weight: 500;
 	}
-	.row.nested {
-		padding-left: 26px;
+	/* Accent spine on the active page — a 2px bar hugging the left edge,
+	 * sitting against the guide rail of its nesting level. */
+	.row.active::before {
+		content: '';
+		position: absolute;
+		left: -1.5px;
+		top: 5px;
+		bottom: 5px;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--acc);
 	}
+	/* Structural nesting: each expanded node's children step in by one level
+	 * and draw a vertical guide rail connecting siblings. Depth composes
+	 * automatically through the nested .children wrappers. */
+	.children {
+		margin-left: 15px;
+		border-left: 1.5px solid var(--rail);
+	}
+	/* Row actions declutter to hover / keyboard focus only. Kept in the DOM
+	 * and reachable: focusing the row (disclosure or doc link) reveals them. */
 	.row.group .row-add {
-		visibility: hidden;
+		display: none;
 	}
-	.row.group:hover .row-add {
-		visibility: visible;
+	.row.group:hover .row-add,
+	.row.group:focus-within .row-add {
+		display: inline-flex;
 	}
-	.disclosure {
+	.disclosure,
+	.caret-spacer {
+		flex: 0 0 auto;
 		width: 20px;
 		color: var(--tx2);
 		font-size: 13px;
@@ -930,10 +958,11 @@
 		min-width: 0;
 	}
 	.row.doc .row-add {
-		visibility: hidden;
+		display: none;
 	}
-	.row.doc:hover .row-add {
-		visibility: visible;
+	.row.doc:hover .row-add,
+	.row.doc:focus-within .row-add {
+		display: inline-flex;
 	}
 	.row-add.danger:hover {
 		color: var(--rose);
@@ -951,6 +980,12 @@
 		color: #fff;
 		font-size: 9px;
 		font-weight: 700;
+	}
+	/* Folders use the plain emoji glyph, not the teamspace badge chip. */
+	.ts-icon.folder-icon {
+		background: none;
+		color: inherit;
+		font-size: 12px;
 	}
 	.icon {
 		color: var(--tx3);
@@ -973,8 +1008,8 @@
 		margin: 4px 6px;
 		color: var(--tx3);
 	}
-	.empty.nested {
-		padding-left: 20px;
+	.empty.branch-empty {
+		margin: 4px 6px 4px 12px;
 	}
 	.trash h2 {
 		display: flex;
