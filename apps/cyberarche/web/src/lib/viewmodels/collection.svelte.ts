@@ -7,6 +7,8 @@
 import {
 	addProperty,
 	addRow as apiAddRow,
+	bulkDeleteRows,
+	bulkSetRows,
 	createCollection as apiCreateCollection,
 	createView,
 	deleteRow as apiDeleteRow,
@@ -139,6 +141,25 @@ export function createCollection(collectionId: string) {
 	let currentViewId = $state<string | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	// The ids of rows the user has multi-selected for a bulk action.
+	let selected = $state<Set<string>>(new Set());
+
+	function clearSelection() {
+		selected = new Set();
+	}
+
+	function toggleRow(id: string) {
+		const next = new Set(selected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selected = next;
+	}
+
+	/** Select every currently-shown row, or clear if they are all selected. */
+	function toggleAll(rowIds: string[]) {
+		const allSelected = rowIds.length > 0 && rowIds.every((id) => selected.has(id));
+		selected = allSelected ? new Set() : new Set(rowIds);
+	}
 
 	const currentView = (): View | null =>
 		collection?.views.find((v) => v.id === currentViewId) ?? null;
@@ -165,6 +186,34 @@ export function createCollection(collectionId: string) {
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'failed to update cell';
 			await reloadRows(); // fall back to server truth on failure
+		}
+	}
+
+	/** Delete every selected row on the server, then clear the selection and
+	 * re-query so the table reflects server truth. */
+	async function bulkDelete() {
+		const ids = [...selected];
+		if (ids.length === 0) return;
+		try {
+			await bulkDeleteRows(collectionId, ids);
+			clearSelection();
+			await reloadRows();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'failed to delete rows';
+		}
+	}
+
+	/** Set one property's value across every selected row, then clear the
+	 * selection and re-query. */
+	async function bulkSet(propertyId: string, value: unknown) {
+		const ids = [...selected];
+		if (ids.length === 0) return;
+		try {
+			await bulkSetRows(collectionId, ids, propertyId, value);
+			clearSelection();
+			await reloadRows();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'failed to set property';
 		}
 	}
 
@@ -253,8 +302,25 @@ export function createCollection(collectionId: string) {
 
 		async selectView(viewId: string) {
 			currentViewId = viewId;
+			clearSelection();
 			await reloadRows();
 		},
+
+		// ---- Bulk row selection + actions (Table view) ----
+		get selectedIds() {
+			return [...selected];
+		},
+		get selectedCount() {
+			return selected.size;
+		},
+		isSelected(id: string) {
+			return selected.has(id);
+		},
+		toggleRow,
+		toggleAll,
+		clearSelection,
+		bulkDelete,
+		bulkSet,
 
 		/** Create a view of the given kind, append it, select it, and load rows. */
 		async createViewOfKind(name: string, kind: ViewKind): Promise<View | null> {

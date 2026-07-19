@@ -201,6 +201,111 @@ describe('collection ViewModel', () => {
 	});
 });
 
+describe('collection ViewModel — bulk selection', () => {
+	beforeEach(() => vi.restoreAllMocks());
+
+	async function loadedVm() {
+		const { fetch, calls } = recordingFetch({
+			'GET /api/v1/collections/c1': COLLECTION(),
+			'GET /api/v1/collections/c1/views/v1/rows': [ROW('r1'), ROW('r2'), ROW('r3')],
+			'POST /api/v1/collections/c1/rows/bulk-delete': { deleted: 2 },
+			'POST /api/v1/collections/c1/rows/bulk-set': { updated: 2 }
+		});
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		return { vm, calls };
+	}
+
+	it('toggleRow selects and deselects a single row', async () => {
+		const { vm } = await loadedVm();
+		expect(vm.isSelected('r1')).toBe(false);
+		vm.toggleRow('r1');
+		expect(vm.isSelected('r1')).toBe(true);
+		expect(vm.selectedCount).toBe(1);
+		expect(vm.selectedIds).toEqual(['r1']);
+		vm.toggleRow('r1');
+		expect(vm.isSelected('r1')).toBe(false);
+		expect(vm.selectedCount).toBe(0);
+	});
+
+	it('toggleAll selects every shown row, then clears when all are selected', async () => {
+		const { vm } = await loadedVm();
+		vm.toggleAll(['r1', 'r2', 'r3']);
+		expect(vm.selectedCount).toBe(3);
+		vm.toggleAll(['r1', 'r2', 'r3']);
+		expect(vm.selectedCount).toBe(0);
+	});
+
+	it('clearSelection empties the selection', async () => {
+		const { vm } = await loadedVm();
+		vm.toggleRow('r1');
+		vm.toggleRow('r2');
+		expect(vm.selectedCount).toBe(2);
+		vm.clearSelection();
+		expect(vm.selectedCount).toBe(0);
+	});
+
+	it('bulkDelete calls the client with the selection, then clears + reloads', async () => {
+		const { vm, calls } = await loadedVm();
+		vm.toggleRow('r1');
+		vm.toggleRow('r2');
+		calls.length = 0;
+
+		await vm.bulkDelete();
+
+		const del = calls.find((c) => c.url.endsWith('/rows/bulk-delete'));
+		expect(del?.method).toBe('POST');
+		expect(del?.body?.ids).toEqual(['r1', 'r2']);
+		expect(vm.selectedCount).toBe(0);
+		// Re-queried rows after the delete.
+		expect(calls.some((c) => c.url.endsWith('/views/v1/rows'))).toBe(true);
+	});
+
+	it('bulkSet calls the client with the selection + value, then clears + reloads', async () => {
+		const { vm, calls } = await loadedVm();
+		vm.toggleRow('r1');
+		vm.toggleRow('r3');
+		calls.length = 0;
+
+		await vm.bulkSet('p1', 'done');
+
+		const set = calls.find((c) => c.url.endsWith('/rows/bulk-set'));
+		expect(set?.method).toBe('POST');
+		expect(set?.body).toEqual({ ids: ['r1', 'r3'], property_id: 'p1', value: 'done' });
+		expect(vm.selectedCount).toBe(0);
+		expect(calls.some((c) => c.url.endsWith('/views/v1/rows'))).toBe(true);
+	});
+
+	it('bulkDelete/bulkSet no-op with an empty selection', async () => {
+		const { vm, calls } = await loadedVm();
+		calls.length = 0;
+		await vm.bulkDelete();
+		await vm.bulkSet('p1', 'x');
+		expect(calls.length).toBe(0);
+	});
+
+	it('selecting then switching views clears the selection', async () => {
+		const { fetch } = recordingFetch({
+			'GET /api/v1/collections/c1': COLLECTION({
+				views: [
+					VIEW(),
+					VIEW({ id: 'v2', name: 'Two' })
+				]
+			}),
+			'GET /api/v1/collections/c1/views/v1/rows': [ROW('r1')],
+			'GET /api/v1/collections/c1/views/v2/rows': [ROW('r1')]
+		});
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+		vm.toggleRow('r1');
+		expect(vm.selectedCount).toBe(1);
+		await vm.selectView('v2');
+		expect(vm.selectedCount).toBe(0);
+	});
+});
+
 describe('operatorsForType', () => {
 	const ops = (type: PropertyType) => operatorsForType(type).map((o) => o.value);
 

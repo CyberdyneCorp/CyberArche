@@ -51,6 +51,14 @@ function fakeVm(overrides: Record<string, unknown> = {}) {
 		loadWorkspaceCollections: vi.fn(async () => []),
 		loadCollectionProperties: vi.fn(async () => []),
 		relationProperties: [],
+		selectedIds: [],
+		selectedCount: 0,
+		isSelected: () => false,
+		toggleRow: vi.fn(),
+		toggleAll: vi.fn(),
+		clearSelection: vi.fn(),
+		bulkDelete: vi.fn(),
+		bulkSet: vi.fn(),
 		setRowGroup: vi.fn(),
 		setBoardGroupBy: vi.fn(),
 		renameRow: vi.fn(),
@@ -364,5 +372,27 @@ describe('CollectionTable component', () => {
 			new Event('submit', { bubbles: true, cancelable: true })
 		);
 		expect(vm.createViewOfKind).toHaveBeenCalledWith('My board', 'board');
+	});
+
+	it('renders a select-all header checkbox and a per-row checkbox that toggles', () => {
+		const vm = fakeVm();
+		render(vm);
+		expect(target.querySelector('[data-testid="select-all"]')).not.toBeNull();
+		const rowBox = target.querySelector<HTMLInputElement>('[data-testid="row-select"]')!;
+		rowBox.click();
+		expect(vm.toggleRow).toHaveBeenCalledWith('r1');
+	});
+
+	it('shows the bulk action bar only when rows are selected', () => {
+		const hidden = fakeVm();
+		render(hidden);
+		expect(target.querySelector('[data-testid="bulk-bar"]')).toBeNull();
+		unmount(instance!);
+		instance = null;
+
+		const shown = fakeVm({ selectedCount: 2, isSelected: () => true });
+		render(shown);
+		expect(target.querySelector('[data-testid="bulk-bar"]')).not.toBeNull();
+		expect(target.querySelector('[data-testid="bulk-count"]')!.textContent).toContain('2 selected');
 	});
 });
