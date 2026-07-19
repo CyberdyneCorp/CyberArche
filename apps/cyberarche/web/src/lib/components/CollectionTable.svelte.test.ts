@@ -45,6 +45,12 @@ function fakeVm(overrides: Record<string, unknown> = {}) {
 		createViewOfKind: vi.fn(),
 		addRow: vi.fn(),
 		setCell: vi.fn(),
+		setRelation: vi.fn(),
+		relatedTitle: (id: string) => id,
+		loadRelationRows: vi.fn(async () => []),
+		loadWorkspaceCollections: vi.fn(async () => []),
+		loadCollectionProperties: vi.fn(async () => []),
+		relationProperties: [],
 		setRowGroup: vi.fn(),
 		setBoardGroupBy: vi.fn(),
 		renameRow: vi.fn(),
@@ -161,8 +167,82 @@ describe('CollectionTable component', () => {
 			'Total',
 			'formula',
 			[],
-			'prop("Price") * prop("Qty")'
+			'prop("Price") * prop("Qty")',
+			{}
 		);
+	});
+
+	it('renders a relation cell as chips resolved by relatedTitle, with a toggle picker', async () => {
+		const vm = fakeVm({
+			properties: [
+				{ id: 'rel', name: 'Tasks', type: 'relation', options: [], relation_collection_id: 'c2' }
+			],
+			rows: [
+				{
+					id: 'r1',
+					workspace_id: 'ws-1',
+					title: 'First',
+					collection_id: 'c1',
+					properties: { rel: ['t1'] },
+					created_at: '',
+					updated_at: ''
+				}
+			],
+			relatedTitle: (id: string) => (id === 't1' ? 'Design' : 'Untitled'),
+			loadRelationRows: vi.fn(async () => [
+				{ id: 't1', title: 'Design' },
+				{ id: 't2', title: 'Build' }
+			])
+		});
+		render(vm);
+		// The linked row shows by title, not id.
+		expect(target.querySelector('[data-testid="relation-chip"]')?.textContent).toBe('Design');
+		// Header carries the relation marker.
+		expect(target.querySelector('[data-testid="column-header"]')?.textContent).toContain('🔗');
+
+		// Open the picker (loads the target collection's rows) and toggle a link.
+		target.querySelector<HTMLButtonElement>('[data-testid="relation-edit"]')!.click();
+		await Promise.resolve();
+		flushSync();
+		expect(vm.loadRelationRows).toHaveBeenCalledWith('c2');
+		const options = target.querySelectorAll<HTMLInputElement>('[data-testid="relation-option"]');
+		expect(options.length).toBe(2);
+		// Toggle the second (unlinked) row on -> setRelation with both ids.
+		options[1].dispatchEvent(new Event('change', { bubbles: true }));
+		expect(vm.setRelation).toHaveBeenCalledWith('r1', 'rel', ['t1', 't2']);
+	});
+
+	it('renders a rollup cell read-only with the computed value and no editor', () => {
+		const vm = fakeVm({
+			properties: [
+				{
+					id: 'roll',
+					name: 'Task count',
+					type: 'rollup',
+					options: [],
+					rollup_relation_property_id: 'rel',
+					rollup_target_property_id: '__title__',
+					rollup_function: 'count'
+				}
+			],
+			rows: [
+				{
+					id: 'r1',
+					workspace_id: 'ws-1',
+					title: 'First',
+					collection_id: 'c1',
+					properties: { roll: 3 },
+					created_at: '',
+					updated_at: ''
+				}
+			]
+		});
+		render(vm);
+		expect(target.querySelector('[data-testid="cell-rollup"]')?.textContent).toBe('3');
+		expect(target.querySelector('[data-testid="column-header"]')?.textContent).toContain('Σ');
+		// No editor is rendered and nothing is written for a rollup column.
+		expect(target.querySelector('[data-testid="cell-number"]')).toBeNull();
+		expect(vm.setCell).not.toHaveBeenCalled();
 	});
 
 	it('add row button calls vm.addRow', () => {

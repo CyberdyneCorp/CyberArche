@@ -1,14 +1,21 @@
 <script lang="ts">
-	import type { PropertyDef } from '$lib/api/collections';
+	import type { PropertyDef, RelatedRow } from '$lib/api/collections';
+	import CollectionRelationCell from './CollectionRelationCell.svelte';
 
 	let {
 		property,
 		value,
-		onchange
+		onchange,
+		relatedTitle,
+		loadRelationOptions
 	}: {
 		property: PropertyDef;
 		value: unknown;
 		onchange: (value: unknown) => void;
+		/** Relation only: resolve a linked row id to its title. */
+		relatedTitle?: (id: string) => string;
+		/** Relation only: load the target collection's rows for the picker. */
+		loadRelationOptions?: () => Promise<RelatedRow[]>;
 	} = $props();
 
 	const asText = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
@@ -29,6 +36,17 @@
 	<!-- Read-only: the computed value arrives in the row's properties from
 	     queryView. No editor, and no setRowValues on interaction. -->
 	<span class="formula-value" data-testid="cell-formula">{asText(value)}</span>
+{:else if property.type === 'rollup'}
+	<!-- Read-only: the aggregate arrives in the row's properties from queryView. -->
+	<span class="formula-value" data-testid="cell-rollup">{asText(value)}</span>
+{:else if property.type === 'relation'}
+	<CollectionRelationCell
+		{property}
+		{value}
+		{relatedTitle}
+		loadOptions={loadRelationOptions}
+		onchange={(ids) => onchange(ids)}
+	/>
 {:else if property.type === 'checkbox'}
 	<input
 		type="checkbox"

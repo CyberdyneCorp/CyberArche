@@ -11,6 +11,7 @@ import {
 	createView,
 	deleteRow as apiDeleteRow,
 	getCollection,
+	listCollectionRows,
 	listCollections,
 	queryView,
 	renameCollection,
@@ -21,6 +22,8 @@ import {
 	type Filter,
 	type PropertyDef,
 	type PropertyType,
+	type RelatedRow,
+	type RelationRollupConfig,
 	type Sort,
 	type View,
 	type ViewKind
@@ -52,7 +55,11 @@ const OPS_BY_TYPE: Record<PropertyType, string[]> = {
 	checkbox: ['eq', 'neq'],
 	// A formula's computed value may be numeric, text, or boolean, so offer the
 	// full operator set; apply_view compares it the same as any other column.
-	formula: ['eq', 'neq', 'contains', 'gt', 'lt', 'is_empty', 'not_empty']
+	formula: ['eq', 'neq', 'contains', 'gt', 'lt', 'is_empty', 'not_empty'],
+	// A relation cell holds a list of linked ids: membership + emptiness.
+	relation: ['contains', 'is_empty', 'not_empty'],
+	// A rollup's computed value may be numeric or text: full operator set.
+	rollup: ['eq', 'neq', 'contains', 'gt', 'lt', 'is_empty', 'not_empty']
 };
 
 /** Pure: the operators appropriate to a property type, as pickable options.
@@ -128,6 +135,7 @@ export function createCollectionList(workspaceId: string) {
 export function createCollection(collectionId: string) {
 	let collection = $state<Collection | null>(null);
 	let rows = $state<CollectionRow[]>([]);
+	let related = $state<Map<string, string>>(new Map());
 	let currentViewId = $state<string | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -137,8 +145,13 @@ export function createCollection(collectionId: string) {
 
 	async function reloadRows() {
 		if (!currentViewId) return;
-		rows = await queryView(collectionId, currentViewId);
+		const result = await queryView(collectionId, currentViewId);
+		rows = result.rows;
+		related = new Map(result.related.map((r) => [r.id, r.title]));
 	}
+
+	/** The display title of a linked row id (falls back to 'Untitled'). */
+	const relatedTitle = (id: string): string => related.get(id) ?? 'Untitled';
 
 	function replaceRow(updated: CollectionRow) {
 		rows = rows.map((r) => (r.id === updated.id ? updated : r));
@@ -212,6 +225,8 @@ export function createCollection(collectionId: string) {
 		get properties() {
 			return collection?.properties ?? [];
 		},
+		/** The display title of a linked row id (for rendering relation chips). */
+		relatedTitle,
 		get currentView() {
 			return currentView();
 		},
@@ -318,6 +333,48 @@ export function createCollection(collectionId: string) {
 			return writeCell(rowId, propertyId, value);
 		},
 
+		/** Set a relation cell's links (reuses the row-values write path; the
+		 * server keeps only ids that are rows of the target collection). */
+		setRelation(rowId: string, propertyId: string, ids: string[]) {
+			return writeCell(rowId, propertyId, ids);
+		},
+
+		/** Load a target collection's rows (id + title) for the relation picker. */
+		async loadRelationRows(targetCollectionId: string): Promise<RelatedRow[]> {
+			try {
+				return await listCollectionRows(targetCollectionId);
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to load rows';
+				return [];
+			}
+		},
+
+		/** The collections in this workspace (for the relation target picker). */
+		async loadWorkspaceCollections(): Promise<Collection[]> {
+			if (!collection) return [];
+			try {
+				return await listCollections(collection.workspace_id);
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to load collections';
+				return [];
+			}
+		},
+
+		/** A target collection's property defs (for the rollup target picker). */
+		async loadCollectionProperties(targetCollectionId: string): Promise<PropertyDef[]> {
+			try {
+				return (await getCollection(targetCollectionId)).properties;
+			} catch (e) {
+				error = e instanceof Error ? e.message : 'failed to load properties';
+				return [];
+			}
+		},
+
+		/** This collection's relation properties (rollup source picker). */
+		get relationProperties(): PropertyDef[] {
+			return collection?.properties.filter((p) => p.type === 'relation') ?? [];
+		},
+
 		async deleteRow(rowId: string) {
 			const previous = rows;
 			rows = rows.filter((r) => r.id !== rowId); // optimistic
@@ -342,10 +399,11 @@ export function createCollection(collectionId: string) {
 			name: string,
 			type: PropertyType,
 			options: string[] = [],
-			formula = ''
+			formula = '',
+			config: RelationRollupConfig = {}
 		) {
 			try {
-				collection = await addProperty(collectionId, name, type, options, formula);
+				collection = await addProperty(collectionId, name, type, options, formula, config);
 			} catch (e) {
 				error = e instanceof Error ? e.message : 'failed to add property';
 			}

@@ -29,12 +29,21 @@ const ROW = (id: string, extra: Record<string, unknown> = {}) => ({
 	...extra
 });
 
+/** queryView now returns `{ rows, related }`; a route may still be written as a
+ * bare rows array for brevity and is wrapped here to the new shape. */
+function wrapRows(url: string, body: unknown): unknown {
+	if (/\/views\/[^/]+\/rows$/.test(url) && Array.isArray(body)) {
+		return { rows: body, related: [] };
+	}
+	return body;
+}
+
 function routedFetch(routes: Record<string, unknown>) {
 	return vi.fn(async (url: string, init?: RequestInit) => {
 		const key = `${init?.method ?? 'GET'} ${url}`;
 		const body = routes[key];
 		if (body === undefined) throw new Error(`unrouted: ${key}`);
-		return { ok: true, status: 200, json: async () => body };
+		return { ok: true, status: 200, json: async () => wrapRows(url, body) };
 	}) as unknown as typeof fetch;
 }
 
@@ -56,7 +65,7 @@ function recordingFetch(routes: Record<string, unknown>) {
 		const route = routes[`${method} ${url}`];
 		if (route === undefined) throw new Error(`unrouted: ${method} ${url}`);
 		const resolved = typeof route === 'function' ? route(body) : route;
-		return { ok: true, status: 200, json: async () => resolved };
+		return { ok: true, status: 200, json: async () => wrapRows(url, resolved) };
 	});
 	return { fetch: fn as unknown as typeof fetch, calls };
 }
@@ -140,7 +149,8 @@ describe('collection ViewModel', () => {
 		const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 			const key = `${init?.method ?? 'GET'} ${url}`;
 			if (key === 'GET /api/v1/collections/c1') return ok(COLLECTION());
-			if (key === 'GET /api/v1/collections/c1/views/v1/rows') return ok([ROW('r1')]);
+			if (key === 'GET /api/v1/collections/c1/views/v1/rows')
+				return ok({ rows: [ROW('r1')], related: [] });
 			if (key === 'PATCH /api/v1/collections/c1/rows/r1')
 				return { ok: false, status: 422, json: async () => ({ detail: 'bad option' }) };
 			throw new Error(`unrouted: ${key}`);
@@ -481,6 +491,69 @@ describe('collection ViewModel — calendar views', () => {
 
 		expect(vm.currentView?.date_by).toBeNull();
 		expect(vm.dateByProperty).toBeUndefined();
+	});
+});
+
+describe('collection ViewModel — relations & rollups', () => {
+	beforeEach(() => vi.restoreAllMocks());
+
+	const REL_COLLECTION = () =>
+		COLLECTION({
+			properties: [{ id: 'rel', name: 'Tasks', type: 'relation', options: [], relation_collection_id: 'c2' }]
+		});
+
+	it('relatedTitle resolves linked ids from the query result, falling back to Untitled', async () => {
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/collections/c1': REL_COLLECTION(),
+				'GET /api/v1/collections/c1/views/v1/rows': {
+					rows: [ROW('r1', { properties: { rel: ['t1'] } })],
+					related: [{ id: 't1', title: 'Design' }]
+				}
+			})
+		);
+		const vm = createCollection('c1');
+		await vm.load();
+		expect(vm.relatedTitle('t1')).toBe('Design');
+		expect(vm.relatedTitle('unknown')).toBe('Untitled');
+	});
+
+	it('setRelation writes the id list and reflects the server row', async () => {
+		const { fetch, calls } = recordingFetch({
+			'GET /api/v1/collections/c1': REL_COLLECTION(),
+			'GET /api/v1/collections/c1/views/v1/rows': {
+				rows: [ROW('r1', { properties: { rel: [] } })],
+				related: []
+			},
+			'PATCH /api/v1/collections/c1/rows/r1': (body: Record<string, unknown>) =>
+				ROW('r1', { properties: { rel: (body.values as Record<string, unknown>)?.rel ?? [] } })
+		});
+		vi.stubGlobal('fetch', fetch);
+		const vm = createCollection('c1');
+		await vm.load();
+
+		await vm.setRelation('r1', 'rel', ['t1', 't2']);
+
+		const patch = calls.find((c) => c.method === 'PATCH');
+		expect(patch?.body).toEqual({ values: { rel: ['t1', 't2'] } });
+		expect(vm.rows[0].properties.rel).toEqual(['t1', 't2']);
+	});
+
+	it('loadRelationRows fetches the target collection rows for the picker', async () => {
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/collections/c1': REL_COLLECTION(),
+				'GET /api/v1/collections/c1/views/v1/rows': { rows: [], related: [] },
+				'GET /api/v1/collections/c2/rows': [{ id: 't1', title: 'Design' }]
+			})
+		);
+		const vm = createCollection('c1');
+		await vm.load();
+		const options = await vm.loadRelationRows('c2');
+		expect(options).toEqual([{ id: 't1', title: 'Design' }]);
+		expect(vm.relationProperties.map((p) => p.id)).toEqual(['rel']);
 	});
 });
 

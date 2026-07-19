@@ -11,7 +11,20 @@ export type PropertyType =
 	| 'date'
 	| 'checkbox'
 	| 'url'
-	| 'formula';
+	| 'formula'
+	| 'relation'
+	| 'rollup';
+
+/** The aggregation functions a rollup property may use. */
+export type RollupFunction =
+	| 'count'
+	| 'sum'
+	| 'average'
+	| 'min'
+	| 'max'
+	| 'earliest'
+	| 'latest'
+	| 'list';
 
 export type ViewKind = 'table' | 'board' | 'gallery' | 'calendar';
 
@@ -22,6 +35,22 @@ export interface PropertyDef {
 	options: string[];
 	/** Expression for a formula property; empty for every other type. */
 	formula?: string;
+	/** Relation: the target collection whose rows this property links to. */
+	relation_collection_id?: string;
+	/** Rollup: which relation property on this collection to follow. */
+	rollup_relation_property_id?: string;
+	/** Rollup: which target-collection property to aggregate ('__title__' for title). */
+	rollup_target_property_id?: string;
+	/** Rollup: the aggregation function. */
+	rollup_function?: string;
+}
+
+/** Config for a relation/rollup property, passed to add/update. */
+export interface RelationRollupConfig {
+	relation_collection_id?: string;
+	rollup_relation_property_id?: string;
+	rollup_target_property_id?: string;
+	rollup_function?: string;
 }
 
 export interface Filter {
@@ -64,6 +93,18 @@ export interface CollectionRow {
 	updated_at: string;
 }
 
+/** A linked row's id + title (relation picker + relation-cell rendering). */
+export interface RelatedRow {
+	id: string;
+	title: string;
+}
+
+/** A view's rows plus the id/title of every row they link to via relations. */
+export interface CollectionRowsResult {
+	rows: CollectionRow[];
+	related: RelatedRow[];
+}
+
 export const listCollections = (workspaceId: string) =>
 	get<Collection[]>(`/api/v1/workspaces/${workspaceId}/collections`);
 
@@ -84,19 +125,28 @@ export const addProperty = (
 	name: string,
 	type: PropertyType,
 	options: string[] = [],
-	formula = ''
+	formula = '',
+	config: RelationRollupConfig = {}
 ) =>
 	post<Collection>(`/api/v1/collections/${collectionId}/properties`, {
 		name,
 		type,
 		options,
-		formula
+		formula,
+		relation_collection_id: config.relation_collection_id ?? '',
+		rollup_relation_property_id: config.rollup_relation_property_id ?? '',
+		rollup_target_property_id: config.rollup_target_property_id ?? '',
+		rollup_function: config.rollup_function ?? ''
 	});
 
 export const updateProperty = (
 	collectionId: string,
 	propertyId: string,
-	patchBody: { name?: string; options?: string[]; formula?: string }
+	patchBody: {
+		name?: string;
+		options?: string[];
+		formula?: string;
+	} & RelationRollupConfig
 ) => patch<Collection>(`/api/v1/collections/${collectionId}/properties/${propertyId}`, patchBody);
 
 export const removeProperty = (collectionId: string, propertyId: string) =>
@@ -124,7 +174,11 @@ export const addRow = (collectionId: string, title = '') =>
 	post<CollectionRow>(`/api/v1/collections/${collectionId}/rows`, { title });
 
 export const queryView = (collectionId: string, viewId: string) =>
-	get<CollectionRow[]>(`/api/v1/collections/${collectionId}/views/${viewId}/rows`);
+	get<CollectionRowsResult>(`/api/v1/collections/${collectionId}/views/${viewId}/rows`);
+
+/** The target collection's rows (id + title) for the relation row picker. */
+export const listCollectionRows = (collectionId: string) =>
+	get<RelatedRow[]>(`/api/v1/collections/${collectionId}/rows`);
 
 export const setRowValues = (
 	collectionId: string,

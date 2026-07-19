@@ -1,6 +1,7 @@
 <script lang="ts">
-	import type { PropertyType, ViewKind } from '$lib/api/collections';
+	import type { Collection, PropertyDef, PropertyType, ViewKind } from '$lib/api/collections';
 	import type { CollectionVM } from '$lib/viewmodels/collection.svelte';
+	import { TITLE_PROPERTY } from '$lib/viewmodels/collection.svelte';
 	import CollectionBoard from './CollectionBoard.svelte';
 	import CollectionCalendar from './CollectionCalendar.svelte';
 	import CollectionCell from './CollectionCell.svelte';
@@ -55,16 +56,70 @@
 		'date',
 		'checkbox',
 		'url',
-		'formula'
+		'formula',
+		'relation',
+		'rollup'
+	];
+	const ROLLUP_FUNCTIONS = [
+		'count',
+		'sum',
+		'average',
+		'min',
+		'max',
+		'earliest',
+		'latest',
+		'list'
 	];
 	let addingProperty = $state(false);
 	let propName = $state('');
 	let propType = $state<PropertyType>('text');
 	let propOptions = $state('');
 	let propFormula = $state('');
+	// Relation config.
+	let relTarget = $state('');
+	let workspaceCollections = $state<Collection[]>([]);
+	// Rollup config.
+	let rollupRelPropId = $state('');
+	let rollupTargetPropId = $state(TITLE_PROPERTY);
+	let rollupFn = $state('count');
+	let rollupTargetOptions = $state<PropertyDef[]>([]);
 
 	function hasOptions(type: PropertyType): boolean {
 		return type === 'select' || type === 'multi_select';
+	}
+
+	/** Load the collections a relation may target (once the picker is shown). */
+	async function loadTargets() {
+		if (workspaceCollections.length === 0) {
+			workspaceCollections = await vm.loadWorkspaceCollections();
+		}
+	}
+
+	/** When the rollup source relation changes, fetch the target collection's
+	 * properties so the target-property picker can list them. */
+	async function onRollupSourceChange(relationPropertyId: string) {
+		rollupRelPropId = relationPropertyId;
+		rollupTargetPropId = TITLE_PROPERTY;
+		const source = vm.relationProperties.find((p) => p.id === relationPropertyId);
+		rollupTargetOptions = source?.relation_collection_id
+			? await vm.loadCollectionProperties(source.relation_collection_id)
+			: [];
+	}
+
+	async function openAddProperty() {
+		addingProperty = !addingProperty;
+		if (addingProperty) await loadTargets();
+	}
+
+	function relationRollupConfig() {
+		if (propType === 'relation') return { relation_collection_id: relTarget };
+		if (propType === 'rollup')
+			return {
+				rollup_relation_property_id: rollupRelPropId,
+				rollup_target_property_id: rollupTargetPropId,
+				rollup_function: rollupFn
+			};
+		return {};
 	}
 
 	async function submitProperty() {
@@ -74,11 +129,15 @@
 			? propOptions.split(',').map((o) => o.trim()).filter(Boolean)
 			: [];
 		const formula = propType === 'formula' ? propFormula.trim() : '';
-		await vm.addProperty(name, propType, options, formula);
+		await vm.addProperty(name, propType, options, formula, relationRollupConfig());
 		propName = '';
 		propOptions = '';
 		propFormula = '';
 		propType = 'text';
+		relTarget = '';
+		rollupRelPropId = '';
+		rollupTargetPropId = TITLE_PROPERTY;
+		rollupFn = 'count';
 		addingProperty = false;
 	}
 </script>
@@ -166,7 +225,9 @@
 						{#each vm.properties as property (property.id)}
 							<th data-testid="column-header"
 								>{#if property.type === 'formula'}<span class="fx-marker" title="Formula">ƒ</span
-									> {/if}{property.name}</th
+									> {:else if property.type === 'relation'}<span class="fx-marker" title="Relation">🔗</span
+										> {:else if property.type === 'rollup'}<span class="fx-marker" title="Rollup">Σ</span
+										> {/if}{property.name}</th
 							>
 						{/each}
 						<th class="add-col">
@@ -174,7 +235,7 @@
 								class="add-prop"
 								data-testid="add-property"
 								title="Add property"
-								onclick={() => (addingProperty = !addingProperty)}>＋</button
+								onclick={openAddProperty}>＋</button
 							>
 						</th>
 					</tr>
@@ -203,7 +264,15 @@
 									<CollectionCell
 										{property}
 										value={row.properties[property.id]}
-										onchange={(value) => vm.setCell(row.id, property.id, value)}
+										relatedTitle={vm.relatedTitle}
+										loadRelationOptions={property.type === 'relation' &&
+										property.relation_collection_id
+											? () => vm.loadRelationRows(property.relation_collection_id as string)
+											: undefined}
+										onchange={(value) =>
+											property.type === 'relation'
+												? vm.setRelation(row.id, property.id, value as string[])
+												: vm.setCell(row.id, property.id, value)}
 									/>
 								</td>
 							{/each}
@@ -251,6 +320,38 @@
 					bind:value={propFormula}
 					data-testid="prop-formula"
 				/>
+			{/if}
+			{#if propType === 'relation'}
+				<select class="input" bind:value={relTarget} data-testid="prop-relation-target">
+					<option value="">Target collection…</option>
+					{#each workspaceCollections as target (target.id)}
+						<option value={target.id}>{target.name}</option>
+					{/each}
+				</select>
+			{/if}
+			{#if propType === 'rollup'}
+				<select
+					class="input"
+					data-testid="prop-rollup-relation"
+					value={rollupRelPropId}
+					onchange={(e) => onRollupSourceChange(e.currentTarget.value)}
+				>
+					<option value="">Relation…</option>
+					{#each vm.relationProperties as rel (rel.id)}
+						<option value={rel.id}>{rel.name}</option>
+					{/each}
+				</select>
+				<select class="input" bind:value={rollupTargetPropId} data-testid="prop-rollup-target">
+					<option value={TITLE_PROPERTY}>Title</option>
+					{#each rollupTargetOptions as tp (tp.id)}
+						<option value={tp.id}>{tp.name}</option>
+					{/each}
+				</select>
+				<select class="input" bind:value={rollupFn} data-testid="prop-rollup-function">
+					{#each ROLLUP_FUNCTIONS as fn (fn)}
+						<option value={fn}>{fn}</option>
+					{/each}
+				</select>
 			{/if}
 			<button type="submit" class="btn" data-testid="prop-submit">Add</button>
 		</form>

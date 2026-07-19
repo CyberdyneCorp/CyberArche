@@ -9,6 +9,7 @@ import {
 	deleteRow,
 	deleteView,
 	getCollection,
+	listCollectionRows,
 	listCollections,
 	queryView,
 	removeProperty,
@@ -62,7 +63,11 @@ describe('collections api client', () => {
 			name: 'Status',
 			type: 'select',
 			options: ['todo', 'done'],
-			formula: ''
+			formula: '',
+			relation_collection_id: '',
+			rollup_relation_property_id: '',
+			rollup_target_property_id: '',
+			rollup_function: ''
 		});
 	});
 
@@ -77,8 +82,65 @@ describe('collections api client', () => {
 			name: 'Total',
 			type: 'formula',
 			options: [],
-			formula: 'prop("Price") * prop("Qty")'
+			formula: 'prop("Price") * prop("Qty")',
+			relation_collection_id: '',
+			rollup_relation_property_id: '',
+			rollup_target_property_id: '',
+			rollup_function: ''
 		});
+	});
+
+	it('adds a relation property, passing the target collection through', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/properties': { id: 'c1', properties: [{ id: 'rel' }] }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await addProperty('c1', 'Tasks', 'relation', [], '', { relation_collection_id: 'c2' });
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(JSON.parse(init.body)).toEqual({
+			name: 'Tasks',
+			type: 'relation',
+			options: [],
+			formula: '',
+			relation_collection_id: 'c2',
+			rollup_relation_property_id: '',
+			rollup_target_property_id: '',
+			rollup_function: ''
+		});
+	});
+
+	it('adds a rollup property, passing the relation/target/function through', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/properties': { id: 'c1', properties: [{ id: 'roll' }] }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await addProperty('c1', 'Task count', 'rollup', [], '', {
+			rollup_relation_property_id: 'rel',
+			rollup_target_property_id: '__title__',
+			rollup_function: 'count'
+		});
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(JSON.parse(init.body)).toEqual({
+			name: 'Task count',
+			type: 'rollup',
+			options: [],
+			formula: '',
+			relation_collection_id: '',
+			rollup_relation_property_id: 'rel',
+			rollup_target_property_id: '__title__',
+			rollup_function: 'count'
+		});
+	});
+
+	it('lists a collection rows (id + title) for the relation picker', async () => {
+		vi.stubGlobal(
+			'fetch',
+			routedFetch({
+				'GET /api/v1/collections/c2/rows': [{ id: 't1', title: 'Design' }]
+			})
+		);
+		const rows = await listCollectionRows('c2');
+		expect(rows).toEqual([{ id: 't1', title: 'Design' }]);
 	});
 
 	it('adds a row', async () => {
@@ -90,15 +152,19 @@ describe('collections api client', () => {
 		expect(row.id).toBe('r1');
 	});
 
-	it('queries a view for rows', async () => {
+	it('queries a view for rows, returning the rows + related map', async () => {
 		vi.stubGlobal(
 			'fetch',
 			routedFetch({
-				'GET /api/v1/collections/c1/views/v1/rows': [{ id: 'r1', title: 'X' }]
+				'GET /api/v1/collections/c1/views/v1/rows': {
+					rows: [{ id: 'r1', title: 'X' }],
+					related: [{ id: 't1', title: 'Design' }]
+				}
 			})
 		);
-		const rows = await queryView('c1', 'v1');
-		expect(rows.map((r) => r.id)).toEqual(['r1']);
+		const result = await queryView('c1', 'v1');
+		expect(result.rows.map((r) => r.id)).toEqual(['r1']);
+		expect(result.related).toEqual([{ id: 't1', title: 'Design' }]);
 	});
 
 	it('sets row values via a values map (PATCH)', async () => {
