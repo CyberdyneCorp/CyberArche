@@ -37,6 +37,10 @@ class PropertyResponse(BaseModel):
     type: PropertyType
     options: list[str]
     formula: str = ""
+    relation_collection_id: str = ""
+    rollup_relation_property_id: str = ""
+    rollup_target_property_id: str = ""
+    rollup_function: str = ""
 
     @staticmethod
     def from_domain(prop: PropertyDef) -> "PropertyResponse":
@@ -46,6 +50,10 @@ class PropertyResponse(BaseModel):
             type=prop.type,
             options=list(prop.options),
             formula=prop.formula,
+            relation_collection_id=prop.relation_collection_id,
+            rollup_relation_property_id=prop.rollup_relation_property_id,
+            rollup_target_property_id=prop.rollup_target_property_id,
+            rollup_function=prop.rollup_function,
         )
 
 
@@ -130,6 +138,21 @@ class CollectionRowResponse(BaseModel):
         )
 
 
+class RelatedRowResponse(BaseModel):
+    """A linked row's id + title: for the relation row picker and for rendering
+    relation cells by title."""
+
+    id: str
+    title: str
+
+
+class CollectionRowsResponse(BaseModel):
+    """A view's rows plus the id/title of every row they link to via relations."""
+
+    rows: list[CollectionRowResponse]
+    related: list[RelatedRowResponse]
+
+
 # ---- Requests --------------------------------------------------------------
 
 
@@ -146,12 +169,20 @@ class AddPropertyRequest(BaseModel):
     type: PropertyType
     options: list[str] = []
     formula: str = ""
+    relation_collection_id: str = ""
+    rollup_relation_property_id: str = ""
+    rollup_target_property_id: str = ""
+    rollup_function: str = ""
 
 
 class UpdatePropertyRequest(BaseModel):
     name: str | None = None
     options: list[str] | None = None
     formula: str | None = None
+    relation_collection_id: str | None = None
+    rollup_relation_property_id: str | None = None
+    rollup_target_property_id: str | None = None
+    rollup_function: str | None = None
 
 
 class CreateViewRequest(BaseModel):
@@ -244,6 +275,10 @@ async def add_property(
         type=body.type,
         options=tuple(body.options),
         formula=body.formula,
+        relation_collection_id=body.relation_collection_id,
+        rollup_relation_property_id=body.rollup_relation_property_id,
+        rollup_target_property_id=body.rollup_target_property_id,
+        rollup_function=body.rollup_function,
     )
     return CollectionResponse.from_domain(collection)
 
@@ -263,6 +298,10 @@ async def update_property(
         name=body.name,
         options=tuple(body.options) if body.options is not None else None,
         formula=body.formula,
+        relation_collection_id=body.relation_collection_id,
+        rollup_relation_property_id=body.rollup_relation_property_id,
+        rollup_target_property_id=body.rollup_target_property_id,
+        rollup_function=body.rollup_function,
     )
     return CollectionResponse.from_domain(collection)
 
@@ -351,14 +390,26 @@ async def add_row(
     return CollectionRowResponse.from_domain(row)
 
 
+@router.get("/api/v1/collections/{collection_id}/rows")
+async def list_rows(
+    collection_id: str, cases: Cases, caller: Caller
+) -> list[RelatedRowResponse]:
+    """The collection's rows as id+title, for the relation row picker."""
+    rows = await cases.collections.list_rows(caller, CollectionId(collection_id))
+    return [RelatedRowResponse(id=row_id, title=title) for row_id, title in rows]
+
+
 @router.get("/api/v1/collections/{collection_id}/views/{view_id}/rows")
 async def query_view(
     collection_id: str, view_id: str, cases: Cases, caller: Caller
-) -> list[CollectionRowResponse]:
-    rows = await cases.collections.query_view(
+) -> CollectionRowsResponse:
+    rows, related = await cases.collections.query_view_with_related(
         caller, CollectionId(collection_id), view_id
     )
-    return [CollectionRowResponse.from_domain(r) for r in rows]
+    return CollectionRowsResponse(
+        rows=[CollectionRowResponse.from_domain(r) for r in rows],
+        related=[RelatedRowResponse(id=row_id, title=title) for row_id, title in related],
+    )
 
 
 @router.patch("/api/v1/collections/{collection_id}/rows/{document_id}")

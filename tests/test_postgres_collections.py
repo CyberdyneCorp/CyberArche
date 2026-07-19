@@ -112,6 +112,10 @@ async def test_add_serializes_schema_and_views_to_jsonb():
             "type": "select",
             "options": ["todo", "done"],
             "formula": "",
+            "relation_collection_id": "",
+            "rollup_relation_property_id": "",
+            "rollup_target_property_id": "",
+            "rollup_function": "",
         }
     ]
     views = json.loads(args[5])
@@ -206,6 +210,50 @@ async def test_property_without_formula_key_defaults_to_empty():
         TenantId("acme"), CollectionId("col-1")
     )
     assert found.properties[0].formula == ""
+
+
+async def test_relation_and_rollup_properties_round_trip_through_jsonb():
+    relation = PropertyDef(
+        id="p-rel", name="Tasks", type=PropertyType.RELATION,
+        relation_collection_id="col-tasks",
+    )
+    rollup = PropertyDef(
+        id="p-roll", name="Task count", type=PropertyType.ROLLUP,
+        rollup_relation_property_id="p-rel", rollup_target_property_id="__title__",
+        rollup_function="count",
+    )
+    collection = make_collection(properties=(relation, rollup))
+
+    # Serialize on add: the relation/rollup config lands in the JSONB payload.
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).add(collection)
+    _, args = pool.calls[0]
+    serialized = json.loads(args[4])
+    assert serialized[0]["relation_collection_id"] == "col-tasks"
+    assert serialized[1]["rollup_relation_property_id"] == "p-rel"
+    assert serialized[1]["rollup_target_property_id"] == "__title__"
+    assert serialized[1]["rollup_function"] == "count"
+
+    # Deserialize back: both property definitions survive intact.
+    pool = FakePool(row=collection_row(properties=serialized))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties == (relation, rollup)
+
+
+async def test_relation_rollup_keys_default_to_empty_when_absent():
+    # Legacy rows predate relation/rollup and lack the new keys.
+    legacy = {"id": "p-9", "name": "Old", "type": "text", "options": []}
+    pool = FakePool(row=collection_row(properties=[legacy]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    prop = found.properties[0]
+    assert prop.relation_collection_id == ""
+    assert prop.rollup_relation_property_id == ""
+    assert prop.rollup_target_property_id == ""
+    assert prop.rollup_function == ""
 
 
 async def test_delete_scopes_by_tenant():

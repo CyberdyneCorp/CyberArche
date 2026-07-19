@@ -385,7 +385,7 @@ def test_http_collection_lifecycle(api):
         f"/api/v1/collections/{col_id}/views/{view_id}/rows", headers=headers
     )
     assert rows.status_code == 200
-    assert [r["title"] for r in rows.json()] == ["Ship it"]
+    assert [r["title"] for r in rows.json()["rows"]] == ["Ship it"]
 
     # List collections in the workspace.
     listed = api.get(f"/api/v1/workspaces/{ws_id}/collections", headers=headers)

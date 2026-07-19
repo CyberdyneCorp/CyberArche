@@ -30,6 +30,10 @@ def _property_to_dict(prop: PropertyDef) -> dict[str, Any]:
         "type": prop.type.value,
         "options": list(prop.options),
         "formula": prop.formula,
+        "relation_collection_id": prop.relation_collection_id,
+        "rollup_relation_property_id": prop.rollup_relation_property_id,
+        "rollup_target_property_id": prop.rollup_target_property_id,
+        "rollup_function": prop.rollup_function,
     }
 
 
@@ -41,6 +45,11 @@ def _property_from_dict(data: dict[str, Any]) -> PropertyDef:
         options=tuple(data.get("options") or ()),
         # Absent on rows written before formula properties existed.
         formula=data.get("formula") or "",
+        # Absent on rows written before relation/rollup properties existed.
+        relation_collection_id=data.get("relation_collection_id") or "",
+        rollup_relation_property_id=data.get("rollup_relation_property_id") or "",
+        rollup_target_property_id=data.get("rollup_target_property_id") or "",
+        rollup_function=data.get("rollup_function") or "",
     )
 
 

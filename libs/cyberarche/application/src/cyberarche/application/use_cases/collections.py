@@ -17,6 +17,7 @@ from cyberarche.application.ports.repositories import DocumentRepository
 from cyberarche.application.ports.telemetry import ClockPort, IdPort
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.domain.collections import (
+    TITLE_PROPERTY,
     Collection,
     Filter,
     PropertyDef,
@@ -30,6 +31,7 @@ from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound, ValidationFailed
 from cyberarche.domain.formula import Resolver, evaluate_formula, validate_formula
 from cyberarche.domain.ids import CollectionId, DocumentId, WorkspaceId
+from cyberarche.domain.rollup import ROLLUP_FUNCTIONS, aggregate
 from cyberarche.domain.memberships import Role
 
 # Sentinel distinguishing "leave unchanged" from an explicit None on the
@@ -107,6 +109,10 @@ class CollectionUseCases:
         type: PropertyType,
         options: tuple[str, ...] = (),
         formula: str = "",
+        relation_collection_id: str = "",
+        rollup_relation_property_id: str = "",
+        rollup_target_property_id: str = "",
+        rollup_function: str = "",
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
         is_formula = type == PropertyType.FORMULA
@@ -119,7 +125,12 @@ class CollectionUseCases:
             # A formula property ignores options; it carries the expression.
             options=() if is_formula else tuple(options),
             formula=formula,
+            relation_collection_id=relation_collection_id,
+            rollup_relation_property_id=rollup_relation_property_id,
+            rollup_target_property_id=rollup_target_property_id,
+            rollup_function=rollup_function,
         )
+        await self._validate_relation_rollup(caller, collection, prop)
         updated = collection.with_properties(collection.properties + (prop,))
         await self._collections.update(updated)
         return updated
@@ -133,6 +144,10 @@ class CollectionUseCases:
         name: str | None = None,
         options: tuple[str, ...] | None = None,
         formula: str | None = None,
+        relation_collection_id: str | None = None,
+        rollup_relation_property_id: str | None = None,
+        rollup_target_property_id: str | None = None,
+        rollup_function: str | None = None,
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
         prop = collection.property(property_id)
@@ -146,7 +161,16 @@ class CollectionUseCases:
             name=_valid_prop_name(name) if name is not None else prop.name,
             options=tuple(options) if options is not None else prop.options,
             formula=new_formula,
+            relation_collection_id=_pick(relation_collection_id, prop.relation_collection_id),
+            rollup_relation_property_id=_pick(
+                rollup_relation_property_id, prop.rollup_relation_property_id
+            ),
+            rollup_target_property_id=_pick(
+                rollup_target_property_id, prop.rollup_target_property_id
+            ),
+            rollup_function=_pick(rollup_function, prop.rollup_function),
         )
+        await self._validate_relation_rollup(caller, collection, edited)
         props = tuple(edited if p.id == property_id else p for p in collection.properties)
         updated = collection.with_properties(props)
         await self._collections.update(updated)
@@ -254,7 +278,12 @@ class CollectionUseCases:
                 raise ValidationFailed(f"unknown property {property_id}")
             if prop.type == PropertyType.FORMULA:
                 raise ValidationFailed("formula properties are read-only")
-            props[property_id] = _coerce_value(prop, value)
+            if prop.type == PropertyType.ROLLUP:
+                raise ValidationFailed("rollup properties are read-only")
+            if prop.type == PropertyType.RELATION:
+                props[property_id] = await self._coerce_relation(caller, prop, value)
+            else:
+                props[property_id] = _coerce_value(prop, value)
         updated = document.with_properties(props, now=self._clock.now())
         await self._documents_repo.update(updated)
         return updated
@@ -278,6 +307,33 @@ class CollectionUseCases:
     async def query_view(
         self, caller: CallerContext, collection_id: CollectionId, view_id: str
     ) -> list[Document]:
+        rows, _related = await self._query_view(caller, collection_id, view_id)
+        return rows
+
+    async def query_view_with_related(
+        self, caller: CallerContext, collection_id: CollectionId, view_id: str
+    ) -> tuple[list[Document], list[tuple[str, str]]]:
+        """Like :meth:`query_view`, but also returns ``(id, title)`` for every
+        row linked by a relation cell in the result, so the client can render
+        relations by title."""
+        return await self._query_view(caller, collection_id, view_id)
+
+    async def list_rows(
+        self, caller: CallerContext, collection_id: CollectionId
+    ) -> list[tuple[str, str]]:
+        """The non-trashed rows of a collection as ``(id, title)`` — backs the
+        relation row picker. Requires workspace VIEWER."""
+        collection = await self._require(caller, collection_id, Role.VIEWER)
+        rows = await self._documents_repo.list_by_collection(
+            caller.tenant_id, collection.id
+        )
+        return [(row.id, row.title) for row in rows]
+
+    # ---- helpers -----------------------------------------------------------
+
+    async def _query_view(
+        self, caller: CallerContext, collection_id: CollectionId, view_id: str
+    ) -> tuple[list[Document], list[tuple[str, str]]]:
         collection = await self._require(caller, collection_id, Role.VIEWER)
         view = collection.view(view_id)
         if view is None:
@@ -285,11 +341,93 @@ class CollectionUseCases:
         rows = await self._documents_repo.list_by_collection(
             caller.tenant_id, collection.id
         )
+        linked = await self._load_linked(caller, collection, rows)
         now = self._clock.now()
-        enriched = [_compute_formulas(collection, row, now=now) for row in rows]
-        return apply_view(enriched, view)
+        enriched = [self._enrich(collection, row, linked, now=now) for row in rows]
+        result = apply_view(enriched, view)
+        return result, _related_titles(collection, result, linked)
 
-    # ---- helpers -----------------------------------------------------------
+    def _enrich(
+        self, collection: Collection, row: Document, linked: dict[str, Document], *, now
+    ) -> Document:
+        """Merge computed rollups then formulas onto a row's stored values.
+        Rollups land before formulas, so a formula may reference a rollup."""
+        rollups = _compute_rollups(collection, row, linked)
+        if rollups:
+            row = row.with_properties(
+                {**row.properties, **rollups}, now=row.updated_at
+            )
+        return _compute_formulas(collection, row, now=now)
+
+    async def _load_linked(
+        self, caller: CallerContext, collection: Collection, rows: list[Document]
+    ) -> dict[str, Document]:
+        """Batch-load every document referenced by any relation cell across the
+        rows into an ``{id: Document}`` map (deduped, non-trashed only)."""
+        relation_props = [
+            p for p in collection.properties if p.type == PropertyType.RELATION
+        ]
+        if not relation_props:
+            return {}
+        ids: set[str] = set()
+        for row in rows:
+            for prop in relation_props:
+                ids.update(_linked_ids(row, prop.id))
+        linked: dict[str, Document] = {}
+        for doc_id in ids:
+            doc = await self._documents_repo.get(caller.tenant_id, DocumentId(doc_id))
+            if doc is not None and not doc.trashed:
+                linked[doc_id] = doc
+        return linked
+
+    async def _coerce_relation(
+        self, caller: CallerContext, prop: PropertyDef, value: object
+    ) -> list[str]:
+        """Coerce a relation write to the ids that are non-trashed rows of the
+        target collection in the caller's tenant; drop everything else."""
+        target = CollectionId(prop.relation_collection_id)
+        valid: list[str] = []
+        for doc_id in _as_id_list(value):
+            doc = await self._documents_repo.get(caller.tenant_id, DocumentId(doc_id))
+            if doc is not None and not doc.trashed and doc.collection_id == target:
+                valid.append(doc_id)
+        return valid
+
+    async def _validate_relation_rollup(
+        self, caller: CallerContext, collection: Collection, prop: PropertyDef
+    ) -> None:
+        if prop.type == PropertyType.RELATION:
+            await self._validate_relation_target(caller, prop.relation_collection_id)
+        elif prop.type == PropertyType.ROLLUP:
+            await self._validate_rollup(caller, collection, prop)
+
+    async def _validate_relation_target(
+        self, caller: CallerContext, relation_collection_id: str
+    ) -> None:
+        if not relation_collection_id:
+            raise ValidationFailed("a relation requires a target collection")
+        target = await self._collections.get(
+            caller.tenant_id, CollectionId(relation_collection_id)
+        )
+        if target is None:
+            raise ValidationFailed("relation target collection not found")
+
+    async def _validate_rollup(
+        self, caller: CallerContext, collection: Collection, prop: PropertyDef
+    ) -> None:
+        if prop.rollup_function not in ROLLUP_FUNCTIONS:
+            raise ValidationFailed(f"unknown rollup function {prop.rollup_function!r}")
+        relation = collection.property(prop.rollup_relation_property_id)
+        if relation is None or relation.type != PropertyType.RELATION:
+            raise ValidationFailed("a rollup must follow a relation property")
+        target = await self._collections.get(
+            caller.tenant_id, CollectionId(relation.relation_collection_id)
+        )
+        if target is None:
+            raise ValidationFailed("relation target collection not found")
+        target_id = prop.rollup_target_property_id
+        if target_id != TITLE_PROPERTY and target.property(target_id) is None:
+            raise ValidationFailed("rollup target property not found")
 
     async def _require(
         self, caller: CallerContext, collection_id: CollectionId, role: Role
@@ -345,6 +483,82 @@ def _compute_formulas(collection: Collection, row: Document, *, now) -> Document
         prop.id: evaluate_formula(prop.formula, resolve, now=now) for prop in formulas
     }
     return row.with_properties({**row.properties, **computed}, now=row.updated_at)
+
+
+def _pick(value: str | None, current: str) -> str:
+    """Explicit value wins; ``None`` leaves the current value unchanged."""
+    return current if value is None else value
+
+
+def _linked_ids(row: Document, property_id: str) -> list[str]:
+    """The stored linked-document ids of a relation cell (empty when absent)."""
+    value = row.properties.get(property_id)
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item) for item in value]
+
+
+def _as_id_list(value: object) -> list[str]:
+    """Normalize an incoming relation write to a deduped list of id strings."""
+    if value is None or value == "":
+        return []
+    items = value if isinstance(value, (list, tuple)) else [value]
+    result: list[str] = []
+    for item in items:
+        if item is None or item == "":
+            continue
+        text = str(item)
+        if text not in result:
+            result.append(text)
+    return result
+
+
+def _target_value(doc: Document, target_property_id: str) -> object:
+    if target_property_id == TITLE_PROPERTY:
+        return doc.title
+    return doc.properties.get(target_property_id)
+
+
+def _compute_rollups(
+    collection: Collection, row: Document, linked: dict[str, Document]
+) -> dict[str, object]:
+    """The computed value of each rollup property for a row, keyed by id."""
+    rollups = [p for p in collection.properties if p.type == PropertyType.ROLLUP]
+    return {p.id: _rollup_value(collection, row, p, linked) for p in rollups}
+
+
+def _rollup_value(
+    collection: Collection,
+    row: Document,
+    prop: PropertyDef,
+    linked: dict[str, Document],
+) -> object:
+    relation = collection.property(prop.rollup_relation_property_id)
+    if relation is None or relation.type != PropertyType.RELATION:
+        return None
+    values: list[object] = []
+    for doc_id in _linked_ids(row, relation.id):
+        doc = linked.get(doc_id)
+        if doc is not None:
+            values.append(_target_value(doc, prop.rollup_target_property_id))
+    return aggregate(prop.rollup_function, values)
+
+
+def _related_titles(
+    collection: Collection, rows: list[Document], linked: dict[str, Document]
+) -> list[tuple[str, str]]:
+    """``(id, title)`` for every row linked by a relation cell in ``rows``."""
+    relation_props = [
+        p for p in collection.properties if p.type == PropertyType.RELATION
+    ]
+    seen: dict[str, str] = {}
+    for row in rows:
+        for prop in relation_props:
+            for doc_id in _linked_ids(row, prop.id):
+                doc = linked.get(doc_id)
+                if doc is not None and doc_id not in seen:
+                    seen[doc_id] = doc.title
+    return list(seen.items())
 
 
 def _valid_prop_name(name: str) -> str:

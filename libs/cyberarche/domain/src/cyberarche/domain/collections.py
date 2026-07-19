@@ -39,6 +39,11 @@ class PropertyType(StrEnum):
     URL = "url"
     # Read-only, server-computed from `PropertyDef.formula` (collections-formula).
     FORMULA = "formula"
+    # Links to rows of another collection (collections-relations-rollups). The
+    # stored value is a list of linked document ids.
+    RELATION = "relation"
+    # Read-only, server-computed aggregate over a relation's linked rows.
+    ROLLUP = "rollup"
 
 
 class ViewKind(StrEnum):
@@ -57,6 +62,15 @@ class PropertyDef:
     options: tuple[str, ...] = ()
     # Expression for a FORMULA property; empty string for every other type.
     formula: str = ""
+    # RELATION: the target collection whose rows this property links to.
+    relation_collection_id: str = ""
+    # ROLLUP: which RELATION property on THIS collection to follow.
+    rollup_relation_property_id: str = ""
+    # ROLLUP: which property on the target collection to aggregate. The special
+    # value TITLE_PROPERTY (``"__title__"``) aggregates the linked row's title.
+    rollup_target_property_id: str = ""
+    # ROLLUP: the aggregation function (see domain.rollup.ROLLUP_FUNCTIONS).
+    rollup_function: str = ""
 
 
 @dataclass(frozen=True, slots=True)
