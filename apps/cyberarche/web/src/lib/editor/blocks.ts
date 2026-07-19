@@ -1,5 +1,6 @@
 /** Registers the built-in block types (12.1: adding one = one entry here). */
 
+import CollectionViewBlock from '$lib/components/editor/blocks/CollectionViewBlock.svelte';
 import DatabaseBlock from '$lib/components/editor/blocks/DatabaseBlock.svelte';
 import DividerBlock from '$lib/components/editor/blocks/DividerBlock.svelte';
 import CodeBlock from '$lib/components/editor/blocks/CodeBlock.svelte';
@@ -161,12 +162,27 @@ export function registerBuiltinBlocks(): void {
 		}),
 		component: TableBlock
 	});
+	// Embedded collection: the inline database backed by the collections service,
+	// reusing the full-page views/cells (formula, relations, rollups, reminders,
+	// bulk, and all four views) inside a document.
+	registerBlock({
+		type: 'collection_view',
+		label: 'Database',
+		icon: '▦',
+		group: 'technical',
+		hint: 'Rich database — table, board, gallery, calendar',
+		create: () => ({ collection_id: '', view_id: '' }),
+		component: CollectionViewBlock
+	});
+	// Legacy CRDT-backed database — kept registered (hidden from the slash menu)
+	// so documents authored before the collection-backed block still render.
 	registerBlock({
 		type: 'database',
-		label: 'Database',
+		label: 'Database (legacy)',
 		icon: '▤',
 		group: 'technical',
 		hint: 'Typed rows with table & board views',
+		hidden: true,
 		create: () => ({ db: { properties: [], rows: [] } }),
 		component: DatabaseBlock
 	});
