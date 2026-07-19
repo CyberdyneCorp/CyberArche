@@ -106,7 +106,13 @@ async def test_add_serializes_schema_and_views_to_jsonb():
     assert query.startswith("INSERT INTO collections")
     assert args[0:4] == ("col-1", "acme", "ws-1", "Tasks")
     assert json.loads(args[4]) == [
-        {"id": "p-1", "name": "Status", "type": "select", "options": ["todo", "done"]}
+        {
+            "id": "p-1",
+            "name": "Status",
+            "type": "select",
+            "options": ["todo", "done"],
+            "formula": "",
+        }
     ]
     views = json.loads(args[5])
     assert views[0]["kind"] == "table"
@@ -164,6 +170,42 @@ async def test_update_binds_name_and_jsonb_columns():
     assert args[1] == "Renamed"
     assert json.loads(args[2])[0]["id"] == "p-1"
     assert json.loads(args[3])[0]["id"] == "v-1"
+
+
+async def test_formula_property_round_trips_through_jsonb():
+    formula_prop = PropertyDef(
+        id="p-2",
+        name="Total",
+        type=PropertyType.FORMULA,
+        formula='prop("Price") * prop("Qty")',
+    )
+    collection = make_collection(properties=(formula_prop,))
+
+    # Serialize on add: the expression is written into the JSONB payload.
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).add(collection)
+    _, args = pool.calls[0]
+    serialized = json.loads(args[4])[0]
+    assert serialized["type"] == "formula"
+    assert serialized["formula"] == 'prop("Price") * prop("Qty")'
+
+    # Deserialize back: the expression survives.
+    pool = FakePool(row=collection_row(properties=[serialized]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties == (formula_prop,)
+    assert found.properties[0].formula == 'prop("Price") * prop("Qty")'
+
+
+async def test_property_without_formula_key_defaults_to_empty():
+    # Rows written before formula properties existed have no "formula" key.
+    legacy = {"id": "p-9", "name": "Old", "type": "text", "options": []}
+    pool = FakePool(row=collection_row(properties=[legacy]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties[0].formula == ""
 
 
 async def test_delete_scopes_by_tenant():

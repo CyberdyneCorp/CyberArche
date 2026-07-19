@@ -49,7 +49,10 @@ const OPS_BY_TYPE: Record<PropertyType, string[]> = {
 	select: ['eq', 'neq', 'is_empty', 'not_empty'],
 	multi_select: ['contains', 'is_empty', 'not_empty'],
 	date: ['eq', 'gt', 'lt', 'is_empty', 'not_empty'],
-	checkbox: ['eq', 'neq']
+	checkbox: ['eq', 'neq'],
+	// A formula's computed value may be numeric, text, or boolean, so offer the
+	// full operator set; apply_view compares it the same as any other column.
+	formula: ['eq', 'neq', 'contains', 'gt', 'lt', 'is_empty', 'not_empty']
 };
 
 /** Pure: the operators appropriate to a property type, as pickable options.
@@ -335,9 +338,14 @@ export function createCollection(collectionId: string) {
 			}
 		},
 
-		async addProperty(name: string, type: PropertyType, options: string[] = []) {
+		async addProperty(
+			name: string,
+			type: PropertyType,
+			options: string[] = [],
+			formula = ''
+		) {
 			try {
-				collection = await addProperty(collectionId, name, type, options);
+				collection = await addProperty(collectionId, name, type, options, formula);
 			} catch (e) {
 				error = e instanceof Error ? e.message : 'failed to add property';
 			}

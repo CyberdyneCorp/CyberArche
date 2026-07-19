@@ -25,7 +25,11 @@
 	}
 </script>
 
-{#if property.type === 'checkbox'}
+{#if property.type === 'formula'}
+	<!-- Read-only: the computed value arrives in the row's properties from
+	     queryView. No editor, and no setRowValues on interaction. -->
+	<span class="formula-value" data-testid="cell-formula">{asText(value)}</span>
+{:else if property.type === 'checkbox'}
 	<input
 		type="checkbox"
 		checked={value === true}
@@ -108,6 +112,12 @@
 		color: var(--tx);
 		font: inherit;
 		padding: 2px 4px;
+	}
+	.formula-value {
+		display: inline-block;
+		width: 100%;
+		padding: 2px 4px;
+		color: var(--tx2);
 	}
 	.cell-input:focus {
 		outline: 1px solid var(--acc);

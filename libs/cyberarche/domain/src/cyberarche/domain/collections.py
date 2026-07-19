@@ -37,6 +37,8 @@ class PropertyType(StrEnum):
     DATE = "date"
     CHECKBOX = "checkbox"
     URL = "url"
+    # Read-only, server-computed from `PropertyDef.formula` (collections-formula).
+    FORMULA = "formula"
 
 
 class ViewKind(StrEnum):
@@ -53,6 +55,8 @@ class PropertyDef:
     type: PropertyType
     # Allowed options for select / multi_select; empty for other types.
     options: tuple[str, ...] = ()
+    # Expression for a FORMULA property; empty string for every other type.
+    formula: str = ""
 
 
 @dataclass(frozen=True, slots=True)

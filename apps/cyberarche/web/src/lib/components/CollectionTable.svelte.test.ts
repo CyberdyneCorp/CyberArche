@@ -111,6 +111,60 @@ describe('CollectionTable component', () => {
 		expect(vm.setCell).toHaveBeenCalledWith('r1', 'status', 'done');
 	});
 
+	it('renders a formula cell read-only with the computed value and no editor', () => {
+		const vm = fakeVm({
+			properties: [{ id: 'total', name: 'Total', type: 'formula', options: [], formula: 'x' }],
+			rows: [
+				{
+					id: 'r1',
+					workspace_id: 'ws-1',
+					title: 'First',
+					collection_id: 'c1',
+					properties: { total: 30 },
+					created_at: '',
+					updated_at: ''
+				}
+			]
+		});
+		render(vm);
+		const cell = target.querySelector('[data-testid="cell-formula"]')!;
+		expect(cell.textContent).toBe('30');
+		// A formula column is not editable: no input control is rendered for it.
+		expect(target.querySelector('[data-testid="cell-number"]')).toBeNull();
+		expect(target.querySelector('[data-testid="cell-text"]')).toBeNull();
+		// The header carries the ƒ marker.
+		expect(target.querySelector('[data-testid="column-header"]')?.textContent).toContain('ƒ');
+		// Nothing was written for the formula column.
+		expect(vm.setCell).not.toHaveBeenCalled();
+	});
+
+	it('shows a formula expression input when the formula type is chosen and passes it', () => {
+		const vm = fakeVm();
+		render(vm);
+		target.querySelector<HTMLButtonElement>('[data-testid="add-property"]')!.click();
+		flushSync();
+		const name = target.querySelector<HTMLInputElement>('[data-testid="prop-name"]')!;
+		name.value = 'Total';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		const type = target.querySelector<HTMLSelectElement>('[data-testid="prop-type"]')!;
+		type.value = 'formula';
+		type.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		const formula = target.querySelector<HTMLInputElement>('[data-testid="prop-formula"]')!;
+		expect(formula).not.toBeNull();
+		formula.value = 'prop("Price") * prop("Qty")';
+		formula.dispatchEvent(new Event('input', { bubbles: true }));
+		target.querySelector<HTMLFormElement>('[data-testid="add-property-form"]')!.dispatchEvent(
+			new Event('submit', { bubbles: true, cancelable: true })
+		);
+		expect(vm.addProperty).toHaveBeenCalledWith(
+			'Total',
+			'formula',
+			[],
+			'prop("Price") * prop("Qty")'
+		);
+	});
+
 	it('add row button calls vm.addRow', () => {
 		const vm = fakeVm();
 		render(vm);

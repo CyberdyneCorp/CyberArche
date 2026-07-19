@@ -28,6 +28,7 @@ from cyberarche.domain.collections import (
 )
 from cyberarche.domain.documents import Document
 from cyberarche.domain.errors import NotFound, ValidationFailed
+from cyberarche.domain.formula import Resolver, evaluate_formula, validate_formula
 from cyberarche.domain.ids import CollectionId, DocumentId, WorkspaceId
 from cyberarche.domain.memberships import Role
 
@@ -105,13 +106,19 @@ class CollectionUseCases:
         name: str,
         type: PropertyType,
         options: tuple[str, ...] = (),
+        formula: str = "",
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
+        is_formula = type == PropertyType.FORMULA
+        if is_formula or formula:
+            validate_formula(formula)
         prop = PropertyDef(
             id=self._ids.new_id(),
             name=_valid_prop_name(name),
             type=type,
-            options=tuple(options),
+            # A formula property ignores options; it carries the expression.
+            options=() if is_formula else tuple(options),
+            formula=formula,
         )
         updated = collection.with_properties(collection.properties + (prop,))
         await self._collections.update(updated)
@@ -125,15 +132,20 @@ class CollectionUseCases:
         *,
         name: str | None = None,
         options: tuple[str, ...] | None = None,
+        formula: str | None = None,
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
         prop = collection.property(property_id)
         if prop is None:
             raise NotFound("property not found")
+        new_formula = prop.formula if formula is None else formula
+        if prop.type == PropertyType.FORMULA or (formula is not None and formula):
+            validate_formula(new_formula)
         edited = replace(
             prop,
             name=_valid_prop_name(name) if name is not None else prop.name,
             options=tuple(options) if options is not None else prop.options,
+            formula=new_formula,
         )
         props = tuple(edited if p.id == property_id else p for p in collection.properties)
         updated = collection.with_properties(props)
@@ -240,6 +252,8 @@ class CollectionUseCases:
             prop = collection.property(property_id)
             if prop is None:
                 raise ValidationFailed(f"unknown property {property_id}")
+            if prop.type == PropertyType.FORMULA:
+                raise ValidationFailed("formula properties are read-only")
             props[property_id] = _coerce_value(prop, value)
         updated = document.with_properties(props, now=self._clock.now())
         await self._documents_repo.update(updated)
@@ -271,7 +285,9 @@ class CollectionUseCases:
         rows = await self._documents_repo.list_by_collection(
             caller.tenant_id, collection.id
         )
-        return apply_view(rows, view)
+        now = self._clock.now()
+        enriched = [_compute_formulas(collection, row, now=now) for row in rows]
+        return apply_view(enriched, view)
 
     # ---- helpers -----------------------------------------------------------
 
@@ -299,6 +315,36 @@ class CollectionUseCases:
         if collection is None:
             raise NotFound("collection not found")
         return document, collection
+
+
+def _make_resolver(collection: Collection, row: Document) -> Resolver:
+    """A `prop("Name")` resolver over a row's STORED values: `prop("Title")`
+    returns the document title; any other name maps to the property of that name
+    and returns the row's stored value for it (None when absent). Formula
+    properties are looked up against stored values, which are empty — so a
+    formula never references another formula's computed result."""
+    by_name = {prop.name: prop for prop in collection.properties}
+
+    def resolve(name: str) -> object:
+        if name == "Title":
+            return row.title
+        prop = by_name.get(name)
+        return None if prop is None else row.properties.get(prop.id)
+
+    return resolve
+
+
+def _compute_formulas(collection: Collection, row: Document, *, now) -> Document:
+    """Return a row whose properties merge stored values with each formula
+    property's freshly computed value. Read-only: `updated_at` is untouched."""
+    formulas = [p for p in collection.properties if p.type == PropertyType.FORMULA]
+    if not formulas:
+        return row
+    resolve = _make_resolver(collection, row)
+    computed = {
+        prop.id: evaluate_formula(prop.formula, resolve, now=now) for prop in formulas
+    }
+    return row.with_properties({**row.properties, **computed}, now=row.updated_at)
 
 
 def _valid_prop_name(name: str) -> str:
