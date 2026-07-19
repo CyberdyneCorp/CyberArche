@@ -43,10 +43,11 @@ describe('groupRecordingsByMonth', () => {
 describe('meeting-notes month collapse', () => {
 	beforeEach(() => vi.unstubAllGlobals());
 
-	it('exposes grouped recordings and toggles a month collapsed/expanded', async () => {
+	it('opens the newest month by default and collapses older ones', async () => {
 		const recordings = [
 			REC('jun', '2026-06-15T12:00:00Z'),
-			REC('may', '2026-05-15T12:00:00Z')
+			REC('may', '2026-05-15T12:00:00Z'),
+			REC('apr', '2026-04-15T12:00:00Z')
 		];
 		const fn = vi.fn(async () => ({
 			ok: true,
@@ -58,16 +59,18 @@ describe('meeting-notes month collapse', () => {
 		const vm = createMeetingNotes_VM('ws-1');
 		await vm.load();
 
-		expect(vm.groups.map((g) => g.key)).toEqual(['2026-06', '2026-05']);
-		// All expanded by default.
+		expect(vm.groups.map((g) => g.key)).toEqual(['2026-06', '2026-05', '2026-04']);
+		// Newest month open, older months collapsed by default.
 		expect(vm.isCollapsed('2026-06')).toBe(false);
+		expect(vm.isCollapsed('2026-05')).toBe(true);
+		expect(vm.isCollapsed('2026-04')).toBe(true);
 
+		// Toggling is independent and reversible.
+		vm.toggleMonth('2026-05');
+		expect(vm.isCollapsed('2026-05')).toBe(false);
 		vm.toggleMonth('2026-06');
 		expect(vm.isCollapsed('2026-06')).toBe(true);
-		expect(vm.isCollapsed('2026-05')).toBe(false); // independent
-
-		vm.toggleMonth('2026-06');
-		expect(vm.isCollapsed('2026-06')).toBe(false);
+		expect(vm.isCollapsed('2026-05')).toBe(false);
 	});
 });
 
