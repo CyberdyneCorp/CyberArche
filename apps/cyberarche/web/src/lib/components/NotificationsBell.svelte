@@ -5,7 +5,10 @@
 	import { goto } from '$app/navigation';
 	import { notifications } from '$lib/viewmodels/notifications.svelte';
 
-	let { workspaceId }: { workspaceId: string } = $props();
+	let {
+		workspaceId,
+		variant = 'bell'
+	}: { workspaceId: string; variant?: 'bell' | 'nav' } = $props();
 
 	let open = $state(false);
 
@@ -39,25 +42,41 @@
 	}
 </script>
 
-<div class="wrap">
-	<button
-		class="bell"
-		class:has-unread={notifications.unread > 0}
-		data-testid="notifications-bell"
-		aria-label="Notifications"
-		title="Notifications"
-		onclick={toggle}
-	>
-		🔔
-		{#if notifications.unread > 0}
-			<span class="badge" data-testid="notifications-badge">{notifications.unread > 9 ? '9+' : notifications.unread}</span>
-		{/if}
-	</button>
+<div class="wrap" class:nav={variant === 'nav'}>
+	{#if variant === 'nav'}
+		<button
+			class="nav-row"
+			class:has-unread={notifications.unread > 0}
+			data-testid="notifications-bell"
+			aria-label="Notifications"
+			title="Notifications"
+			onclick={toggle}
+		>
+			<span aria-hidden="true">🔔</span> Notifications
+			{#if notifications.unread > 0}
+				<span class="count" data-testid="notifications-badge">{notifications.unread > 9 ? '9+' : notifications.unread}</span>
+			{/if}
+		</button>
+	{:else}
+		<button
+			class="bell"
+			class:has-unread={notifications.unread > 0}
+			data-testid="notifications-bell"
+			aria-label="Notifications"
+			title="Notifications"
+			onclick={toggle}
+		>
+			🔔
+			{#if notifications.unread > 0}
+				<span class="badge" data-testid="notifications-badge">{notifications.unread > 9 ? '9+' : notifications.unread}</span>
+			{/if}
+		</button>
+	{/if}
 
 	{#if open}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<div class="scrim" role="presentation" onclick={() => (open = false)}></div>
-		<div class="pop" data-testid="notifications-pop">
+		<div class="pop" class:pop-down={variant === 'nav'} data-testid="notifications-pop">
 			<header>
 				<strong>Notifications</strong>
 				{#if notifications.items.some((n) => !n.read)}
@@ -105,6 +124,36 @@
 		background: var(--bg2);
 		color: var(--tx);
 	}
+	/* nav-row variant: matches the sidebar's top-nav buttons (.chat-btn). */
+	.nav-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
+		padding: 6px 8px;
+		margin-bottom: 4px;
+		border-radius: var(--r-control);
+		color: var(--tx2);
+		font-weight: 500;
+		text-align: left;
+	}
+	.nav-row:hover {
+		background: var(--bg2);
+		color: var(--tx);
+	}
+	.count {
+		margin-left: auto;
+		min-width: 17px;
+		height: 17px;
+		padding: 0 5px;
+		display: grid;
+		place-items: center;
+		border-radius: var(--r-pill);
+		background: var(--acc);
+		color: #fff;
+		font-size: 10px;
+		font-weight: 700;
+	}
 	.badge {
 		position: absolute;
 		left: 20px;
@@ -137,6 +186,11 @@
 		border-radius: 12px;
 		box-shadow: var(--sh3);
 		overflow: hidden;
+	}
+	/* When triggered from the top nav, open downward instead of upward. */
+	.pop.pop-down {
+		bottom: auto;
+		top: calc(100% + 6px);
 	}
 	header {
 		display: flex;

@@ -73,8 +73,12 @@ test('theme toggle persists across reloads', async ({ page }) => {
 		await page.getByTestId('workspace-name-input').fill('Theme WS');
 		await page.getByTestId('create-workspace').click();
 	}
-	await page.getByTestId('theme-toggle').click();
+	// Theme now lives in Settings → Appearance (moved out of the sidebar footer).
+	await page.getByTestId('open-settings').click();
+	await page.getByTestId('settings-tab-appearance').click();
+	await page.getByTestId('theme-option-dark').click();
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+	await page.getByTestId('settings-done').click();
 	await page.reload();
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });

@@ -55,6 +55,31 @@ describe('theme ViewModel', () => {
 		expect(document.documentElement.dataset.theme).toBeUndefined();
 	});
 
+	it('set(dark) switches, persists and stamps the root; set(light) reverts', () => {
+		const theme = createTheme();
+
+		theme.set('dark');
+		expect(theme.mode).toBe('dark');
+		expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
+		expect(document.documentElement.dataset.theme).toBe('dark');
+
+		theme.set('light');
+		expect(theme.mode).toBe('light');
+		expect(localStorage.getItem(STORAGE_KEY)).toBe('light');
+		expect(document.documentElement.dataset.theme).toBeUndefined();
+	});
+
+	it('set() to the current mode is a no-op (no redundant write)', () => {
+		const theme = createTheme();
+		const spy = vi.spyOn(Storage.prototype, 'setItem');
+
+		theme.set('light');
+
+		expect(theme.mode).toBe('light');
+		expect(spy).not.toHaveBeenCalled();
+		spy.mockRestore();
+	});
+
 	it('falls back to light when localStorage is unavailable (SSR)', () => {
 		vi.stubGlobal('localStorage', undefined);
 

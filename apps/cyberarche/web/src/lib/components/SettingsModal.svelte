@@ -20,8 +20,14 @@
 		type NotificationPrefsVM
 	} from '$lib/viewmodels/notificationPrefs.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
+	import { theme } from '$lib/viewmodels/theme.svelte';
 
 	let { workspaceId }: { workspaceId: string } = $props();
+
+	const THEME_OPTIONS: { mode: 'light' | 'dark'; label: string; icon: string; hint: string }[] = [
+		{ mode: 'light', label: 'Light', icon: '☀', hint: 'Warm, bright chrome for daytime work.' },
+		{ mode: 'dark', label: 'Dark', icon: '☾', hint: 'Low-glare surfaces for dim rooms.' }
+	];
 
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') settingsModal.close();
@@ -62,7 +68,7 @@
 
 	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
 
-	type TabId = 'connectors' | 'integrations' | 'agent' | 'notifications' | 'keys';
+	type TabId = 'connectors' | 'integrations' | 'agent' | 'notifications' | 'appearance' | 'keys';
 	const TABS: { id: TabId; label: string; icon: string; title: string; sub: string }[] = [
 		{
 			id: 'connectors',
@@ -91,6 +97,13 @@
 			icon: '🔔',
 			title: 'Notifications',
 			sub: 'Choose how you get notified. In-app notifications are always on; email/push deliver only when configured on this deployment.'
+		},
+		{
+			id: 'appearance',
+			label: 'Appearance',
+			icon: '◐',
+			title: 'Appearance',
+			sub: 'Theme and display'
 		},
 		{
 			id: 'keys',
@@ -464,6 +477,34 @@
 			{/if}
 		</section>
 	{/if}
+	{/if}
+
+	{#if activeTab === 'appearance'}
+		<section class="card" data-testid="settings-tab-appearance">
+			<h2>Theme</h2>
+			<p class="hint">Choose how CyberArche looks. Your choice is saved on this device.</p>
+			<div class="theme-options" role="radiogroup" aria-label="Theme">
+				{#each THEME_OPTIONS as option (option.mode)}
+					<button
+						class="theme-option"
+						class:selected={theme.mode === option.mode}
+						role="radio"
+						aria-checked={theme.mode === option.mode}
+						data-testid="theme-option-{option.mode}"
+						onclick={() => theme.set(option.mode)}
+					>
+						<span class="theme-icon" aria-hidden="true">{option.icon}</span>
+						<span class="theme-text">
+							<strong>{option.label}</strong>
+							<span class="theme-hint">{option.hint}</span>
+						</span>
+						{#if theme.mode === option.mode}
+							<span class="theme-check" aria-hidden="true">✓</span>
+						{/if}
+					</button>
+				{/each}
+			</div>
+		</section>
 	{/if}
 
 	{#if activeTab === 'notifications'}
@@ -931,6 +972,51 @@
 	.notif-hint {
 		font-size: 12px;
 		color: var(--tx3);
+	}
+	.theme-options {
+		display: flex;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.theme-option {
+		flex: 1 1 200px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 16px;
+		border: 1px solid var(--line2);
+		border-radius: var(--r-block);
+		background: var(--bg1);
+		color: var(--tx);
+		text-align: left;
+		cursor: pointer;
+	}
+	.theme-option:hover {
+		background: var(--bg2);
+	}
+	.theme-option.selected {
+		border-color: var(--acc);
+		background: var(--accbg);
+	}
+	.theme-icon {
+		font-size: 20px;
+		width: 24px;
+		text-align: center;
+	}
+	.theme-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.theme-hint {
+		font-size: 12px;
+		color: var(--tx3);
+	}
+	.theme-check {
+		margin-left: auto;
+		color: var(--acc-strong);
+		font-weight: 700;
 	}
 	.google-groups {
 		display: flex;
