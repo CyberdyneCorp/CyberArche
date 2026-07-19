@@ -34,6 +34,7 @@ BLOCK_TYPES: frozenset[str] = frozenset(
         "whiteboard",
         "excalidraw",
         "database",
+        "collection_view",
         "image",
         "file",
         "embed",

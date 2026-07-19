@@ -4,10 +4,13 @@
 
 	let {
 		vm,
-		onOpenRow
+		onOpenRow,
+		readOnly = false
 	}: {
 		vm: CollectionVM;
 		onOpenRow: (rowId: string) => void;
+		/** Hide the move-between-columns editor (embedded read-only databases). */
+		readOnly?: boolean;
 	} = $props();
 
 	const groupBy = $derived(vm.groupByProperty);
@@ -64,6 +67,7 @@
 						{#each group.rows as row (row.id)}
 							<div class="card-wrap" data-testid="board-card">
 								<CollectionCard {row} properties={cardProps} {onOpenRow} />
+								{#if !readOnly}
 								<label class="move">
 									<span class="visually-hidden">Move {row.title} to column</span>
 									<select
@@ -79,6 +83,7 @@
 										<option value="">Uncategorized</option>
 									</select>
 								</label>
+								{/if}
 							</div>
 						{/each}
 						{#if group.rows.length === 0}

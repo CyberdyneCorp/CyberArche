@@ -96,6 +96,14 @@ describe('CollectionTable component', () => {
 		flushSync();
 	}
 
+	function renderReadOnly(vm: ReturnType<typeof fakeVm>, onOpenRow = vi.fn()) {
+		instance = mount(CollectionTable, {
+			target,
+			props: { vm: vm as never, onOpenRow, readOnly: true }
+		});
+		flushSync();
+	}
+
 	it('renders a column per schema property plus the title column', () => {
 		const vm = fakeVm();
 		render(vm);
@@ -381,6 +389,25 @@ describe('CollectionTable component', () => {
 		const rowBox = target.querySelector<HTMLInputElement>('[data-testid="row-select"]')!;
 		rowBox.click();
 		expect(vm.toggleRow).toHaveBeenCalledWith('r1');
+	});
+
+	it('read-only mode hides add-row, add-property, add-view and bulk selection', () => {
+		const vm = fakeVm({ selectedCount: 2, isSelected: () => true });
+		renderReadOnly(vm);
+		// Editing affordances are gone.
+		expect(target.querySelector('[data-testid="add-row"]')).toBeNull();
+		expect(target.querySelector('[data-testid="add-property"]')).toBeNull();
+		expect(target.querySelector('[data-testid="add-view"]')).toBeNull();
+		expect(target.querySelector('[data-testid="select-all"]')).toBeNull();
+		expect(target.querySelector('[data-testid="row-select"]')).toBeNull();
+		// The bulk bar stays hidden even though rows are "selected".
+		expect(target.querySelector('[data-testid="bulk-bar"]')).toBeNull();
+		// Cells render as read-only values, not editors.
+		expect(target.querySelector('[data-testid="cell-readonly"]')).not.toBeNull();
+		expect(target.querySelector('[data-testid="cell-checkbox"]')).toBeNull();
+		expect(target.querySelector('[data-testid="cell-select"]')).toBeNull();
+		// Rows can still be opened as pages.
+		expect(target.querySelector('[data-testid="open-row"]')).not.toBeNull();
 	});
 
 	it('shows the bulk action bar only when rows are selected', () => {

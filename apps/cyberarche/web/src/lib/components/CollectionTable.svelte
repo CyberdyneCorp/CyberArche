@@ -12,11 +12,15 @@
 
 	let {
 		vm,
-		onOpenRow
+		onOpenRow,
+		readOnly = false
 	}: {
 		vm: CollectionVM;
 		/** Open a row as a full document page. */
 		onOpenRow: (rowId: string) => void;
+		/** Hide every editing affordance (add row/property/view, bulk selection,
+		 * rename, cell editors) — used by the embedded read-only database block. */
+		readOnly?: boolean;
 	} = $props();
 
 	// --- add view mini-form ---
@@ -162,7 +166,9 @@
 
 <section class="collection">
 	<header class="head">
-		{#if editingName}
+		{#if readOnly}
+			<span class="name" data-testid="collection-name">{vm.collection?.name ?? 'Collection'}</span>
+		{:else if editingName}
 			<!-- svelte-ignore a11y_autofocus -->
 			<input
 				class="name-input"
@@ -192,12 +198,14 @@
 				{view.name}
 			</button>
 		{/each}
-		<button
-			class="add-view"
-			data-testid="add-view"
-			title="Add view"
-			onclick={() => (addingView = !addingView)}>＋</button
-		>
+		{#if !readOnly}
+			<button
+				class="add-view"
+				data-testid="add-view"
+				title="Add view"
+				onclick={() => (addingView = !addingView)}>＋</button
+			>
+		{/if}
 	</nav>
 
 	{#if addingView}
@@ -229,28 +237,30 @@
 	{/if}
 
 	{#if vm.currentView?.kind === 'board'}
-		<CollectionBoard {vm} {onOpenRow} />
+		<CollectionBoard {vm} {onOpenRow} {readOnly} />
 	{:else if vm.currentView?.kind === 'gallery'}
 		<CollectionGallery {vm} {onOpenRow} />
 	{:else if vm.currentView?.kind === 'calendar'}
 		<CollectionCalendar {vm} {onOpenRow} />
 	{:else}
-		{#if vm.selectedCount > 0}
+		{#if vm.selectedCount > 0 && !readOnly}
 			<CollectionBulkBar {vm} />
 		{/if}
 		<div class="table-wrap">
 			<table class="table" data-testid="collection-table">
 				<thead>
 					<tr>
-						<th class="sel-col">
-							<input
-								type="checkbox"
-								data-testid="select-all"
-								checked={allSelected}
-								indeterminate={someSelected && !allSelected}
-								onchange={() => vm.toggleAll(rowIds)}
-							/>
-						</th>
+						{#if !readOnly}
+							<th class="sel-col">
+								<input
+									type="checkbox"
+									data-testid="select-all"
+									checked={allSelected}
+									indeterminate={someSelected && !allSelected}
+									onchange={() => vm.toggleAll(rowIds)}
+								/>
+							</th>
+						{/if}
 						<th class="title-col">Name</th>
 						{#each vm.properties as property (property.id)}
 							<th data-testid="column-header"
@@ -264,26 +274,30 @@
 							>
 						{/each}
 						<th class="add-col">
-							<button
-								class="add-prop"
-								data-testid="add-property"
-								title="Add property"
-								onclick={openAddProperty}>＋</button
-							>
+							{#if !readOnly}
+								<button
+									class="add-prop"
+									data-testid="add-property"
+									title="Add property"
+									onclick={openAddProperty}>＋</button
+								>
+							{/if}
 						</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each vm.rows as row (row.id)}
 						<tr data-testid="collection-row" class:selected={vm.isSelected(row.id)}>
-							<td class="sel-col">
-								<input
-									type="checkbox"
-									data-testid="row-select"
-									checked={vm.isSelected(row.id)}
-									onchange={() => vm.toggleRow(row.id)}
-								/>
-							</td>
+							{#if !readOnly}
+								<td class="sel-col">
+									<input
+										type="checkbox"
+										data-testid="row-select"
+										checked={vm.isSelected(row.id)}
+										onchange={() => vm.toggleRow(row.id)}
+									/>
+								</td>
+							{/if}
 							<td class="title-col">
 								<div class="title-cell">
 									<button
@@ -292,18 +306,23 @@
 										data-testid="open-row"
 										onclick={() => onOpenRow(row.id)}>⤢</button
 									>
-									<input
-										class="cell-input title-input"
-										value={row.title}
-										data-testid="row-title"
-										onchange={(e) => vm.renameRow(row.id, e.currentTarget.value)}
-									/>
+									{#if readOnly}
+										<span class="cell-input title-input" data-testid="row-title">{row.title}</span>
+									{:else}
+										<input
+											class="cell-input title-input"
+											value={row.title}
+											data-testid="row-title"
+											onchange={(e) => vm.renameRow(row.id, e.currentTarget.value)}
+										/>
+									{/if}
 								</div>
 							</td>
 							{#each vm.properties as property (property.id)}
 								<td>
 									<CollectionCell
 										{property}
+										{readOnly}
 										value={row.properties[property.id]}
 										relatedTitle={vm.relatedTitle}
 										loadRelationOptions={property.type === 'relation' &&
@@ -327,13 +346,15 @@
 				<p class="empty-rows" data-testid="no-rows">No rows match the current filters</p>
 			{/if}
 
-			<button class="add-row" data-testid="add-row" onclick={() => vm.addRow()}>
-				＋ Add row
-			</button>
+			{#if !readOnly}
+				<button class="add-row" data-testid="add-row" onclick={() => vm.addRow()}>
+					＋ Add row
+				</button>
+			{/if}
 		</div>
 	{/if}
 
-	{#if addingProperty}
+	{#if addingProperty && !readOnly}
 		<form class="prop-form" data-testid="add-property-form" onsubmit={(e) => { e.preventDefault(); submitProperty(); }}>
 			<input
 				class="input"

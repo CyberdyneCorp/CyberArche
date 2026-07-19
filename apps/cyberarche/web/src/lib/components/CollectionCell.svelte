@@ -7,7 +7,8 @@
 		value,
 		onchange,
 		relatedTitle,
-		loadRelationOptions
+		loadRelationOptions,
+		readOnly = false
 	}: {
 		property: PropertyDef;
 		value: unknown;
@@ -16,10 +17,23 @@
 		relatedTitle?: (id: string) => string;
 		/** Relation only: load the target collection's rows for the picker. */
 		loadRelationOptions?: () => Promise<RelatedRow[]>;
+		/** Render the value without any editor (embedded read-only databases). */
+		readOnly?: boolean;
 	} = $props();
 
 	const asText = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
 	const asList = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : []);
+
+	/** A plain, non-editable rendering of the cell value for read-only mode. */
+	function displayText(): string {
+		if (property.type === 'checkbox') return value === true ? '✓' : '';
+		if (property.type === 'relation')
+			return asList(value)
+				.map((id) => relatedTitle?.(id) ?? id)
+				.join(', ');
+		if (property.type === 'multi_select') return asList(value).join(', ');
+		return asText(value);
+	}
 
 	function addTag(option: string) {
 		if (!option) return;
@@ -32,7 +46,10 @@
 	}
 </script>
 
-{#if property.type === 'formula'}
+{#if readOnly}
+	<!-- Embedded read-only database: show the value, never an editor. -->
+	<span class="formula-value" data-testid="cell-readonly">{displayText()}</span>
+{:else if property.type === 'formula'}
 	<!-- Read-only: the computed value arrives in the row's properties from
 	     queryView. No editor, and no setRowValues on interaction. -->
 	<span class="formula-value" data-testid="cell-formula">{asText(value)}</span>
