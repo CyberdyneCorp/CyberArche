@@ -14,3 +14,12 @@ class FileExtractorPort(Protocol):
         heading blocks. Raises ValidationFailed for unsupported types.
         """
         ...
+
+    def extract_table(
+        self, *, filename: str, content: bytes
+    ) -> tuple[list[str], list[list[str]]]:
+        """Parse a CSV/Excel sheet into ``(header, rows)`` for importing it as a
+        collection: the first row is the header, the rest are data rows (empty
+        input -> ``([], [])``). Raises ValidationFailed for non-spreadsheets.
+        """
+        ...

@@ -20,9 +20,11 @@ from cyberarche.application.kernel import CallerContext
 from cyberarche.application.ports.extraction import FileExtractorPort
 from cyberarche.application.ports.telemetry import IdPort
 from cyberarche.application.use_cases.agent import AgentUseCases
+from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
+from cyberarche.domain.collections import PropertyType
 from cyberarche.domain.documents import Document
-from cyberarche.domain.ids import DocumentId, WorkspaceId
+from cyberarche.domain.ids import CollectionId, DocumentId, WorkspaceId
 
 # Zip-bomb guards: a Notion export is a modest set of markdown files.
 _MAX_ENTRIES = 2000
@@ -32,6 +34,13 @@ _TITLE_LIMIT = 200
 # Notion appends a space + 32-hex page id to every file and folder name.
 _NOTION_ID_RE = re.compile(r"\s+[0-9a-fA-F]{32}$")
 
+# A spreadsheet import materializes at most this many data rows; the rest are
+# ignored so a huge sheet cannot blow up into an unbounded number of documents.
+_MAX_ROWS = 1000
+
+# Spreadsheet extensions that import as a collection (not as document blocks).
+_SPREADSHEET_SUFFIXES = (".csv", ".xlsx", ".xlsm")
+
 
 class ImportUseCases:
     def __init__(
@@ -39,11 +48,13 @@ class ImportUseCases:
         documents: DocumentUseCases,
         agent: AgentUseCases,
         extractor: FileExtractorPort,
+        collections: CollectionUseCases,
         ids: IdPort,
     ) -> None:
         self._documents = documents
         self._agent = agent
         self._extractor = extractor
+        self._collections = collections
         self._ids = ids
 
     async def import_upload(
@@ -54,15 +65,106 @@ class ImportUseCases:
         filename: str,
         content: bytes,
     ) -> list[Document]:
-        """Dispatch by extension: `.zip` -> Notion export, else a single file."""
-        if PurePosixPath(filename.lower()).suffix == ".zip":
+        """Dispatch by extension: `.zip` -> Notion export, a spreadsheet
+        (`.csv`/`.xlsx`) -> a collection embedded in a document, else a single
+        document from the file's blocks."""
+        suffix = PurePosixPath(filename.lower()).suffix
+        if suffix == ".zip":
             return await self.import_notion_zip(
                 caller, workspace_id=workspace_id, content=content
             )
+        if suffix in _SPREADSHEET_SUFFIXES:
+            doc = await self.import_spreadsheet(
+                caller, workspace_id=workspace_id, filename=filename, content=content
+            )
+            return [doc]
         doc = await self.import_file(
             caller, workspace_id=workspace_id, filename=filename, content=content
         )
         return [doc]
+
+    async def import_spreadsheet(
+        self,
+        caller: CallerContext,
+        *,
+        workspace_id: WorkspaceId,
+        filename: str,
+        content: bytes,
+    ) -> Document:
+        """Import a CSV/Excel sheet as a new collection, then create a private
+        document that embeds a view of it. The first column becomes each row's
+        title; the remaining columns become typed properties (a column that is
+        all-numeric in the data becomes a NUMBER property, else TEXT)."""
+        header, rows = self._extractor.extract_table(
+            filename=filename, content=content
+        )
+        name = _filename_stem(filename)
+        collection = await self._collections.create_collection(
+            caller, workspace_id=workspace_id, name=name
+        )
+        mapping = await self._build_schema(caller, collection.id, header, rows)
+        await self._import_rows(caller, collection.id, rows, mapping)
+        return await self._embed_collection(
+            caller, workspace_id, name, collection.id, collection.views[0].id
+        )
+
+    async def _build_schema(
+        self,
+        caller: CallerContext,
+        collection_id: CollectionId,
+        header: list[str],
+        rows: list[list[str]],
+    ) -> list[tuple[int, str]]:
+        """Add one property per column after the first; return the ordered
+        ``(column_index, property_id)`` pairs used to fill each row."""
+        mapping: list[tuple[int, str]] = []
+        for index in range(1, len(header)):
+            col_type = _infer_column_type(rows, index)
+            updated = await self._collections.add_property(
+                caller, collection_id, name=header[index] or "Column", type=col_type
+            )
+            mapping.append((index, updated.properties[-1].id))
+        return mapping
+
+    async def _import_rows(
+        self,
+        caller: CallerContext,
+        collection_id: CollectionId,
+        rows: list[list[str]],
+        mapping: list[tuple[int, str]],
+    ) -> None:
+        """Create a capped row per data line: the first column is the title and
+        each mapped column's non-empty cell is written as that property's value."""
+        for row in rows[:_MAX_ROWS]:
+            created = await self._collections.add_row(
+                caller, collection_id, title=_cell(row, 0)
+            )
+            values = {
+                property_id: _cell(row, index)
+                for index, property_id in mapping
+                if _cell(row, index)
+            }
+            if values:
+                await self._collections.set_row_values(caller, created.id, values)
+
+    async def _embed_collection(
+        self,
+        caller: CallerContext,
+        workspace_id: WorkspaceId,
+        title: str,
+        collection_id: CollectionId,
+        view_id: str,
+    ) -> Document:
+        doc = await self._documents.create(
+            caller, workspace_id=workspace_id, title=title
+        )
+        block = {
+            "id": self._ids.new_id(),
+            "type": "collection_view",
+            "data": {"collection_id": collection_id, "view_id": view_id},
+        }
+        await self._agent.apply_blocks(caller, doc.id, [block])
+        return doc
 
     async def import_file(
         self,
@@ -196,3 +298,25 @@ def _notion_title(name: str) -> str:
     """A folder/file name with the `.md` suffix and Notion id stripped."""
     stem = PurePosixPath(name).stem
     return _NOTION_ID_RE.sub("", stem).strip() or "Untitled"
+
+
+def _cell(row: list[str], index: int) -> str:
+    """A row's cell at ``index``, or ``""`` when the row is short."""
+    return row[index] if index < len(row) else ""
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _infer_column_type(rows: list[list[str]], index: int) -> PropertyType:
+    """NUMBER when the column has at least one value and every non-empty value
+    parses as a number; TEXT otherwise."""
+    non_empty = [cell for row in rows if (cell := _cell(row, index))]
+    if non_empty and all(_is_number(cell) for cell in non_empty):
+        return PropertyType.NUMBER
+    return PropertyType.TEXT

@@ -10,6 +10,7 @@ import io
 
 import pytest
 from docx import Document as Docx
+from openpyxl import Workbook
 
 from cyberarche.adapters.outbound.extraction.files import FileExtractor
 from cyberarche.domain.errors import ValidationFailed
@@ -20,6 +21,17 @@ def _docx_bytes(build) -> bytes:
     build(document)
     buffer = io.BytesIO()
     document.save(buffer)
+    return buffer.getvalue()
+
+
+def _xlsx_bytes(rows: list[list[object]], *, sheets: int = 1) -> bytes:
+    workbook = Workbook()
+    for value in rows:
+        workbook.active.append(value)
+    for i in range(1, sheets):
+        workbook.create_sheet(f"extra{i}")
+    buffer = io.BytesIO()
+    workbook.save(buffer)
     return buffer.getvalue()
 
 
@@ -95,3 +107,43 @@ def test_unreadable_docx_raises_validation_failed():
     extractor = FileExtractor()
     with pytest.raises(ValidationFailed):
         extractor.extract_blocks(filename="broken.docx", content=b"not a real docx")
+
+
+# ---- extract_table (spreadsheet import) ------------------------------------
+
+
+def test_extract_table_csv_splits_header_and_rows():
+    extractor = FileExtractor()
+    content = b"Name,Age\nAlice,30\nBob,25\n"
+    header, rows = extractor.extract_table(filename="people.csv", content=content)
+    assert header == ["Name", "Age"]
+    assert rows == [["Alice", "30"], ["Bob", "25"]]
+
+
+def test_extract_table_csv_strips_bom_and_drops_empty_lines():
+    extractor = FileExtractor()
+    content = "﻿Name,Age\n\nAlice,30\n".encode("utf-8")
+    header, rows = extractor.extract_table(filename="people.csv", content=content)
+    assert header == ["Name", "Age"]
+    assert rows == [["Alice", "30"]]
+
+
+def test_extract_table_empty_csv_yields_empty_header_and_rows():
+    extractor = FileExtractor()
+    header, rows = extractor.extract_table(filename="empty.csv", content=b"")
+    assert header == []
+    assert rows == []
+
+
+def test_extract_table_xlsx_uses_first_sheet():
+    extractor = FileExtractor()
+    content = _xlsx_bytes([["Name", "Score"], ["Alice", 30], ["Bob", 25]], sheets=2)
+    header, rows = extractor.extract_table(filename="scores.xlsx", content=content)
+    assert header == ["Name", "Score"]
+    assert rows == [["Alice", "30"], ["Bob", "25"]]
+
+
+def test_extract_table_rejects_non_spreadsheet():
+    extractor = FileExtractor()
+    with pytest.raises(ValidationFailed):
+        extractor.extract_table(filename="notes.md", content=b"# Title")

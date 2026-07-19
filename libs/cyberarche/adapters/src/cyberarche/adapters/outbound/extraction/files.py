@@ -68,6 +68,21 @@ class FileExtractor:
             return _paragraphs(content.decode("utf-8", errors="replace"))
         raise ValidationFailed(f"unsupported file type: {suffix}")
 
+    def extract_table(
+        self, *, filename: str, content: bytes
+    ) -> tuple[list[str], list[list[str]]]:
+        """Parse a CSV or Excel sheet into ``(header, rows)`` — the first row is
+        the header, the rest are data rows. Empty input yields ``([], [])``.
+        Reuses the same csv/openpyxl parsing as `extract_blocks`."""
+        suffix = PurePosixPath(filename.lower()).suffix
+        if suffix == ".csv":
+            rows = _csv_rows(content)
+        elif suffix in (".xlsx", ".xlsm"):
+            rows = _first_sheet_rows(content)
+        else:
+            raise ValidationFailed(f"not a spreadsheet file: {suffix}")
+        return (rows[0], rows[1:]) if rows else ([], [])
+
     def _pdf(self, content: bytes) -> list[dict]:
         reader = PdfReader(io.BytesIO(content))
         blocks: list[dict] = []
@@ -76,8 +91,7 @@ class FileExtractor:
         return blocks
 
     def _csv(self, content: bytes, filename: str) -> list[dict]:
-        text = content.decode("utf-8-sig", errors="replace")
-        rows = [row for row in csv.reader(io.StringIO(text)) if row]
+        rows = _csv_rows(content)
         if not rows:
             return []
         return [_table_block(rows, source=filename)]
@@ -138,3 +152,16 @@ def _sheet_rows(sheet) -> list[list[str]]:
         for row in sheet.iter_rows(values_only=True)
         if any(cell is not None for cell in row)
     ]
+
+
+def _csv_rows(content: bytes) -> list[list[str]]:
+    """CSV bytes -> non-empty rows (utf-8 with an optional BOM)."""
+    text = content.decode("utf-8-sig", errors="replace")
+    return [row for row in csv.reader(io.StringIO(text)) if row]
+
+
+def _first_sheet_rows(content: bytes) -> list[list[str]]:
+    """The non-empty rows of an Excel workbook's first sheet ([] when empty)."""
+    workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    sheets = workbook.worksheets
+    return _sheet_rows(sheets[0]) if sheets else []
