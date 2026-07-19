@@ -11,6 +11,7 @@ from datetime import datetime
 
 from cyberarche.application.authz import AccessControl
 from cyberarche.application.kernel import CallerContext
+from cyberarche.application.use_cases.members import ensure_another_owner
 from cyberarche.application.use_cases.notifications import NotificationDispatcher
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
@@ -71,8 +72,15 @@ class SharingUseCases:
         user_id: UserId,
         role: Role,
     ) -> WorkspaceMembership:
-        """Invite a CyberdyneAuth identity to the workspace with a role."""
+        """Invite a CyberdyneAuth identity to the workspace with a role.
+
+        Inviting an existing member upserts their role, so the last-owner
+        protection applies here too (workspace-members spec).
+        """
         await self._access.require_workspace(caller, workspace_id, Role.OWNER)
+        existing = await self._memberships.workspace_role(workspace_id, user_id)
+        if existing is not None and existing.role == Role.OWNER and role != Role.OWNER:
+            await ensure_another_owner(self._memberships, workspace_id, user_id)
         membership = WorkspaceMembership(
             workspace_id=workspace_id,
             user_id=user_id,

@@ -23,6 +23,7 @@ from cyberarche.application.testing.fakes import (
     InMemoryScheduledAgentRepository,
     InMemoryApiKeyRepository,
     InMemoryCustomInstructionsRepository,
+    InMemoryDirectory,
     InMemoryBlobStorage,
     InMemoryCollectionRepository,
     InMemoryReminderStateRepository,
@@ -84,6 +85,8 @@ from cyberarche.application.use_cases.workspace_chat import WorkspaceChatUseCase
 from cyberarche.application.use_cases.templates import TemplateUseCases
 from cyberarche.application.use_cases.knowledge import KnowledgeUseCases
 from cyberarche.application.use_cases.realtime import RealtimeUseCases
+from cyberarche.application.use_cases.members import WorkspaceMemberUseCases
+from cyberarche.application.use_cases.org_directory import OrgDirectoryUseCases
 from cyberarche.application.use_cases.sharing import SharingUseCases
 from cyberarche.application.use_cases.teamspaces import (
     FavoriteUseCases,
@@ -107,6 +110,11 @@ def update_log(clock: FixedClock) -> InMemoryUpdateLog:
 @pytest.fixture
 def memberships() -> InMemoryMembershipRepository:
     return InMemoryMembershipRepository()
+
+
+@pytest.fixture
+def directory() -> InMemoryDirectory:
+    return InMemoryDirectory()
 
 
 @pytest.fixture
@@ -228,6 +236,7 @@ def use_cases(
     snapshots_repo: InMemorySnapshotRepository,
     teamspace_repo: InMemoryTeamspaceRepository,
     favorite_repo: InMemoryFavoriteRepository,
+    directory: InMemoryDirectory,
 ) -> UseCases:
     workspaces = InMemoryWorkspaceRepository()
     documents = InMemoryDocumentRepository()
@@ -316,6 +325,8 @@ def use_cases(
     )
     return UseCases(
         workspaces=WorkspaceUseCases(workspaces, memberships, clock, ids, rag),
+        members=WorkspaceMemberUseCases(memberships, access, clock, directory),
+        org_directory=OrgDirectoryUseCases(directory),
         documents=document_use_cases,
         snapshots=SnapshotUseCases(
             snapshots, documents, access, clock, ids, engine, realtime

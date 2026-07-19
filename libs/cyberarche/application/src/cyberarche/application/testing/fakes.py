@@ -15,7 +15,11 @@ from cyberarche.application.ports.bus import MessageHandler, Unsubscribe
 from cyberarche.application.ports.crdt import LoggedUpdate
 from cyberarche.application.ports.queue import QueuedJob
 from cyberarche.application.ports.storage import Blob
-from cyberarche.application.ports.identity import Claims
+from cyberarche.application.ports.identity import (
+    Claims,
+    DirectoryPage,
+    DirectoryUser,
+)
 from cyberarche.application.ports.llm import LLMMessage, LLMResponse, ToolSpec
 from cyberarche.application.ports.mcp import ExternalTool
 from cyberarche.domain.api_keys import ApiKey
@@ -276,6 +280,19 @@ class InMemoryMembershipRepository:
     async def document_grants_for_user(self, user_id: UserId) -> list[DocumentGrant]:
         grants = [g for g in self._document.values() if g.user_id == user_id]
         return sorted(grants, key=lambda g: g.granted_at, reverse=True)
+
+    async def list_workspace_members(
+        self, workspace_id: WorkspaceId
+    ) -> list[WorkspaceMembership]:
+        members = [
+            m for (ws, _), m in self._workspace.items() if ws == workspace_id
+        ]
+        return sorted(members, key=lambda m: (m.granted_at, m.user_id))
+
+    async def remove_workspace_member(
+        self, workspace_id: WorkspaceId, user_id: UserId
+    ) -> None:
+        self._workspace.pop((workspace_id, user_id), None)
 
 
 class InMemoryUpdateLog:
@@ -1431,6 +1448,35 @@ class InMemoryReminderStateRepository:
         self, document_id: str, property_id: str, value: str
     ) -> None:
         self._items[(str(document_id), str(property_id))] = value
+
+
+class InMemoryDirectory:
+    """DirectoryPort fake: org id -> users, with email substring search."""
+
+    def __init__(
+        self, users_by_org: dict[str, list[DirectoryUser]] | None = None
+    ) -> None:
+        self.users_by_org: dict[str, list[DirectoryUser]] = dict(users_by_org or {})
+
+    async def list_org_users(
+        self,
+        org_id: str,
+        *,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> DirectoryPage:
+        users = self.users_by_org.get(org_id, [])
+        if search:
+            needle = search.lower()
+            users = [u for u in users if u.email and needle in u.email.lower()]
+        start = (page - 1) * page_size
+        return DirectoryPage(
+            users=users[start : start + page_size],
+            total=len(users),
+            page=page,
+            page_size=page_size,
+        )
 
 
 class StaticTokenPort:

@@ -19,8 +19,15 @@
 		createNotificationPrefs,
 		type NotificationPrefsVM
 	} from '$lib/viewmodels/notificationPrefs.svelte';
+	import { createOrgUsers, type OrgUsersVM } from '$lib/viewmodels/orgUsers.svelte';
+	import {
+		createWorkspaceMembers,
+		type WorkspaceMembersVM
+	} from '$lib/viewmodels/workspaceMembers.svelte';
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { theme } from '$lib/viewmodels/theme.svelte';
+	import type { ShareRole } from '$lib/api/sharing';
+	import OrgUserPicker from './OrgUserPicker.svelte';
 
 	let { workspaceId }: { workspaceId: string } = $props();
 
@@ -59,6 +66,23 @@
 	let keyName = $state('');
 	let copiedSecret = $state(false);
 
+	let members = $state<WorkspaceMembersVM | null>(null);
+	let memberDirectory = $state<OrgUsersVM | null>(null);
+	let memberPicker = $state<OrgUserPicker | null>(null);
+	let memberSearch = $state('');
+	let memberInviteTarget = $state<string | null>(null);
+	let memberInviteRole = $state<ShareRole>('editor');
+
+	const MEMBER_ROLES: ShareRole[] = ['owner', 'editor', 'commenter', 'viewer'];
+	const filteredMembers = $derived.by(() => {
+		const q = memberSearch.trim().toLowerCase();
+		const all = members?.members ?? [];
+		if (!q) return all;
+		return all.filter(
+			(m) => (m.email ?? '').toLowerCase().includes(q) || m.user_id.toLowerCase().includes(q)
+		);
+	});
+
 	const NOTIFICATION_TOGGLES: { key: 'email_enabled' | 'push_enabled' | 'mentions_enabled' | 'agent_results_enabled'; label: string; hint: string }[] = [
 		{ key: 'email_enabled', label: 'Email notifications', hint: 'Deliver notifications to your email (when configured on this deployment).' },
 		{ key: 'push_enabled', label: 'Push notifications', hint: 'Deliver notifications as push (when configured on this deployment).' },
@@ -68,8 +92,22 @@
 
 	const mcpUrl = $derived(`${page.url.origin.replace(':5173', ':8100')}/mcp/`);
 
-	type TabId = 'connectors' | 'integrations' | 'agent' | 'notifications' | 'appearance' | 'keys';
+	type TabId =
+		| 'connectors'
+		| 'members'
+		| 'integrations'
+		| 'agent'
+		| 'notifications'
+		| 'appearance'
+		| 'keys';
 	const TABS: { id: TabId; label: string; icon: string; title: string; sub: string }[] = [
+		{
+			id: 'members',
+			label: 'Members',
+			icon: '👥',
+			title: 'Members',
+			sub: 'Who can access this workspace. Invite people from your organization; role changes and removals are owner-only.'
+		},
 		{
 			id: 'connectors',
 			label: 'Connectors',
@@ -138,7 +176,30 @@
 		const notificationsVm = createNotificationPrefs();
 		notificationPrefs = notificationsVm;
 		notificationsVm.load();
+		const membersVm = createWorkspaceMembers(workspaceId);
+		members = membersVm;
+		membersVm.load();
+		const directoryVm = createOrgUsers();
+		memberDirectory = directoryVm;
+		directoryVm.load();
 	});
+
+	async function inviteMember(event: SubmitEvent) {
+		event.preventDefault();
+		if (!members || !memberInviteTarget) return;
+		if (await members.invite(memberInviteTarget, memberInviteRole)) memberPicker?.clear();
+	}
+
+	async function changeMemberRole(userId: string, event: Event) {
+		const select = event.currentTarget as HTMLSelectElement;
+		const ok = await members?.setRole(userId, select.value as ShareRole);
+		if (!ok) {
+			// A rejected change (e.g. last owner) leaves the state untouched, so
+			// Svelte won't rewrite the select — restore the DOM value by hand.
+			const current = members?.members.find((m) => m.user_id === userId)?.role;
+			if (current) select.value = current;
+		}
+	}
 
 	function toggleGroup(id: string) {
 		googleGroups = googleGroups.includes(id)
@@ -235,6 +296,81 @@
 			<h1>{activeMeta.title}</h1>
 			<p class="sub">{activeMeta.sub}</p>
 		</header>
+
+	{#if activeTab === 'members'}
+	{#if members && memberDirectory}
+		<section class="card">
+			<h2>Invite from your organization</h2>
+			<form class="add member-invite" onsubmit={inviteMember}>
+				<OrgUserPicker
+					bind:this={memberPicker}
+					orgUsers={memberDirectory}
+					testid="member-invite-user"
+					onselect={(userId) => (memberInviteTarget = userId)}
+				/>
+				<select class="input" bind:value={memberInviteRole} data-testid="member-invite-role">
+					{#each MEMBER_ROLES as role (role)}
+						<option value={role}>{role}</option>
+					{/each}
+				</select>
+				<button
+					class="btn btn-primary"
+					type="submit"
+					disabled={!memberInviteTarget || members.busy}
+					data-testid="member-invite">Invite</button
+				>
+			</form>
+		</section>
+
+		<section class="card">
+			<h2>Members</h2>
+			<input
+				class="input member-filter"
+				placeholder="Filter by email or user id…"
+				bind:value={memberSearch}
+				data-testid="member-search"
+			/>
+			{#each filteredMembers as member (member.user_id)}
+				<div class="member-row" data-testid="member-row">
+					{#if member.avatar_url}
+						<img class="member-avatar" src={member.avatar_url} alt="" />
+					{:else}
+						<span class="member-avatar fallback" aria-hidden="true"
+							>{(member.email ?? member.user_id).charAt(0).toUpperCase()}</span
+						>
+					{/if}
+					<span class="member-label">{member.email ?? member.user_id}</span>
+					{#if members.isOwner}
+						<select
+							class="input member-role"
+							value={member.role}
+							data-testid="member-role"
+							onchange={(event) => changeMemberRole(member.user_id, event)}
+						>
+							{#each MEMBER_ROLES as role (role)}
+								<option value={role}>{role}</option>
+							{/each}
+						</select>
+						<button
+							class="remove"
+							data-testid="member-remove"
+							onclick={() => members!.remove(member.user_id)}>Remove</button
+						>
+					{:else}
+						<span class="chip">{member.role}</span>
+					{/if}
+				</div>
+			{:else}
+				<p class="none" data-testid="no-members">
+					{members.loading ? 'Loading members…' : 'No members match.'}
+				</p>
+			{/each}
+			{#if members.error}
+				<p class="error" role="alert" data-testid="members-error">{members.error}</p>
+			{/if}
+		</section>
+	{/if}
+	{/if}
 
 	{#if activeTab === 'keys'}
 	{#if apiKeys}
@@ -1180,5 +1316,48 @@
 	.mini {
 		font-size: 11px;
 		color: var(--acc-strong);
+	}
+	.member-invite {
+		align-items: flex-start;
+	}
+	.member-filter {
+		width: 100%;
+		margin-bottom: 8px;
+	}
+	.member-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 9px 0;
+		border-top: 1px solid var(--line);
+	}
+	.member-row:first-of-type {
+		border-top: none;
+	}
+	.member-avatar {
+		width: 26px;
+		height: 26px;
+		border-radius: 50%;
+		object-fit: cover;
+		flex: 0 0 auto;
+	}
+	.member-avatar.fallback {
+		display: grid;
+		place-items: center;
+		background: var(--accbg);
+		color: var(--acc-strong);
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.member-label {
+		flex: 1;
+		font-size: 13px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.member-role {
+		width: auto;
+		text-transform: capitalize;
 	}
 </style>

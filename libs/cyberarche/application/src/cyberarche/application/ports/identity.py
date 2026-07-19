@@ -48,6 +48,38 @@ class AuthGatewayPort(Protocol):
     async def refresh(self, *, refresh_token: str) -> TokenPair: ...
 
 
+@dataclass(frozen=True, slots=True)
+class DirectoryUser:
+    """An organization member as known to the identity provider."""
+
+    id: str
+    email: str | None = None
+    avatar_url: str | None = None
+    is_active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryPage:
+    users: list[DirectoryUser]
+    total: int
+    page: int
+    page_size: int
+
+
+class DirectoryPort(Protocol):
+    """Lists an organization's users from the identity provider (org-directory
+    spec). Raises domain UpstreamUnavailable when the provider cannot serve."""
+
+    async def list_org_users(
+        self,
+        org_id: str,
+        *,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> DirectoryPage: ...
+
+
 class AuthorizationPort(Protocol):
     """Evaluates whether an identity may perform an action on a resource.
 

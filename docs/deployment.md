@@ -23,7 +23,7 @@ mcp and workers services wait for `api: service_healthy`.
 
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB          # PASSWORD is REQUIRED (no default)
-CYBERARCHE_AUTH_BASE_URL / _CLIENT_ID / _CLIENT_SECRET   # cyberarche-backend client
+CYBERARCHE_AUTH_BASE_URL / _CLIENT_ID / _CLIENT_SECRET   # cyberarche-backend client (needs the directory:read grant, see below)
 CYBERARCHE_RAG_BASE_URL / _RAG_API_TOKEN / _RAG_WEBHOOK_SECRET
 CYBERARCHE_LLM_PROVIDER / _MODEL / _API_KEY / _BASE_URL  # _BASE_URL for OpenAI-compatible endpoints
 CYBERARCHE_MEETINGS_URL                                  # Cyberflies transcripts; defaults to prod URL
@@ -45,6 +45,14 @@ the cookie's `Secure` flag to apply (it keys off the forwarded scheme).
 
 `VITE_API_URL` and `NPM_GITHUB_TOKEN` are consumed at **build** time —
 changing them requires a rebuild, not a restart.
+
+**Org user directory (`directory:read`).** The share-dialog user picker and
+the workspace Members tab list the organization's users through CyberdyneAuth's
+`GET /api/v1/orgs/{org_id}/members` endpoint, called with the
+`cyberarche-backend` client-credentials token. That client must hold the
+`directory:read` grant on CyberdyneAuth (granted by an auth admin). Without it
+— or while CyberdyneAuth is unreachable — `GET /api/v1/org/users` returns 503
+and the UI falls back to inviting by raw user id; nothing else degrades.
 
 The backend settings surface (`services/cyberarche/api/src/cyberarche/api/config.py`,
 prefix `CYBERARCHE_`) is larger than the list above. Settings not mapped in

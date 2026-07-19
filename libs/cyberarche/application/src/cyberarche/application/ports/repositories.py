@@ -125,6 +125,16 @@ class MembershipRepository(Protocol):
         self, workspace_id: WorkspaceId, user_id: UserId
     ) -> WorkspaceMembership | None: ...
 
+    async def list_workspace_members(
+        self, workspace_id: WorkspaceId
+    ) -> list[WorkspaceMembership]:
+        """Every membership of the workspace, oldest grant first."""
+        ...
+
+    async def remove_workspace_member(
+        self, workspace_id: WorkspaceId, user_id: UserId
+    ) -> None: ...
+
     async def add_document_grant(self, grant: DocumentGrant) -> None: ...
 
     async def document_grant(

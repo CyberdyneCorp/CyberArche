@@ -25,3 +25,7 @@ class ValidationFailed(DomainError):
 
 class Conflict(DomainError):
     """The action conflicts with current state (e.g. duplicate, stale)."""
+
+
+class UpstreamUnavailable(DomainError):
+    """A dependent service cannot serve the request right now."""

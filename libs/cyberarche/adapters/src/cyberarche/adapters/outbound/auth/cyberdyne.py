@@ -22,8 +22,13 @@ import httpx
 import jwt
 from jwt import InvalidTokenError, PyJWK
 
-from cyberarche.application.ports.identity import Claims, TokenPair
-from cyberarche.domain.errors import NotAuthenticated
+from cyberarche.application.ports.identity import (
+    Claims,
+    DirectoryPage,
+    DirectoryUser,
+    TokenPair,
+)
+from cyberarche.domain.errors import NotAuthenticated, UpstreamUnavailable
 
 _JWKS_TTL_SECONDS = 300.0
 # Floor between JWKS refetches triggered by an unknown `kid`, so a stream of
@@ -61,6 +66,9 @@ class CyberdyneAuthConfig:
     @property
     def iam_evaluate_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/api/v1/admin/iam/evaluate"
+
+    def org_members_url(self, org_id: str) -> str:
+        return f"{self.base_url.rstrip('/')}/api/v1/orgs/{org_id}/members"
 
     @property
     def login_url(self) -> str:
@@ -239,6 +247,73 @@ def _token_pair(payload: dict) -> TokenPair:
     if not access or not refresh:
         raise NotAuthenticated("auth service returned no tokens")
     return TokenPair(access_token=access, refresh_token=refresh)
+
+
+class CyberdyneDirectory:
+    """DirectoryPort adapter: lists an organization's users for pickers.
+
+    Authenticates with our own service token (client-credentials holding the
+    `directory:read` grant) — never the caller's token. Any failure maps to
+    UpstreamUnavailable so the SPA can fall back to raw-id entry
+    (org-directory spec)."""
+
+    def __init__(
+        self,
+        config: CyberdyneAuthConfig,
+        http: httpx.AsyncClient,
+        service_tokens: ClientCredentialsTokenSource,
+    ) -> None:
+        self._config = config
+        self._http = http
+        self._service_tokens = service_tokens
+
+    async def list_org_users(
+        self,
+        org_id: str,
+        *,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> DirectoryPage:
+        params: dict[str, str | int] = {"page": page, "page_size": page_size}
+        if search:
+            params["search"] = search
+        try:
+            token = await self._service_tokens.service_token()
+            response = await self._http.get(
+                self._config.org_members_url(org_id),
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except (httpx.HTTPError, NotAuthenticated) as error:
+            raise UpstreamUnavailable("user directory unreachable") from error
+        if response.status_code == 404:
+            # Unknown/inactive org: an empty directory, not an outage.
+            return DirectoryPage(users=[], total=0, page=page, page_size=page_size)
+        if response.status_code != 200:
+            raise UpstreamUnavailable(
+                f"user directory returned {response.status_code}"
+            )
+        return _directory_page(response.json(), page=page, page_size=page_size)
+
+
+def _directory_page(payload: dict, *, page: int, page_size: int) -> DirectoryPage:
+    users = [
+        DirectoryUser(
+            id=str(member.get("id") or ""),
+            email=member.get("email"),
+            avatar_url=member.get("avatar_url"),
+            is_active=bool(member.get("is_active", True)),
+        )
+        for member in payload.get("members", [])
+        if member.get("id")
+    ]
+    return DirectoryPage(
+        users=users,
+        total=int(payload.get("total", len(users))),
+        page=int(payload.get("page", page)),
+        page_size=int(payload.get("page_size", page_size)),
+    )
 
 
 class IamAuthorization:
