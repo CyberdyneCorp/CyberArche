@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { importDocuments } from './import-documents';
+import { importDocuments, IMPORT_ACCEPT } from './import-documents';
 
 vi.mock('$lib/api/import', () => ({ importFile: vi.fn() }));
 vi.mock('$lib/viewmodels/document-tree.svelte', () => ({
@@ -41,5 +41,14 @@ describe('importDocuments', () => {
 		(importFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
 
 		await expect(importDocuments('ws-1', new File(['x'], 'a.md'))).rejects.toThrow('boom');
+	});
+});
+
+describe('IMPORT_ACCEPT', () => {
+	it('accepts PDF and CSV/Excel alongside the text formats', () => {
+		const exts = IMPORT_ACCEPT.split(',');
+		for (const ext of ['.pdf', '.csv', '.xlsx', '.md', '.markdown', '.txt', '.docx', '.zip']) {
+			expect(exts).toContain(ext);
+		}
 	});
 });

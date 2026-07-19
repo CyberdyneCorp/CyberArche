@@ -270,6 +270,14 @@ def use_cases(
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspace_repo, folder_repo, workspaces
     )
+    collection_use_cases = CollectionUseCases(
+        collections_repo,
+        documents,
+        document_use_cases,
+        access,
+        clock,
+        ids,
+    )
     persona = AgentPersonaUseCases(
         InMemoryCustomInstructionsRepository(),
         InMemoryAgentMemoryRepository(),
@@ -329,7 +337,7 @@ def use_cases(
             meetings, llm, document_use_cases, agent_use_cases, ids
         ),
         document_import=ImportUseCases(
-            document_use_cases, agent_use_cases, file_extractor, ids
+            document_use_cases, agent_use_cases, file_extractor, collection_use_cases, ids
         ),
         persona=persona,
         google=google,
@@ -340,14 +348,7 @@ def use_cases(
             teamspace_repo, documents, folder_repo, access, clock, ids
         ),
         favorites=FavoriteUseCases(favorite_repo, documents, access),
-        collections=CollectionUseCases(
-            collections_repo,
-            documents,
-            document_use_cases,
-            access,
-            clock,
-            ids,
-        ),
+        collections=collection_use_cases,
         collection_reminders=CollectionReminderUseCases(
             collections_repo,
             documents,

@@ -294,6 +294,9 @@ def _build_use_cases(
     document_use_cases = DocumentUseCases(
         documents, access, clock, ids, teamspaces, folders, workspaces
     )
+    collection_use_cases = CollectionUseCases(
+        collections, documents, document_use_cases, access, clock, ids
+    )
     search = SearchUseCases(documents, realtime, crdt_engine, access)
     workspace_chat = WorkspaceChatUseCases(
         llm, rag, workspaces, search, access, persona=persona
@@ -343,7 +346,7 @@ def _build_use_cases(
             meetings, llm, document_use_cases, agent_use_cases, ids
         ),
         document_import=ImportUseCases(
-            document_use_cases, agent_use_cases, file_extractor, ids
+            document_use_cases, agent_use_cases, file_extractor, collection_use_cases, ids
         ),
         google=google,
         persona=persona,
@@ -360,9 +363,7 @@ def _build_use_cases(
         api_keys=ApiKeyUseCases(api_keys, clock, ids),
         teamspaces=TeamspaceUseCases(teamspaces, documents, folders, access, clock, ids),
         favorites=FavoriteUseCases(favorites, documents, access),
-        collections=CollectionUseCases(
-            collections, documents, document_use_cases, access, clock, ids
-        ),
+        collections=collection_use_cases,
         collection_reminders=CollectionReminderUseCases(
             collections, documents, reminders, dispatcher, ids
         ),

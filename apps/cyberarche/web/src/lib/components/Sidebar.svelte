@@ -405,8 +405,8 @@
 		<button
 			class="new tmpl-btn"
 			data-testid="import-document"
-			title="Import from Markdown, Word, or Notion export"
-			aria-label="Import document"
+			title="Import Markdown, Word, PDF, CSV/Excel, or a Notion export"
+			aria-label="Import Markdown, Word, PDF, CSV/Excel, or a Notion export"
 			onclick={() => importInput?.click()}>⬆</button
 		>
 		<input

@@ -7,8 +7,10 @@ import type { Document } from '$lib/api/documents';
 import { importFile } from '$lib/api/import';
 import { documentTree } from '$lib/viewmodels/document-tree.svelte';
 
-/** File extensions the importer accepts (used for the <input accept> filter). */
-export const IMPORT_ACCEPT = '.md,.markdown,.txt,.docx,.zip';
+/** File extensions the importer accepts (used for the <input accept> filter).
+ * A PDF imports as a document; a CSV/Excel sheet imports as a collection
+ * embedded in a document; a Notion `.zip` becomes a tree of documents. */
+export const IMPORT_ACCEPT = '.md,.markdown,.txt,.docx,.pdf,.csv,.xlsx,.zip';
 
 /** Upload `file`, add every created document to the tree (roots land under
  * Private), and return the first created document for navigation — or null when
