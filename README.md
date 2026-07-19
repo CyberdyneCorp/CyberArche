@@ -49,7 +49,9 @@ Current behavior is spec-driven; each item below maps to a capability under
   **search** (⌘K), and **workspace chat** (Q&A grounded in the workspace).
 - **Collaboration** — realtime CRDT editing, live cursors/presence, comments,
   **version history** with diff/restore, sharing & permissions (Owner/Editor/
-  Commenter/Viewer + shareable links), teamspaces, folders, and favorites.
+  Commenter/Viewer + shareable links), teamspaces, folders, favorites, and a
+  **breadcrumb path** (workspace / teamspace / folder / parent documents) for
+  navigating an open document's location.
 - **Notifications** — an in-app inbox with per-user preferences, delivery
   channels (webhook, **web-push** via VAPID), and a scheduled **email digest**
   of unread notifications.
