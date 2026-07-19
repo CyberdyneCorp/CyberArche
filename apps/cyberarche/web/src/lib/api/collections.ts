@@ -10,7 +10,8 @@ export type PropertyType =
 	| 'multi_select'
 	| 'date'
 	| 'checkbox'
-	| 'url';
+	| 'url'
+	| 'formula';
 
 export type ViewKind = 'table' | 'board' | 'gallery' | 'calendar';
 
@@ -19,6 +20,8 @@ export interface PropertyDef {
 	name: string;
 	type: PropertyType;
 	options: string[];
+	/** Expression for a formula property; empty for every other type. */
+	formula?: string;
 }
 
 export interface Filter {
@@ -80,18 +83,20 @@ export const addProperty = (
 	collectionId: string,
 	name: string,
 	type: PropertyType,
-	options: string[] = []
+	options: string[] = [],
+	formula = ''
 ) =>
 	post<Collection>(`/api/v1/collections/${collectionId}/properties`, {
 		name,
 		type,
-		options
+		options,
+		formula
 	});
 
 export const updateProperty = (
 	collectionId: string,
 	propertyId: string,
-	patchBody: { name?: string; options?: string[] }
+	patchBody: { name?: string; options?: string[]; formula?: string }
 ) => patch<Collection>(`/api/v1/collections/${collectionId}/properties/${propertyId}`, patchBody);
 
 export const removeProperty = (collectionId: string, propertyId: string) =>

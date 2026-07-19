@@ -36,11 +36,16 @@ class PropertyResponse(BaseModel):
     name: str
     type: PropertyType
     options: list[str]
+    formula: str = ""
 
     @staticmethod
     def from_domain(prop: PropertyDef) -> "PropertyResponse":
         return PropertyResponse(
-            id=prop.id, name=prop.name, type=prop.type, options=list(prop.options)
+            id=prop.id,
+            name=prop.name,
+            type=prop.type,
+            options=list(prop.options),
+            formula=prop.formula,
         )
 
 
@@ -140,11 +145,13 @@ class AddPropertyRequest(BaseModel):
     name: str
     type: PropertyType
     options: list[str] = []
+    formula: str = ""
 
 
 class UpdatePropertyRequest(BaseModel):
     name: str | None = None
     options: list[str] | None = None
+    formula: str | None = None
 
 
 class CreateViewRequest(BaseModel):
@@ -236,6 +243,7 @@ async def add_property(
         name=body.name,
         type=body.type,
         options=tuple(body.options),
+        formula=body.formula,
     )
     return CollectionResponse.from_domain(collection)
 
@@ -254,6 +262,7 @@ async def update_property(
         property_id,
         name=body.name,
         options=tuple(body.options) if body.options is not None else None,
+        formula=body.formula,
     )
     return CollectionResponse.from_domain(collection)
 

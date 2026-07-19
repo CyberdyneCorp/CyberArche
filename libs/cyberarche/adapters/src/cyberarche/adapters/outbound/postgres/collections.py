@@ -29,6 +29,7 @@ def _property_to_dict(prop: PropertyDef) -> dict[str, Any]:
         "name": prop.name,
         "type": prop.type.value,
         "options": list(prop.options),
+        "formula": prop.formula,
     }
 
 
@@ -38,6 +39,8 @@ def _property_from_dict(data: dict[str, Any]) -> PropertyDef:
         name=data["name"],
         type=PropertyType(data["type"]),
         options=tuple(data.get("options") or ()),
+        # Absent on rows written before formula properties existed.
+        formula=data.get("formula") or "",
     )
 
 

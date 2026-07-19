@@ -61,7 +61,23 @@ describe('collections api client', () => {
 		expect(JSON.parse(init.body)).toEqual({
 			name: 'Status',
 			type: 'select',
-			options: ['todo', 'done']
+			options: ['todo', 'done'],
+			formula: ''
+		});
+	});
+
+	it('adds a formula property, passing the expression through', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/properties': { id: 'c1', properties: [{ id: 'f1' }] }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await addProperty('c1', 'Total', 'formula', [], 'prop("Price") * prop("Qty")');
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(JSON.parse(init.body)).toEqual({
+			name: 'Total',
+			type: 'formula',
+			options: [],
+			formula: 'prop("Price") * prop("Qty")'
 		});
 	});
 

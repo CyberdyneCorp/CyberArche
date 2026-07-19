@@ -47,11 +47,21 @@
 	}
 
 	// --- add property mini-form ---
-	const TYPES: PropertyType[] = ['text', 'number', 'select', 'multi_select', 'date', 'checkbox', 'url'];
+	const TYPES: PropertyType[] = [
+		'text',
+		'number',
+		'select',
+		'multi_select',
+		'date',
+		'checkbox',
+		'url',
+		'formula'
+	];
 	let addingProperty = $state(false);
 	let propName = $state('');
 	let propType = $state<PropertyType>('text');
 	let propOptions = $state('');
+	let propFormula = $state('');
 
 	function hasOptions(type: PropertyType): boolean {
 		return type === 'select' || type === 'multi_select';
@@ -63,9 +73,11 @@
 		const options = hasOptions(propType)
 			? propOptions.split(',').map((o) => o.trim()).filter(Boolean)
 			: [];
-		await vm.addProperty(name, propType, options);
+		const formula = propType === 'formula' ? propFormula.trim() : '';
+		await vm.addProperty(name, propType, options, formula);
 		propName = '';
 		propOptions = '';
+		propFormula = '';
 		propType = 'text';
 		addingProperty = false;
 	}
@@ -152,7 +164,10 @@
 					<tr>
 						<th class="title-col">Name</th>
 						{#each vm.properties as property (property.id)}
-							<th data-testid="column-header">{property.name}</th>
+							<th data-testid="column-header"
+								>{#if property.type === 'formula'}<span class="fx-marker" title="Formula">ƒ</span
+									> {/if}{property.name}</th
+							>
 						{/each}
 						<th class="add-col">
 							<button
@@ -227,6 +242,14 @@
 					placeholder="Options (comma-separated)"
 					bind:value={propOptions}
 					data-testid="prop-options"
+				/>
+			{/if}
+			{#if propType === 'formula'}
+				<input
+					class="input formula-input"
+					placeholder={'Expression, e.g. prop("Price") * prop("Qty")'}
+					bind:value={propFormula}
+					data-testid="prop-formula"
 				/>
 			{/if}
 			<button type="submit" class="btn" data-testid="prop-submit">Add</button>
@@ -346,6 +369,15 @@
 	}
 	.open-row:hover {
 		color: var(--acc-strong);
+	}
+	.fx-marker {
+		color: var(--tx3);
+		font-style: italic;
+		font-weight: 700;
+	}
+	.formula-input {
+		min-width: 260px;
+		font-family: var(--font-mono, monospace);
 	}
 	.add-col {
 		min-width: 40px;
