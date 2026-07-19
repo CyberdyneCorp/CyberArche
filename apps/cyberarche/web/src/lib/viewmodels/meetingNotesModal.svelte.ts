@@ -111,6 +111,10 @@ export function createMeetingNotes_VM(workspaceId: string) {
 			error = null;
 			try {
 				recordings = await listRecordings();
+				// Open the newest month by default and collapse the rest, so the
+				// picker starts focused on the latest recordings.
+				const keys = groupRecordingsByMonth(recordings).map((group) => group.key);
+				collapsed = new Set(keys.slice(1));
 			} catch (err) {
 				error = friendlyError(err);
 			} finally {
