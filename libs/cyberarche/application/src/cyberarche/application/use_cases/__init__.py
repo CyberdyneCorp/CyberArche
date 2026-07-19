@@ -12,6 +12,7 @@ from cyberarche.application.use_cases.collection_reminders import (
 )
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
+from cyberarche.application.use_cases.document_import import ImportUseCases
 from cyberarche.application.use_cases.documents import DocumentUseCases
 from cyberarche.application.use_cases.files import FileUseCases
 from cyberarche.application.use_cases.google_workspace import GoogleWorkspaceUseCases
@@ -71,4 +72,5 @@ class UseCases:
     skills: AgentSkillUseCases
     scheduled_agents: ScheduledAgentUseCases
     meeting_notes: MeetingNotesUseCases
+    document_import: ImportUseCases
     google: GoogleWorkspaceUseCases | None

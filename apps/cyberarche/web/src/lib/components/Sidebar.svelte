@@ -15,6 +15,7 @@
 	import { settingsModal } from '$lib/viewmodels/settingsModal.svelte';
 	import { workspaceChatOpen } from '$lib/viewmodels/workspaceChat.svelte';
 	import { meetingNotesModal } from '$lib/viewmodels/meetingNotesModal.svelte';
+	import { importDocuments, IMPORT_ACCEPT } from '$lib/viewmodels/import-documents';
 	import { theme } from '$lib/viewmodels/theme.svelte';
 	import { toasts } from '$lib/viewmodels/toasts.svelte';
 	import ContextMenu from './ContextMenu.svelte';
@@ -59,6 +60,22 @@
 		const document = await documentTree.create('', undefined, teamspaceId);
 		if (teamspaceId) await teamspaces?.reload(teamspaceId);
 		await goto(`/w/${workspaceId}/d/${document.id}`);
+	}
+
+	let importInput = $state<HTMLInputElement | null>(null);
+
+	async function onImportPick(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // allow re-picking the same file
+		if (!file) return;
+		try {
+			const first = await importDocuments(workspaceId, file);
+			if (first) await goto(`/w/${workspaceId}/d/${first.id}`);
+			else toasts.error('That file had no importable content.');
+		} catch {
+			toasts.error("Couldn't import that file.");
+		}
 	}
 
 	async function newFolder(teamspaceId: string | null) {
@@ -385,6 +402,21 @@
 			aria-label="New from template"
 			onclick={() => (templatePickerOpen = true)}>▤</button
 		>
+		<button
+			class="new tmpl-btn"
+			data-testid="import-document"
+			title="Import from Markdown, Word, or Notion export"
+			aria-label="Import document"
+			onclick={() => importInput?.click()}>⬆</button
+		>
+		<input
+			bind:this={importInput}
+			type="file"
+			accept={IMPORT_ACCEPT}
+			class="hidden-file"
+			data-testid="import-file-input"
+			onchange={onImportPick}
+		/>
 	</div>
 
 	<button
@@ -776,6 +808,9 @@
 		flex: 0 0 auto;
 		justify-content: center;
 		padding: 6px 9px;
+	}
+	.hidden-file {
+		display: none;
 	}
 	.chat-btn {
 		display: flex;
