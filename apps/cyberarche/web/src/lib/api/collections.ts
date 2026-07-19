@@ -43,6 +43,8 @@ export interface PropertyDef {
 	rollup_target_property_id?: string;
 	/** Rollup: the aggregation function. */
 	rollup_function?: string;
+	/** Date: reminder lead time in minutes. -1 = none; 0 = at the date; >0 = before. */
+	reminder_minutes?: number;
 }
 
 /** Config for a relation/rollup property, passed to add/update. */
@@ -126,7 +128,8 @@ export const addProperty = (
 	type: PropertyType,
 	options: string[] = [],
 	formula = '',
-	config: RelationRollupConfig = {}
+	config: RelationRollupConfig = {},
+	reminderMinutes = -1
 ) =>
 	post<Collection>(`/api/v1/collections/${collectionId}/properties`, {
 		name,
@@ -136,7 +139,8 @@ export const addProperty = (
 		relation_collection_id: config.relation_collection_id ?? '',
 		rollup_relation_property_id: config.rollup_relation_property_id ?? '',
 		rollup_target_property_id: config.rollup_target_property_id ?? '',
-		rollup_function: config.rollup_function ?? ''
+		rollup_function: config.rollup_function ?? '',
+		reminder_minutes: reminderMinutes
 	});
 
 export const updateProperty = (
@@ -146,6 +150,7 @@ export const updateProperty = (
 		name?: string;
 		options?: string[];
 		formula?: string;
+		reminder_minutes?: number;
 	} & RelationRollupConfig
 ) => patch<Collection>(`/api/v1/collections/${collectionId}/properties/${propertyId}`, patchBody);
 

@@ -21,7 +21,10 @@ from cyberarche.application.ports.identity import (
     ServiceTokenPort,
     TokenPort,
 )
-from cyberarche.application.ports.collections import CollectionRepository
+from cyberarche.application.ports.collections import (
+    CollectionRepository,
+    ReminderStateRepository,
+)
 from cyberarche.application.ports.repositories import (
     DocumentRepository,
     MembershipRepository,
@@ -74,6 +77,9 @@ from cyberarche.application.use_cases.agent import AgentUseCases
 from cyberarche.application.use_cases.api_keys import (
     ApiKeyUseCases,
     CompositeTokenVerifier,
+)
+from cyberarche.application.use_cases.collection_reminders import (
+    CollectionReminderUseCases,
 )
 from cyberarche.application.use_cases.collections import CollectionUseCases
 from cyberarche.application.use_cases.connectors import ConnectorUseCases
@@ -241,6 +247,7 @@ def _build_use_cases(
     teamspaces: TeamspaceRepository,
     favorites: FavoriteRepository,
     collections: CollectionRepository,
+    reminders: ReminderStateRepository,
     folders: FolderRepository,
     blobs: BlobStoragePort,
     queue: TaskQueuePort,
@@ -350,6 +357,9 @@ def _build_use_cases(
         favorites=FavoriteUseCases(favorites, documents, access),
         collections=CollectionUseCases(
             collections, documents, document_use_cases, access, clock, ids
+        ),
+        collection_reminders=CollectionReminderUseCases(
+            collections, documents, reminders, dispatcher, ids
         ),
         folders=FolderUseCases(folders, documents, access, clock, ids),
         files=FileUseCases(blobs, access, ids),
@@ -516,6 +526,7 @@ class _Repositories:
     teamspaces: TeamspaceRepository
     favorites: FavoriteRepository
     collections: CollectionRepository
+    reminders: ReminderStateRepository
     folders: FolderRepository
     inferred_links: InferredLinkRepository
     notifications: NotificationRepository
@@ -556,6 +567,9 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
     )
     from cyberarche.adapters.outbound.postgres.collections import (
         PostgresCollectionRepository,
+    )
+    from cyberarche.adapters.outbound.postgres.collection_reminders import (
+        PostgresReminderStateRepository,
     )
     from cyberarche.adapters.outbound.postgres.folders import PostgresFolderRepository
     from cyberarche.adapters.outbound.postgres.teamspaces import (
@@ -609,6 +623,7 @@ async def _postgres_repositories(config: WiringConfig, closers: list) -> _Reposi
         teamspaces=PostgresTeamspaceRepository(pool),
         favorites=PostgresFavoriteRepository(pool),
         collections=PostgresCollectionRepository(pool),
+        reminders=PostgresReminderStateRepository(pool),
         folders=PostgresFolderRepository(pool),
         inferred_links=PostgresInferredLinkRepository(pool),
         notifications=PostgresNotificationRepository(pool),
@@ -641,6 +656,7 @@ def _memory_repositories() -> _Repositories:
         teamspaces=fakes.InMemoryTeamspaceRepository(),
         favorites=fakes.InMemoryFavoriteRepository(),
         collections=fakes.InMemoryCollectionRepository(),
+        reminders=fakes.InMemoryReminderStateRepository(),
         folders=fakes.InMemoryFolderRepository(),
         inferred_links=fakes.InMemoryInferredLinkRepository(),
         notifications=fakes.InMemoryNotificationRepository(),
@@ -977,6 +993,7 @@ async def build_container(
             repos.teamspaces,
             repos.favorites,
             repos.collections,
+            repos.reminders,
             repos.folders,
             blobs,
             queue,

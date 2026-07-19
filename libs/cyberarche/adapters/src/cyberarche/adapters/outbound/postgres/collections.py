@@ -34,6 +34,7 @@ def _property_to_dict(prop: PropertyDef) -> dict[str, Any]:
         "rollup_relation_property_id": prop.rollup_relation_property_id,
         "rollup_target_property_id": prop.rollup_target_property_id,
         "rollup_function": prop.rollup_function,
+        "reminder_minutes": prop.reminder_minutes,
     }
 
 
@@ -50,6 +51,8 @@ def _property_from_dict(data: dict[str, Any]) -> PropertyDef:
         rollup_relation_property_id=data.get("rollup_relation_property_id") or "",
         rollup_target_property_id=data.get("rollup_target_property_id") or "",
         rollup_function=data.get("rollup_function") or "",
+        # Absent on rows written before date reminders existed => no reminder.
+        reminder_minutes=data.get("reminder_minutes", -1),
     )
 
 
@@ -158,6 +161,12 @@ class PostgresCollectionRepository:
             """,
             tenant_id,
             workspace_id,
+        )
+        return [_from_row(r) for r in rows]
+
+    async def list_all(self) -> list[Collection]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM collections ORDER BY created_at"
         )
         return [_from_row(r) for r in rows]
 

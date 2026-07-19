@@ -70,11 +70,21 @@
 		'latest',
 		'list'
 	];
+	// Reminder lead times for a date property, in minutes (-1 = no reminder).
+	const REMINDER_OPTIONS: { label: string; value: number }[] = [
+		{ label: 'No reminder', value: -1 },
+		{ label: 'At the time', value: 0 },
+		{ label: '5 minutes before', value: 5 },
+		{ label: '1 hour before', value: 60 },
+		{ label: '1 day before', value: 1440 },
+		{ label: '1 week before', value: 10080 }
+	];
 	let addingProperty = $state(false);
 	let propName = $state('');
 	let propType = $state<PropertyType>('text');
 	let propOptions = $state('');
 	let propFormula = $state('');
+	let propReminder = $state(-1);
 	// Relation config.
 	let relTarget = $state('');
 	let workspaceCollections = $state<Collection[]>([]);
@@ -129,7 +139,8 @@
 			? propOptions.split(',').map((o) => o.trim()).filter(Boolean)
 			: [];
 		const formula = propType === 'formula' ? propFormula.trim() : '';
-		await vm.addProperty(name, propType, options, formula, relationRollupConfig());
+		const reminder = propType === 'date' ? propReminder : -1;
+		await vm.addProperty(name, propType, options, formula, relationRollupConfig(), reminder);
 		propName = '';
 		propOptions = '';
 		propFormula = '';
@@ -138,6 +149,7 @@
 		rollupRelPropId = '';
 		rollupTargetPropId = TITLE_PROPERTY;
 		rollupFn = 'count';
+		propReminder = -1;
 		addingProperty = false;
 	}
 </script>
@@ -227,6 +239,9 @@
 								>{#if property.type === 'formula'}<span class="fx-marker" title="Formula">ƒ</span
 									> {:else if property.type === 'relation'}<span class="fx-marker" title="Relation">🔗</span
 										> {:else if property.type === 'rollup'}<span class="fx-marker" title="Rollup">Σ</span
+										> {:else if property.type === 'date' && (property.reminder_minutes ?? -1) >= 0}<span
+											class="fx-marker"
+											title="Reminder">🔔</span
 										> {/if}{property.name}</th
 							>
 						{/each}
@@ -320,6 +335,13 @@
 					bind:value={propFormula}
 					data-testid="prop-formula"
 				/>
+			{/if}
+			{#if propType === 'date'}
+				<select class="input" bind:value={propReminder} data-testid="prop-reminder">
+					{#each REMINDER_OPTIONS as opt (opt.value)}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
 			{/if}
 			{#if propType === 'relation'}
 				<select class="input" bind:value={relTarget} data-testid="prop-relation-target">

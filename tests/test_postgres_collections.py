@@ -116,6 +116,7 @@ async def test_add_serializes_schema_and_views_to_jsonb():
             "rollup_relation_property_id": "",
             "rollup_target_property_id": "",
             "rollup_function": "",
+            "reminder_minutes": -1,
         }
     ]
     views = json.loads(args[5])
@@ -254,6 +255,51 @@ async def test_relation_rollup_keys_default_to_empty_when_absent():
     assert prop.rollup_relation_property_id == ""
     assert prop.rollup_target_property_id == ""
     assert prop.rollup_function == ""
+
+
+async def test_date_reminder_minutes_round_trips_through_jsonb():
+    date_prop = PropertyDef(
+        id="p-due", name="Due", type=PropertyType.DATE, reminder_minutes=1440
+    )
+    collection = make_collection(properties=(date_prop,))
+
+    # Serialize on add: the reminder lead time lands in the JSONB payload.
+    pool = FakePool()
+    await PostgresCollectionRepository(pool).add(collection)
+    _, args = pool.calls[0]
+    serialized = json.loads(args[4])[0]
+    assert serialized["reminder_minutes"] == 1440
+
+    # Deserialize back: the reminder lead time survives.
+    pool = FakePool(row=collection_row(properties=[serialized]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties == (date_prop,)
+    assert found.properties[0].reminder_minutes == 1440
+
+
+async def test_reminder_minutes_defaults_to_negative_one_when_absent():
+    # Rows written before date reminders existed have no "reminder_minutes" key.
+    legacy = {"id": "p-9", "name": "Old", "type": "date", "options": []}
+    pool = FakePool(row=collection_row(properties=[legacy]))
+    found = await PostgresCollectionRepository(pool).get(
+        TenantId("acme"), CollectionId("col-1")
+    )
+    assert found.properties[0].reminder_minutes == -1
+
+
+async def test_list_all_fetches_every_collection_cross_tenant():
+    pool = FakePool(
+        rows=[collection_row(), collection_row(id="col-2", tenant_id="globex")]
+    )
+    listed = await PostgresCollectionRepository(pool).list_all()
+
+    assert [c.id for c in listed] == ["col-1", "col-2"]
+    # No tenant binding — the background sweep enumerates every tenant.
+    query, args = pool.calls[0]
+    assert query.startswith("SELECT * FROM collections")
+    assert args == ()
 
 
 async def test_delete_scopes_by_tenant():

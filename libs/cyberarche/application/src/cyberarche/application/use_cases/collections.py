@@ -113,6 +113,7 @@ class CollectionUseCases:
         rollup_relation_property_id: str = "",
         rollup_target_property_id: str = "",
         rollup_function: str = "",
+        reminder_minutes: int = -1,
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
         is_formula = type == PropertyType.FORMULA
@@ -129,6 +130,8 @@ class CollectionUseCases:
             rollup_relation_property_id=rollup_relation_property_id,
             rollup_target_property_id=rollup_target_property_id,
             rollup_function=rollup_function,
+            # A reminder is only meaningful on a DATE property; inert elsewhere.
+            reminder_minutes=reminder_minutes if type == PropertyType.DATE else -1,
         )
         await self._validate_relation_rollup(caller, collection, prop)
         updated = collection.with_properties(collection.properties + (prop,))
@@ -148,6 +151,7 @@ class CollectionUseCases:
         rollup_relation_property_id: str | None = None,
         rollup_target_property_id: str | None = None,
         rollup_function: str | None = None,
+        reminder_minutes: int | None = None,
     ) -> Collection:
         collection = await self._require(caller, collection_id, Role.EDITOR)
         prop = collection.property(property_id)
@@ -169,6 +173,9 @@ class CollectionUseCases:
                 rollup_target_property_id, prop.rollup_target_property_id
             ),
             rollup_function=_pick(rollup_function, prop.rollup_function),
+            reminder_minutes=(
+                prop.reminder_minutes if reminder_minutes is None else reminder_minutes
+            ),
         )
         await self._validate_relation_rollup(caller, collection, edited)
         props = tuple(edited if p.id == property_id else p for p in collection.properties)

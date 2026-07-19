@@ -71,6 +71,9 @@ class PropertyDef:
     rollup_target_property_id: str = ""
     # ROLLUP: the aggregation function (see domain.rollup.ROLLUP_FUNCTIONS).
     rollup_function: str = ""
+    # DATE: reminder lead time. -1 = no reminder; 0 = at the date; >0 = minutes
+    # before the date (e.g. 1440 = 1 day before). Only meaningful for DATE props.
+    reminder_minutes: int = -1
 
 
 @dataclass(frozen=True, slots=True)

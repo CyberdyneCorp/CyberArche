@@ -168,8 +168,32 @@ describe('CollectionTable component', () => {
 			'formula',
 			[],
 			'prop("Price") * prop("Qty")',
-			{}
+			{},
+			-1
 		);
+	});
+
+	it('shows a reminder select for a date property and passes the lead time', () => {
+		const vm = fakeVm();
+		render(vm);
+		target.querySelector<HTMLButtonElement>('[data-testid="add-property"]')!.click();
+		flushSync();
+		const name = target.querySelector<HTMLInputElement>('[data-testid="prop-name"]')!;
+		name.value = 'Due';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		const type = target.querySelector<HTMLSelectElement>('[data-testid="prop-type"]')!;
+		type.value = 'date';
+		type.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		const reminder = target.querySelector<HTMLSelectElement>('[data-testid="prop-reminder"]')!;
+		expect(reminder).not.toBeNull();
+		reminder.value = '1440';
+		reminder.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		target.querySelector<HTMLFormElement>('[data-testid="add-property-form"]')!.dispatchEvent(
+			new Event('submit', { bubbles: true, cancelable: true })
+		);
+		expect(vm.addProperty).toHaveBeenCalledWith('Due', 'date', [], '', {}, 1440);
 	});
 
 	it('renders a relation cell as chips resolved by relatedTitle, with a toggle picker', async () => {

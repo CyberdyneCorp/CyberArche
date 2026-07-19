@@ -67,7 +67,28 @@ describe('collections api client', () => {
 			relation_collection_id: '',
 			rollup_relation_property_id: '',
 			rollup_target_property_id: '',
-			rollup_function: ''
+			rollup_function: '',
+			reminder_minutes: -1
+		});
+	});
+
+	it('adds a date property with a reminder lead time', async () => {
+		const fetchMock = routedFetch({
+			'POST /api/v1/collections/c1/properties': { id: 'c1', properties: [{ id: 'd1' }] }
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await addProperty('c1', 'Due', 'date', [], '', {}, 1440);
+		const init = (fetchMock as unknown as Mock).mock.calls[0][1];
+		expect(JSON.parse(init.body)).toEqual({
+			name: 'Due',
+			type: 'date',
+			options: [],
+			formula: '',
+			relation_collection_id: '',
+			rollup_relation_property_id: '',
+			rollup_target_property_id: '',
+			rollup_function: '',
+			reminder_minutes: 1440
 		});
 	});
 
@@ -86,7 +107,8 @@ describe('collections api client', () => {
 			relation_collection_id: '',
 			rollup_relation_property_id: '',
 			rollup_target_property_id: '',
-			rollup_function: ''
+			rollup_function: '',
+			reminder_minutes: -1
 		});
 	});
 
@@ -105,7 +127,8 @@ describe('collections api client', () => {
 			relation_collection_id: 'c2',
 			rollup_relation_property_id: '',
 			rollup_target_property_id: '',
-			rollup_function: ''
+			rollup_function: '',
+			reminder_minutes: -1
 		});
 	});
 
@@ -128,7 +151,8 @@ describe('collections api client', () => {
 			relation_collection_id: '',
 			rollup_relation_property_id: 'rel',
 			rollup_target_property_id: '__title__',
-			rollup_function: 'count'
+			rollup_function: 'count',
+			reminder_minutes: -1
 		});
 	});
 
