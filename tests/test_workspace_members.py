@@ -59,6 +59,21 @@ async def test_listing_enriches_from_the_directory(
     assert by_id["bob"].email is None  # not in the directory: bare id, no failure
 
 
+async def test_callers_own_row_falls_back_to_claims_email(use_cases: UseCases):
+    """Even without a directory entry, the caller's own row shows their email."""
+    from cyberarche.application.kernel import CallerContext
+    from cyberarche.domain.ids import TenantId, UserId
+
+    me = CallerContext(
+        user_id=UserId("alice"), tenant_id=TenantId("acme"), email="alice@acme.test"
+    )
+    workspace = await use_cases.workspaces.create(me, name="WS")
+
+    listed = await use_cases.members.list_members(me, workspace.id)
+
+    assert listed[0].email == "alice@acme.test"
+
+
 async def test_listing_survives_a_directory_outage(use_cases: UseCases, alice):
     workspace = await workspace_with_bob(use_cases, alice)
     failing = _FailingDirectory()

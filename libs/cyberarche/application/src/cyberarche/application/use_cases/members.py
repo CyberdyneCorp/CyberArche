@@ -66,10 +66,13 @@ class WorkspaceMemberUseCases:
         enriched = []
         for membership in members:
             user = index.get(str(membership.user_id))
+            email = user.email if user else None
+            if email is None and str(membership.user_id) == str(caller.user_id):
+                email = caller.email  # the caller's own claims beat a missing directory entry
             enriched.append(
                 WorkspaceMember(
                     membership=membership,
-                    email=user.email if user else None,
+                    email=email,
                     avatar_url=user.avatar_url if user else None,
                 )
             )

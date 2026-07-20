@@ -93,6 +93,41 @@ async def test_missing_org_claim_falls_back_to_personal_tenant(rsa_key):
     assert claims.tenant_id == claims.subject  # personal tenant
 
 
+async def test_nested_org_object_claim_yields_the_org_id_tenant(rsa_key):
+    """CyberdyneAuth emits `org: {id, short_name}`, not a flat `org_id`."""
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    claims = await verifier.verify(
+        sign(rsa_key, org={"id": "org-uuid-1", "short_name": "Cyberdyne"})
+    )
+
+    assert claims.tenant_id == "org-uuid-1"
+
+
+async def test_flat_org_id_claim_wins_over_the_nested_org_object(rsa_key):
+    handler, _ = auth_backend(rsa_key)
+    verifier = JwksTokenVerifier(CONFIG, http_with(handler))
+
+    claims = await verifier.verify(
+        sign(rsa_key, org_id="flat-org", org={"id": "nested-org"})
+    )
+
+    assert claims.tenant_id == "flat-org"
+
+
+async def test_dotted_tenant_claim_path_resolves_nested_values(rsa_key):
+    handler, _ = auth_backend(rsa_key)
+    config = CyberdyneAuthConfig(
+        base_url="https://auth.test", issuer="cyberdyne-auth", tenant_claim="org.id"
+    )
+    verifier = JwksTokenVerifier(config, http_with(handler))
+
+    claims = await verifier.verify(sign(rsa_key, org={"id": "org-uuid-2"}))
+
+    assert claims.tenant_id == "org-uuid-2"
+
+
 async def test_expired_jwt_is_rejected(rsa_key):
     handler, _ = auth_backend(rsa_key)
     verifier = JwksTokenVerifier(CONFIG, http_with(handler))
