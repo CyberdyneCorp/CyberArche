@@ -153,4 +153,89 @@ describe('orgUsers ViewModel', () => {
 		expect(vm.users.map((u) => u.id)).toEqual(['winner']);
 		expect(vm.loading).toBe(false);
 	});
+
+	describe('loadAll mode', () => {
+		const USERS = (prefix: string, count: number) =>
+			Array.from({ length: count }, (_, i) => USER(`${prefix}${i}`));
+
+		const allUrl = (search: string, page: number) =>
+			`/api/v1/org/users?search=${search}&page=${page}&page_size=200`;
+
+		const allPage = (users: ReturnType<typeof USER>[], total: number, page: number) => ({
+			body: { users, total, page, page_size: 200 }
+		});
+
+		it('load pages through the directory until total is reached', async () => {
+			const fetchMock = routedFetch({
+				[allUrl('', 1)]: allPage(USERS('a', 200), 250, 1),
+				[allUrl('', 2)]: allPage(USERS('b', 50), 250, 2)
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			const vm = createOrgUsers({ loadAll: true });
+
+			await vm.load();
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(vm.users).toHaveLength(250);
+			expect(vm.users[0].id).toBe('a0');
+			expect(vm.users[249].id).toBe('b49');
+			expect(vm.total).toBe(250);
+			expect(vm.truncated).toBe(false);
+			expect(vm.loading).toBe(false);
+		});
+
+		it('a single page suffices when total fits in one request', async () => {
+			const fetchMock = routedFetch({ [allUrl('', 1)]: allPage(USERS('a', 3), 3, 1) });
+			vi.stubGlobal('fetch', fetchMock);
+			const vm = createOrgUsers({ loadAll: true });
+
+			await vm.load();
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(vm.users).toHaveLength(3);
+		});
+
+		it('caps at 1000 users and reports truncation', async () => {
+			const routes: Record<string, { body: unknown }> = {};
+			for (let page = 1; page <= 5; page += 1) {
+				routes[allUrl('', page)] = allPage(USERS(`p${page}-`, 200), 1200, page);
+			}
+			const fetchMock = routedFetch(routes);
+			vi.stubGlobal('fetch', fetchMock);
+			const vm = createOrgUsers({ loadAll: true });
+
+			await vm.load();
+
+			expect(fetchMock).toHaveBeenCalledTimes(5);
+			expect(vm.users).toHaveLength(1000);
+			expect(vm.total).toBe(1200);
+			expect(vm.truncated).toBe(true);
+		});
+
+		it('stops paging when the server returns an empty page early', async () => {
+			const fetchMock = routedFetch({
+				[allUrl('', 1)]: allPage(USERS('a', 200), 500, 1),
+				[allUrl('', 2)]: allPage([], 500, 2)
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			const vm = createOrgUsers({ loadAll: true });
+
+			await vm.load();
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(vm.users).toHaveLength(200);
+		});
+
+		it('debounced search pages with the search param', async () => {
+			const fetchMock = routedFetch({ [allUrl('ada', 1)]: allPage([USER('ada')], 1, 1) });
+			vi.stubGlobal('fetch', fetchMock);
+			const vm = createOrgUsers({ loadAll: true });
+
+			vm.search(' ada ');
+			await vi.advanceTimersByTimeAsync(250);
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(vm.users.map((u) => u.id)).toEqual(['ada']);
+		});
+	});
 });

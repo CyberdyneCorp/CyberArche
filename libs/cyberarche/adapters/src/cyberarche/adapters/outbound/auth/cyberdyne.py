@@ -79,12 +79,34 @@ class CyberdyneAuthConfig:
         return f"{self.base_url.rstrip('/')}/api/v1/auth/refresh"
 
 
+def _tenant_from_payload(payload: dict, tenant_claim: str) -> str:
+    """The org id from the configured claim, tolerating CyberdyneAuth's shapes.
+
+    CyberdyneAuth emits the organization as a nested object claim
+    (`org: {id, short_name}`), not a flat `org_id` string, so a flat lookup
+    alone would silently classify every org user as a personal tenant.
+    Resolution order: flat claim, dotted path (`org.id`), then the `org`
+    object's `id`. A dict value contributes its `id` field.
+    """
+    value = payload.get(tenant_claim)
+    if value is None and "." in tenant_claim:
+        value = payload
+        for part in tenant_claim.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+    if value is None:
+        org = payload.get("org")
+        value = org.get("id") if isinstance(org, dict) else None
+    if isinstance(value, dict):
+        value = value.get("id")
+    return str(value or "")
+
+
 def claims_from_payload(payload: dict, *, tenant_claim: str) -> Claims:
     subject = str(payload.get("sub") or "")
     if not subject:
         raise NotAuthenticated("token has no subject")
     scopes = frozenset(str(payload.get("scope", "")).split()) - {""}
-    tenant = str(payload.get(tenant_claim) or "") or subject  # personal tenant fallback
+    tenant = _tenant_from_payload(payload, tenant_claim) or subject  # personal fallback
     return Claims(
         subject=subject,
         tenant_id=tenant,

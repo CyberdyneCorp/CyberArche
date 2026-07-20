@@ -68,8 +68,11 @@
 
 	let members = $state<WorkspaceMembersVM | null>(null);
 	let memberDirectory = $state<OrgUsersVM | null>(null);
+	let orgRoster = $state<OrgUsersVM | null>(null);
 	let memberPicker = $state<OrgUserPicker | null>(null);
 	let memberSearch = $state('');
+	let rosterSearch = $state('');
+	let rosterRoles = $state<Record<string, ShareRole>>({});
 	let memberInviteTarget = $state<string | null>(null);
 	let memberInviteRole = $state<ShareRole>('editor');
 
@@ -81,6 +84,10 @@
 		return all.filter(
 			(m) => (m.email ?? '').toLowerCase().includes(q) || m.user_id.toLowerCase().includes(q)
 		);
+	});
+	const workspaceRoleOf = $derived.by(() => {
+		const byId = new Map((members?.members ?? []).map((m) => [m.user_id, m.role]));
+		return (userId: string): ShareRole | undefined => byId.get(userId);
 	});
 
 	const NOTIFICATION_TOGGLES: { key: 'email_enabled' | 'push_enabled' | 'mentions_enabled' | 'agent_results_enabled'; label: string; hint: string }[] = [
@@ -182,12 +189,23 @@
 		const directoryVm = createOrgUsers();
 		memberDirectory = directoryVm;
 		directoryVm.load();
+		const rosterVm = createOrgUsers({ loadAll: true });
+		orgRoster = rosterVm;
+		rosterVm.load();
 	});
 
 	async function inviteMember(event: SubmitEvent) {
 		event.preventDefault();
 		if (!members || !memberInviteTarget) return;
 		if (await members.invite(memberInviteTarget, memberInviteRole)) memberPicker?.clear();
+	}
+
+	async function addFromRoster(userId: string) {
+		await members?.invite(userId, rosterRoles[userId] ?? 'editor');
+	}
+
+	function setRosterRole(userId: string, event: Event) {
+		rosterRoles[userId] = (event.currentTarget as HTMLSelectElement).value as ShareRole;
 	}
 
 	async function changeMemberRole(userId: string, event: Event) {
@@ -330,45 +348,163 @@
 				bind:value={memberSearch}
 				data-testid="member-search"
 			/>
-			{#each filteredMembers as member (member.user_id)}
-				<div class="member-row" data-testid="member-row">
-					{#if member.avatar_url}
-						<img class="member-avatar" src={member.avatar_url} alt="" />
-					{:else}
-						<span class="member-avatar fallback" aria-hidden="true"
-							>{(member.email ?? member.user_id).charAt(0).toUpperCase()}</span
-						>
-					{/if}
-					<span class="member-label">{member.email ?? member.user_id}</span>
-					{#if members.isOwner}
-						<select
-							class="input member-role"
-							value={member.role}
-							data-testid="member-role"
-							onchange={(event) => changeMemberRole(member.user_id, event)}
-						>
-							{#each MEMBER_ROLES as role (role)}
-								<option value={role}>{role}</option>
-							{/each}
-						</select>
-						<button
-							class="remove"
-							data-testid="member-remove"
-							onclick={() => members!.remove(member.user_id)}>Remove</button
-						>
-					{:else}
-						<span class="chip">{member.role}</span>
-					{/if}
-				</div>
-			{:else}
+			{#if filteredMembers.length === 0}
 				<p class="none" data-testid="no-members">
 					{members.loading ? 'Loading members…' : 'No members match.'}
 				</p>
-			{/each}
+			{:else}
+				<div class="table-scroll members-scroll">
+					<table class="people-table">
+						<thead>
+							<tr>
+								<th>User</th>
+								<th>Role</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each filteredMembers as member (member.user_id)}
+								<tr data-testid="member-row">
+									<td>
+										<div class="user-cell">
+											{#if member.avatar_url}
+												<img class="member-avatar" src={member.avatar_url} alt="" />
+											{:else}
+												<span class="member-avatar fallback" aria-hidden="true"
+													>{(member.email ?? member.user_id).charAt(0).toUpperCase()}</span
+												>
+											{/if}
+											<span class="member-label">{member.email ?? member.user_id}</span>
+										</div>
+									</td>
+									{#if members.isOwner}
+										<td>
+											<select
+												class="input member-role"
+												value={member.role}
+												data-testid="member-role"
+												onchange={(event) => changeMemberRole(member.user_id, event)}
+											>
+												{#each MEMBER_ROLES as role (role)}
+													<option value={role}>{role}</option>
+												{/each}
+											</select>
+										</td>
+										<td>
+											<button
+												class="remove"
+												data-testid="member-remove"
+												onclick={() => members!.remove(member.user_id)}>Remove</button
+											>
+										</td>
+									{:else}
+										<td><span class="chip">{member.role}</span></td>
+										<td><span class="none">—</span></td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 			{#if members.error}
 				<p class="error" role="alert" data-testid="members-error">{members.error}</p>
 			{/if}
 		</section>
+
+		{#if orgRoster}
+			<section class="card" data-testid="org-roster">
+				<h2>
+					Organization · <span data-testid="org-roster-count">{orgRoster.total}</span>
+					{orgRoster.total === 1 ? 'person' : 'people'}
+				</h2>
+				{#if orgRoster.unavailable}
+					<p class="none" data-testid="org-roster-unavailable">Directory unavailable</p>
+				{:else}
+					<input
+						class="input member-filter"
+						placeholder="Search your organization by email…"
+						bind:value={rosterSearch}
+						oninput={() => orgRoster?.search(rosterSearch)}
+						data-testid="org-roster-search"
+					/>
+					{#if orgRoster.users.length === 0}
+						<p class="none" data-testid="org-roster-empty">
+							{#if orgRoster.loading}Loading directory…{:else if rosterSearch.trim()}No matching people.{:else}No organization directory{/if}
+						</p>
+					{:else}
+						<div class="table-scroll roster-scroll">
+							<table class="people-table">
+								<thead>
+									<tr>
+										<th>User</th>
+										<th>Status</th>
+										<th>Workspace access</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each orgRoster.users as user (user.id)}
+										<tr data-testid="org-roster-row" class:inactive={!user.is_active}>
+											<td>
+												<div class="user-cell">
+													{#if user.avatar_url}
+														<img class="member-avatar" src={user.avatar_url} alt="" />
+													{:else}
+														<span class="member-avatar fallback" aria-hidden="true"
+															>{(user.email ?? user.id).charAt(0).toUpperCase()}</span
+														>
+													{/if}
+													<span class="member-label">{user.email ?? user.id}</span>
+												</div>
+											</td>
+											<td>
+												<span
+													class="chip"
+													class:chip-accent={user.is_active}
+													data-testid="org-roster-status">{user.is_active ? 'active' : 'inactive'}</span
+												>
+											</td>
+											<td>
+												{#if workspaceRoleOf(user.id)}
+													<span class="chip">{workspaceRoleOf(user.id)}</span>
+												{:else if members.isOwner}
+													<div class="roster-add">
+														<select
+															class="input member-role"
+															value={rosterRoles[user.id] ?? 'editor'}
+															data-testid="org-roster-add-role"
+															onchange={(event) => setRosterRole(user.id, event)}
+														>
+															{#each MEMBER_ROLES as role (role)}
+																<option value={role}>{role}</option>
+															{/each}
+														</select>
+														<button
+															class="btn btn-secondary"
+															disabled={members.busy}
+															data-testid="org-roster-add"
+															onclick={() => addFromRoster(user.id)}>Add</button
+														>
+													</div>
+												{:else}
+													<span class="none">—</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+						{#if orgRoster.truncated}
+							<p class="hint">Showing the first {orgRoster.users.length} of {orgRoster.total} people.</p>
+						{/if}
+					{/if}
+				{/if}
+				{#if orgRoster.error}
+					<p class="error" role="alert">{orgRoster.error}</p>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 	{/if}
 
@@ -1324,15 +1460,56 @@
 		width: 100%;
 		margin-bottom: 8px;
 	}
-	.member-row {
+	.table-scroll {
+		overflow-y: auto;
+		border: 1px solid var(--line);
+		border-radius: var(--r-control);
+	}
+	.members-scroll {
+		max-height: 30vh;
+	}
+	.roster-scroll {
+		max-height: 40vh;
+	}
+	.people-table {
+		width: 100%;
+		border-collapse: separate;
+		border-spacing: 0;
+		font-size: 13px;
+	}
+	.people-table th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--bg0);
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--tx2);
+		text-align: left;
+		padding: 7px 10px;
+		border-bottom: 1px solid var(--line);
+	}
+	.people-table td {
+		padding: 6px 10px;
+		border-bottom: 1px solid var(--line);
+		vertical-align: middle;
+	}
+	.people-table tbody tr:last-child td {
+		border-bottom: none;
+	}
+	.people-table tr.inactive td {
+		opacity: 0.55;
+	}
+	.user-cell {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		padding: 9px 0;
-		border-top: 1px solid var(--line);
+		min-width: 0;
 	}
-	.member-row:first-of-type {
-		border-top: none;
+	.roster-add {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 	}
 	.member-avatar {
 		width: 26px;
